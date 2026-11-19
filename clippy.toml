@@ -1,0 +1,39 @@
+# clippy settings of the workspace (CI runs `cargo clippy --workspace --all-targets -- -D warnings`).
+
+# Thread-count determinism (CONTRIBUTING.md, "Determinism"). faer computes a product with one
+# result row or column as `par.degree()` partial sums, so with the calculator's parallelism its
+# rounding follows the thread count; faer's convenience solvers and factorizations and its matrix
+# operators run with faer's global parallelism, the size of the current thread pool. linus calls
+# these through `linus_base::linalg`, which runs one-row/one-column
+# products and one-right-hand-side solves sequentially and takes an explicit parallelism
+# everywhere. Operators (`&a * &b`) cannot be listed here: crates/linus/tests/faer_parallelism.rs
+# runs calculations with faer's global parallelism disabled.
+disallowed-methods = [
+    { path = "faer::linalg::matmul::matmul", reason = "use linus_base::linalg::{matmul, gemm, mm}: one-row/one-column products run sequentially there (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_lower_triangular_in_place", reason = "use linus_base::linalg::solve_lower_in_place: one right-hand side runs sequentially there (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_upper_triangular_in_place", reason = "use linus_base::linalg::solve_upper_in_place: one right-hand side runs sequentially there (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_unit_lower_triangular_in_place", reason = "add a linus_base::linalg wrapper with product_par: one right-hand side must run sequentially (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_unit_upper_triangular_in_place", reason = "add a linus_base::linalg wrapper with product_par: one right-hand side must run sequentially (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_lower_triangular_in_place_with_conj", reason = "use linus_base::linalg::solve_lower_in_place (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_upper_triangular_in_place_with_conj", reason = "use linus_base::linalg::solve_upper_in_place (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_unit_lower_triangular_in_place_with_conj", reason = "add a linus_base::linalg wrapper with product_par (thread-count determinism)" },
+    { path = "faer::linalg::triangular_solve::solve_unit_upper_triangular_in_place_with_conj", reason = "add a linus_base::linalg wrapper with product_par (thread-count determinism)" },
+    { path = "faer::linalg::solvers::Solve::solve", reason = "faer's solvers run with its global parallelism (the thread count): use linus_base::linalg::{cholesky_solve, lu_solve}" },
+    { path = "faer::linalg::solvers::Solve::solve_in_place", reason = "faer's solvers run with its global parallelism (the thread count): use linus_base::linalg::{cholesky_solve, lu_solve}" },
+    { path = "faer::linalg::solvers::Solve::solve_transpose", reason = "faer's solvers run with its global parallelism (the thread count): use linus_base::linalg" },
+    { path = "faer::linalg::solvers::Solve::solve_transpose_in_place", reason = "faer's solvers run with its global parallelism (the thread count): use linus_base::linalg" },
+    { path = "faer::linalg::solvers::Solve::rsolve", reason = "faer's solvers run with its global parallelism (the thread count): use linus_base::linalg" },
+    { path = "faer::linalg::solvers::Solve::rsolve_in_place", reason = "faer's solvers run with its global parallelism (the thread count): use linus_base::linalg" },
+    { path = "faer::mat::generic::Mat::llt", reason = "faer's factorizations run with its global parallelism (the thread count): use linus_base::linalg::cholesky" },
+    { path = "faer::mat::generic::Mat::ldlt", reason = "faer's factorizations run with its global parallelism (the thread count): add an explicit-Par wrapper to linus_base::linalg" },
+    { path = "faer::mat::generic::Mat::lblt", reason = "faer's factorizations run with its global parallelism (the thread count): add an explicit-Par wrapper to linus_base::linalg" },
+    { path = "faer::mat::generic::Mat::partial_piv_lu", reason = "faer's factorizations run with its global parallelism (the thread count): use linus_base::linalg::lu_solve" },
+    { path = "faer::mat::generic::Mat::full_piv_lu", reason = "faer's factorizations run with its global parallelism (the thread count): add an explicit-Par wrapper to linus_base::linalg" },
+    { path = "faer::mat::generic::Mat::qr", reason = "faer's factorizations run with its global parallelism (the thread count): add an explicit-Par wrapper to linus_base::linalg" },
+    { path = "faer::mat::generic::Mat::col_piv_qr", reason = "faer's factorizations run with its global parallelism (the thread count): add an explicit-Par wrapper to linus_base::linalg" },
+    { path = "faer::mat::generic::Mat::svd", reason = "faer's factorizations run with its global parallelism (the thread count): use linus_base::linalg::svd" },
+    { path = "faer::mat::generic::Mat::thin_svd", reason = "faer's factorizations run with its global parallelism (the thread count): use linus_base::linalg::svd" },
+    { path = "faer::mat::generic::Mat::singular_values", reason = "faer's factorizations run with its global parallelism (the thread count): use linus_base::linalg::svd" },
+    { path = "faer::mat::generic::Mat::self_adjoint_eigen", reason = "faer's eigensolver runs with its global parallelism (the thread count): use linus_base::linalg::eigh" },
+    { path = "faer::mat::generic::Mat::self_adjoint_eigenvalues", reason = "faer's eigensolver runs with its global parallelism (the thread count): use linus_base::linalg::eigh" },
+]

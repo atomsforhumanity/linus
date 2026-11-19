@@ -1,0 +1,5 @@
+3
+water charge=0 mult=1; gas-phase B3LYP/G/def2-SVP (exact J/K, DefGrid2, TightOpt) minimum, ORCA 6.0.0; Angstrom
+O       0.00000000      0.00000000      0.12708799
+H       0.00000000      0.75704644     -0.47409399
+H       0.00000000     -0.75704644     -0.47409399

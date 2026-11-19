@@ -1,0 +1,460 @@
+{
+ "system": "water-svp",
+ "platform": "cpu",
+ "mode": "A",
+ "nsteps": 5,
+ "job_wall": 0.2744283676147461,
+ "started": 1794559961.5447388,
+ "steps": [
+  {
+   "step": 0,
+   "wall": 0.05356644501443952,
+   "rusage": {
+    "utime": 0.181596,
+    "stime": 0.021529,
+    "minflt": 5319,
+    "majflt": 0
+   },
+   "energy": -76.34876986694627,
+   "gradient": [
+    [
+     -0.0033702244934609178,
+     0.06706398882162971,
+     0.04654634487074327
+    ],
+    [
+     0.0009208254510177059,
+     -0.015475832448679505,
+     0.002139204577315812
+    ],
+    [
+     0.0024493990424504473,
+     -0.05158815637295239,
+     -0.04868554944806061
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.0005254779999999999,
+    "diis": 0.00040364400000000004,
+    "dipole": 4.3586e-05,
+    "ecp": 3e-08,
+    "energy": 0.042359797,
+    "grad_1e": 9.2209e-05,
+    "grad_2e": 0.001971112,
+    "grad_df_2c": 0.000826091,
+    "grad_df_3c": 0.000383486,
+    "grad_df_3c_build_g": 5.8128e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.00026612,
+    "grad_df_3c_pairs": 2.3796e-05,
+    "grad_df_fit": 0.000900013,
+    "grad_df_mo": 0.000666722,
+    "grad_df_mo_half": 1.3401e-05,
+    "grad_df_mo_ints": 0.000218568,
+    "grad_df_mo_metric": 0.000358068,
+    "grad_df_mo_pairs": 6.0772e-05,
+    "grad_ecp": 2.61e-07,
+    "grad_pairs": 8.3736e-05,
+    "grad_xc": 0.00309507,
+    "grid": 0.001165952,
+    "guess": 0.00298815,
+    "jk": 0.0006132589999999999,
+    "jk_setup": 0.018444183,
+    "one_electron": 0.000257587,
+    "orthogonalizer": 6.0972e-05,
+    "pairs": 0.000834354,
+    "scf_total": 0.018471394,
+    "total": 0.047868603,
+    "xc": 0.016733692999999997
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.31907836009793933,
+   "positions_error_bohr": 8.617551117140465e-13
+  },
+  {
+   "step": 1,
+   "wall": 0.055482293013483286,
+   "rusage": {
+    "utime": 0.189662,
+    "stime": 0.017781,
+    "minflt": 5257,
+    "majflt": 0
+   },
+   "energy": -76.35779360809723,
+   "gradient": [
+    [
+     0.0007133444764448565,
+     -0.010213347636911382,
+     0.01128193838755187
+    ],
+    [
+     -0.00015224841006217585,
+     0.0007481638038334681,
+     -0.009992477577447756
+    ],
+    [
+     -0.000561096066385075,
+     0.009465183833079205,
+     -0.001289460810097287
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.00048814499999999994,
+    "diis": 0.0009529310000000002,
+    "dipole": 4.1602e-05,
+    "ecp": 4e-08,
+    "energy": 0.0438524,
+    "grad_1e": 7.8518e-05,
+    "grad_2e": 0.001948628,
+    "grad_df_2c": 0.000793101,
+    "grad_df_3c": 0.000384598,
+    "grad_df_3c_build_g": 5.3149e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000267693,
+    "grad_df_3c_pairs": 2.7442e-05,
+    "grad_df_fit": 0.000861945,
+    "grad_df_mo": 0.000681404,
+    "grad_df_mo_half": 1.345e-05,
+    "grad_df_mo_ints": 0.000230696,
+    "grad_df_mo_metric": 0.000360452,
+    "grad_df_mo_pairs": 6.2714e-05,
+    "grad_ecp": 2.7e-07,
+    "grad_pairs": 9.5453e-05,
+    "grad_xc": 0.003099377,
+    "grid": 0.00107819,
+    "guess": 0.002863602,
+    "jk": 0.000635926,
+    "jk_setup": 0.01894107,
+    "one_electron": 0.000367232,
+    "orthogonalizer": 0.000103335,
+    "pairs": 0.000994114,
+    "scf_total": 0.019451667,
+    "total": 0.049337411,
+    "xc": 0.017144047
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3358330229298902,
+   "positions_error_bohr": 9.314771176605063e-13
+  },
+  {
+   "step": 2,
+   "wall": 0.054769622976891696,
+   "rusage": {
+    "utime": 0.186291,
+    "stime": 0.019609,
+    "minflt": 5335,
+    "majflt": 0
+   },
+   "energy": -76.3580767094334,
+   "gradient": [
+    [
+     -0.0001626379454921301,
+     0.0028586090659307797,
+     0.0007735096378129747
+    ],
+    [
+     0.0004888465952884967,
+     -0.008109509569798723,
+     0.0013948349492027279
+    ],
+    [
+     -0.0003262086497982826,
+     0.00525090050387278,
+     -0.0021683445870189777
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.000507805,
+    "diis": 0.00039344,
+    "dipole": 4.3145e-05,
+    "ecp": 2e-08,
+    "energy": 0.042744905,
+    "grad_1e": 8.5479e-05,
+    "grad_2e": 0.001970811,
+    "grad_df_2c": 0.000793793,
+    "grad_df_3c": 0.000387973,
+    "grad_df_3c_build_g": 6.1042e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000266641,
+    "grad_df_3c_pairs": 2.3455e-05,
+    "grad_df_fit": 0.000882235,
+    "grad_df_mo": 0.000679361,
+    "grad_df_mo_half": 1.0576e-05,
+    "grad_df_mo_ints": 0.000224698,
+    "grad_df_mo_metric": 0.000357207,
+    "grad_df_mo_pairs": 7.2459e-05,
+    "grad_ecp": 1.7e-07,
+    "grad_pairs": 0.000100992,
+    "grad_xc": 0.004001473,
+    "grid": 0.001081986,
+    "guess": 0.002932396,
+    "jk": 0.000577356,
+    "jk_setup": 0.018899768,
+    "one_electron": 0.000280271,
+    "orthogonalizer": 6.9935e-05,
+    "pairs": 0.001013143,
+    "scf_total": 0.018394167,
+    "total": 0.049155988,
+    "xc": 0.016720311999999998
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.33761305773328215,
+   "positions_error_bohr": 7.859407569199561e-13
+  },
+  {
+   "step": 3,
+   "wall": 0.0549775050021708,
+   "rusage": {
+    "utime": 0.173892,
+    "stime": 0.030155,
+    "minflt": 5072,
+    "majflt": 0
+   },
+   "energy": -76.35821510716644,
+   "gradient": [
+    [
+     -0.00015143129761501298,
+     0.0026304846431807055,
+     0.0006184815209973049
+    ],
+    [
+     0.0003408362519894334,
+     -0.005602188339957126,
+     0.001144262324336509
+    ],
+    [
+     -0.00018940495437104465,
+     0.002971703696780459,
+     -0.001762743845326764
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.000491307,
+    "diis": 0.000437655,
+    "dipole": 4.2174e-05,
+    "ecp": 3e-08,
+    "energy": 0.042664404,
+    "grad_1e": 7.6023e-05,
+    "grad_2e": 0.001822459,
+    "grad_df_2c": 0.000649786,
+    "grad_df_3c": 0.000384268,
+    "grad_df_3c_build_g": 5.7467e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000266881,
+    "grad_df_3c_pairs": 2.4587e-05,
+    "grad_df_fit": 0.000725409,
+    "grad_df_mo": 0.000691679,
+    "grad_df_mo_half": 1.2709e-05,
+    "grad_df_mo_ints": 0.000229485,
+    "grad_df_mo_metric": 0.000358859,
+    "grad_df_mo_pairs": 7.27e-05,
+    "grad_ecp": 2.61e-07,
+    "grad_pairs": 9.4882e-05,
+    "grad_xc": 0.003128441,
+    "grid": 0.001118761,
+    "guess": 0.002993458,
+    "jk": 0.0006068540000000001,
+    "jk_setup": 0.018893247,
+    "one_electron": 0.000248864,
+    "orthogonalizer": 6.006e-05,
+    "pairs": 0.000730748,
+    "scf_total": 0.018517603,
+    "total": 0.048054874,
+    "xc": 0.016790938000000002
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.33721986495235184,
+   "positions_error_bohr": 8.333334022836425e-13
+  },
+  {
+   "step": 4,
+   "wall": 0.054269721964374185,
+   "rusage": {
+    "utime": 0.176639,
+    "stime": 0.026547,
+    "minflt": 4982,
+    "majflt": 0
+   },
+   "energy": -76.35832532676835,
+   "gradient": [
+    [
+     1.8957389128131195e-05,
+     -0.0004968826304396212,
+     -0.00034197176159300735
+    ],
+    [
+     1.6277124362633344e-06,
+     3.0020422035426098e-05,
+     6.031357754621158e-06
+    ],
+    [
+     -2.0585101561408636e-05,
+     0.0004668622084049723,
+     0.000335940403830004
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.000540524,
+    "diis": 0.000416117,
+    "dipole": 4.3686e-05,
+    "ecp": 3e-08,
+    "energy": 0.042787369,
+    "grad_1e": 7.7717e-05,
+    "grad_2e": 0.001836229,
+    "grad_df_2c": 0.000694183,
+    "grad_df_3c": 0.000361924,
+    "grad_df_3c_build_g": 2.8973e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000268694,
+    "grad_df_3c_pairs": 2.7231e-05,
+    "grad_df_fit": 0.000763337,
+    "grad_df_mo": 0.000686732,
+    "grad_df_mo_half": 1.2679e-05,
+    "grad_df_mo_ints": 0.000224407,
+    "grad_df_mo_metric": 0.0003597,
+    "grad_df_mo_pairs": 7.3781e-05,
+    "grad_ecp": 3.51e-07,
+    "grad_pairs": 0.000122454,
+    "grad_xc": 0.003065386,
+    "grid": 0.001106803,
+    "guess": 0.002978125,
+    "jk": 0.000616247,
+    "jk_setup": 0.018418444,
+    "one_electron": 0.000227742,
+    "orthogonalizer": 0.000101933,
+    "pairs": 0.000932551,
+    "scf_total": 0.018975371,
+    "total": 0.048175835,
+    "xc": 0.017162276
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3365469811608809,
+   "positions_error_bohr": 7.409628466348295e-13
+  }
+ ]
+}

@@ -1,0 +1,898 @@
+{
+ "system": "water-svp",
+ "platform": "cpu",
+ "mode": "W",
+ "nsteps": 5,
+ "job_wall": 0.413815975189209,
+ "started": 1794559596.586442,
+ "worker": {
+  "hello": {
+   "protocol": 1,
+   "program": "linus",
+   "version": "0.1.0",
+   "capabilities": {
+    "calctypes": [
+     "energy",
+     "gradient",
+     "hessian"
+    ],
+    "methods": {
+     "hf": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "slater": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "hfs": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "xalpha-2/3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "lda": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "lsda": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "lsd": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "vwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn-rpa": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "vwn3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "vwn-rpa": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "bp86": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b-p": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b88p86": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "bp86-vwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "bp86-vwn": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "blyp": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbe": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbe0": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbeh": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbe1pbe": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp/g": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp-rpa": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp-vwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "tpss": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "tpssh": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "scan": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "r2scan": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "m06-2x": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x-v": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97m-v": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "cam-b3lyp": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pw6b95": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b97m-v": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x-d3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x-d3bj": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97m-d3bj": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b97m-d3bj": [
+      "energy",
+      "gradient",
+      "hessian"
+     ]
+    },
+    "sessions": true,
+    "batches": false,
+    "in_process": true,
+    "thread_safe": true,
+    "gpu": true,
+    "driver": false,
+    "extras": {
+     "numerics_epoch": 7
+    }
+   },
+   "extras": {
+    "numerics_epoch": 7
+   }
+  },
+  "exit": 0,
+  "command": [
+   "python",
+   "serve.py",
+   "linus"
+  ]
+ },
+ "steps": [
+  {
+   "step": 0,
+   "wall": 0.054814389965031296,
+   "prepare": 0.004507402947638184,
+   "call": 0.05030698701739311,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.17,
+    "stime": 0.03,
+    "minflt": 4464,
+    "majflt": 0
+   },
+   "energy": -76.34876986694628,
+   "gradient": [
+    [
+     -0.00337022449343668,
+     0.06706398882162289,
+     0.046546344870984635
+    ],
+    [
+     0.0009208254510026694,
+     -0.015475832448450855,
+     0.0021392045771457813
+    ],
+    [
+     0.002449399042434214,
+     -0.051588156373172156,
+     -0.048685549448126336
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.000515703,
+    "diis": 0.000410598,
+    "dipole": 4.3215e-05,
+    "ecp": 2e-08,
+    "energy": 0.043869395,
+    "grad_1e": 7.6945e-05,
+    "grad_2e": 0.001907526,
+    "grad_df_2c": 0.000760914,
+    "grad_df_3c": 0.000358028,
+    "grad_df_3c_build_g": 2.4978e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000263997,
+    "grad_df_3c_pairs": 2.9073e-05,
+    "grad_df_fit": 0.000833082,
+    "grad_df_mo": 0.00069167,
+    "grad_df_mo_half": 1.2599e-05,
+    "grad_df_mo_ints": 0.000229205,
+    "grad_df_mo_metric": 0.000357327,
+    "grad_df_mo_pairs": 7.4732e-05,
+    "grad_ecp": 3.2e-07,
+    "grad_pairs": 0.000104688,
+    "grad_xc": 0.003119527,
+    "grid": 0.001203078,
+    "guess": 0.00300136,
+    "jk": 0.000597258,
+    "jk_setup": 0.01962757,
+    "one_electron": 0.000371698,
+    "orthogonalizer": 6.5298e-05,
+    "pairs": 0.000948976,
+    "scf_total": 0.018499206,
+    "total": 0.04936995,
+    "xc": 0.016782746
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.31907836009787316,
+    "products": 2,
+    "skipped": "gap_above_threshold",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": null,
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.935558319091797,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.31907836009787316,
+   "warm_start": false,
+   "guess": {
+    "distance": null,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": false,
+    "reason": "no_history",
+    "source": "sad"
+   },
+   "peak_memory_gib": 0.08543014526367188
+  },
+  {
+   "step": 1,
+   "wall": 0.027802094002254307,
+   "prepare": 1.6100239008665085e-07,
+   "call": 0.02780193299986422,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.16,
+    "stime": 0.01,
+    "minflt": 1157,
+    "majflt": 0
+   },
+   "energy": -76.35779360809724,
+   "gradient": [
+    [
+     0.0007133448100492446,
+     -0.010213353412250964,
+     0.011281938267045266
+    ],
+    [
+     -0.00015224858582009795,
+     0.0007481659364044768,
+     -0.009992482240917366
+    ],
+    [
+     -0.000561096224230024,
+     0.00946518747584102,
+     -0.0012894560261279553
+    ]
+   ],
+   "iterations": 9,
+   "fock_builds": 9,
+   "timings": {
+    "diag": 0.00041335099999999995,
+    "diis": 0.000354072,
+    "dipole": 4.013e-05,
+    "ecp": 4e-08,
+    "energy": 0.020963047,
+    "grad_1e": 3.3931e-05,
+    "grad_2e": 0.001864982,
+    "grad_df_2c": 0.000721624,
+    "grad_df_3c": 0.000396656,
+    "grad_df_3c_build_g": 7.3931e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000257157,
+    "grad_df_3c_pairs": 2.668e-05,
+    "grad_df_fit": 0.000779762,
+    "grad_df_mo": 0.000663748,
+    "grad_df_mo_half": 1.1007e-05,
+    "grad_df_mo_ints": 0.0002193,
+    "grad_df_mo_metric": 0.00035242,
+    "grad_df_mo_pairs": 6.7352e-05,
+    "grad_ecp": 1.41e-07,
+    "grad_pairs": 8.668e-05,
+    "grad_xc": 0.003702232,
+    "grid": 0.001028075,
+    "jk": 0.000480702,
+    "jk_setup": 0.001009256,
+    "one_electron": 3.6244e-05,
+    "orthogonalizer": 4.2694e-05,
+    "pairs": 2.3766e-05,
+    "scf_total": 0.016467182,
+    "total": 0.026892857,
+    "xc": 0.015064916
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.3358330252880108,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3358330252880108,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.922870635986328,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3358330252880108,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.1134774005231733,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.08937454223632812
+  },
+  {
+   "step": 2,
+   "wall": 0.026088578975759447,
+   "prepare": 1.5099067240953445e-07,
+   "call": 0.026088427985087037,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.15,
+    "stime": 0.0,
+    "minflt": 1087,
+    "majflt": 0
+   },
+   "energy": -76.35807670943326,
+   "gradient": [
+    [
+     -0.00016263822699161701,
+     0.0028586143671707753,
+     0.0007735118595948443
+    ],
+    [
+     0.0004888466087644844,
+     -0.008109509391298009,
+     0.0013948371299262186
+    ],
+    [
+     -0.000326208381776303,
+     0.005250895024122515,
+     -0.0021683489895222285
+    ]
+   ],
+   "iterations": 8,
+   "fock_builds": 8,
+   "timings": {
+    "diag": 0.000365329,
+    "diis": 0.00028848299999999997,
+    "dipole": 4.002e-05,
+    "ecp": 4e-08,
+    "energy": 0.019477395,
+    "grad_1e": 3.6485e-05,
+    "grad_2e": 0.001844121,
+    "grad_df_2c": 0.000715996,
+    "grad_df_3c": 0.000380131,
+    "grad_df_3c_build_g": 5.8127e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000258289,
+    "grad_df_3c_pairs": 2.3405e-05,
+    "grad_df_fit": 0.000774804,
+    "grad_df_mo": 0.000669867,
+    "grad_df_mo_half": 1.2559e-05,
+    "grad_df_mo_ints": 0.000218087,
+    "grad_df_mo_metric": 0.000350076,
+    "grad_df_mo_pairs": 7.5794e-05,
+    "grad_ecp": 1.11e-07,
+    "grad_pairs": 0.000101713,
+    "grad_xc": 0.003732598,
+    "grid": 0.000919732,
+    "jk": 0.000431891,
+    "jk_setup": 0.00102474,
+    "one_electron": 3.5163e-05,
+    "orthogonalizer": 4.3946e-05,
+    "pairs": 2.3305e-05,
+    "scf_total": 0.014589551,
+    "total": 0.02541059,
+    "xc": 0.013354854
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.3376130524685754,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3376130524685754,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.919105529785156,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3376130524685754,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.019955222286070776,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.0931243896484375
+  },
+  {
+   "step": 3,
+   "wall": 0.022743953042663634,
+   "prepare": 1.300359144806862e-07,
+   "call": 0.022743823006749153,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.12,
+    "stime": 0.01,
+    "minflt": 450,
+    "majflt": 0
+   },
+   "energy": -76.35821510716644,
+   "gradient": [
+    [
+     -0.0001514318561729594,
+     0.002630494611818357,
+     0.0006184851362174282
+    ],
+    [
+     0.00034083633978620326,
+     -0.005602188805429731,
+     0.0011442668218810126
+    ],
+    [
+     -0.000189404483606527,
+     0.002971694193619645,
+     -0.0017627519581008277
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.000307993,
+    "diis": 0.00024233300000000004,
+    "dipole": 3.945e-05,
+    "ecp": 4e-08,
+    "energy": 0.017285982,
+    "grad_1e": 3.6245e-05,
+    "grad_2e": 0.001390169,
+    "grad_df_2c": 0.000222104,
+    "grad_df_3c": 0.000397658,
+    "grad_df_3c_build_g": 6.5258e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000265109,
+    "grad_df_3c_pairs": 2.4737e-05,
+    "grad_df_fit": 0.000276786,
+    "grad_df_mo": 0.000695906,
+    "grad_df_mo_half": 1.4512e-05,
+    "grad_df_mo_ints": 0.00023945,
+    "grad_df_mo_metric": 0.000355144,
+    "grad_df_mo_pairs": 7.1027e-05,
+    "grad_ecp": 1.2e-07,
+    "grad_pairs": 0.00010657,
+    "grad_xc": 0.003038095,
+    "grid": 0.001070157,
+    "jk": 0.00039136,
+    "jk_setup": 0.000993273,
+    "one_electron": 3.4081e-05,
+    "orthogonalizer": 4.2754e-05,
+    "pairs": 2.9885e-05,
+    "scf_total": 0.012799351,
+    "total": 0.022087487,
+    "xc": 0.011722542
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.3372198645674594,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3372198645674594,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.915546417236328,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3372198645674594,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.011943338398610797,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.09434890747070312
+  },
+  {
+   "step": 4,
+   "wall": 0.023981152975466102,
+   "prepare": 1.3096723705530167e-07,
+   "call": 0.023981022008229047,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.13,
+    "stime": 0.0,
+    "minflt": 297,
+    "majflt": 0
+   },
+   "energy": -76.35832532676831,
+   "gradient": [
+    [
+     1.8957397335230258e-05,
+     -0.0004968858221163913,
+     -0.0003419672542334107
+    ],
+    [
+     1.627439970390554e-06,
+     3.002615617692106e-05,
+     6.0266680917409055e-06
+    ],
+    [
+     -2.058483730183608e-05,
+     0.00046685966593673633,
+     0.00033594058614899724
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.000318458,
+    "diis": 0.000237996,
+    "dipole": 3.8728e-05,
+    "ecp": 5e-08,
+    "energy": 0.017388096,
+    "grad_1e": 3.6515e-05,
+    "grad_2e": 0.001341566,
+    "grad_df_2c": 0.000230927,
+    "grad_df_3c": 0.000361132,
+    "grad_df_3c_build_g": 1.5634e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000260992,
+    "grad_df_3c_pairs": 2.4427e-05,
+    "grad_df_fit": 0.000285469,
+    "grad_df_mo": 0.000676286,
+    "grad_df_mo_half": 1.2389e-05,
+    "grad_df_mo_ints": 0.000225269,
+    "grad_df_mo_metric": 0.000351127,
+    "grad_df_mo_pairs": 7.1667e-05,
+    "grad_ecp": 1.1e-07,
+    "grad_pairs": 0.000118698,
+    "grad_xc": 0.00417348,
+    "grid": 0.001125822,
+    "jk": 0.000392032,
+    "jk_setup": 0.000989386,
+    "one_electron": 3.4742e-05,
+    "orthogonalizer": 4.1973e-05,
+    "pairs": 2.8242e-05,
+    "scf_total": 0.012828996,
+    "total": 0.023272717,
+    "xc": 0.011744556000000001
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.33654697193989547,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.33654697193989547,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.914535522460938,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.33654697193989547,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.02386447604216338,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.09453582763671875
+  }
+ ]
+}

@@ -1,0 +1,702 @@
+{
+ "system": "water-svp",
+ "platform": "gpu",
+ "mode": "D",
+ "nsteps": 5,
+ "job_wall": 0.7550637722015381,
+ "started": 1794557558.2282972,
+ "import_linus_s": 0.07209811999928206,
+ "linus_file": "__init__.py",
+ "linus_version": "0.1.0",
+ "steps": [
+  {
+   "step": 0,
+   "wall": 0.330034748010803,
+   "prepare": 0.14117817499209195,
+   "call": 0.18885629303986207,
+   "drop": 2.7997884899377823e-07,
+   "python": 0.0008155160398620742,
+   "rusage": {
+    "utime": 0.248978,
+    "stime": 0.214845,
+    "minflt": 128259,
+    "majflt": 0
+   },
+   "energy": -76.3487698669463,
+   "gradient": [
+    [
+     -0.0033702244934341345,
+     0.06706398882159408,
+     0.046546344870994016
+    ],
+    [
+     0.0009208254510012451,
+     -0.015475832448434285,
+     0.002139204577113807
+    ],
+    [
+     0.002449399042433322,
+     -0.05158815637316064,
+     -0.048685549448111126
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.005698830060964048,
+    "diis": 0.0008527040079643485,
+    "dipole": 4.5048e-05,
+    "ecp": 3.1e-08,
+    "energy": 0.162743607,
+    "grad_1e": 0.001296908,
+    "grad_2e": 0.018452824,
+    "grad_2e_setup": 0.005137241,
+    "grad_2e_setup_aux_pairs": 0.000117386,
+    "grad_2e_setup_builders": 0.004289698,
+    "grad_2e_setup_kernels": 0.003470906,
+    "grad_2e_setup_metric": 0.000761324,
+    "grad_2e_setup_metric_host": 5.268e-06,
+    "grad_2e_setup_pack_derivs": 3.8e-07,
+    "grad_2e_setup_pack_ints": 2.41e-07,
+    "grad_2e_setup_plan": 1.2829e-05,
+    "grad_2e_setup_upload": 0.000620753,
+    "grad_2e_setup_wait": 1.562e-06,
+    "grad_ecp": 3e-07,
+    "grad_pairs": 9.8848e-05,
+    "grad_xc": 0.005335198,
+    "grad_xc_setup": 0.002616713,
+    "grad_xc_setup_blocks": 3e-08,
+    "grad_xc_setup_layout": 0.001750321,
+    "grad_xc_setup_layout_blocks": 0.000322465,
+    "grad_xc_setup_layout_lists": 0.00017177799999999982,
+    "grad_xc_setup_layout_plans": 0.000361864,
+    "grad_xc_setup_layout_screen": 0.000889447,
+    "grid": 0.00131689,
+    "guess": 0.003066408,
+    "jk": 0.014249916999999999,
+    "jk_setup": 0.09633654,
+    "one_electron": 0.000229945,
+    "pairs": 0.000739111,
+    "scf_setup": 0.017478259,
+    "scf_total": 0.058103438,
+    "total": 0.188040777,
+    "xc": 0.017695654000000005,
+    "xc_setup": 0.002025294
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.0002749040722846985,
+    "scf_loop_device_mib": 0.8545646667480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.31907836009784385,
+    "products": 2,
+    "skipped": "gap_above_threshold",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": null,
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.929996490478516,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.31907836009784385,
+   "warm_start": false,
+   "guess": {
+    "distance": null,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": false,
+    "reason": "no_history",
+    "source": "sad"
+   },
+   "peak_memory_gib": 0.7068138122558594
+  },
+  {
+   "step": 1,
+   "wall": 0.07300016604131088,
+   "prepare": 7.810303941369057e-07,
+   "call": 0.07299883401719853,
+   "drop": 5.509937182068825e-07,
+   "python": 0.0006528710171985336,
+   "rusage": {
+    "utime": 0.159673,
+    "stime": 0.011486,
+    "minflt": 1894,
+    "majflt": 0
+   },
+   "energy": -76.3577936080972,
+   "gradient": [
+    [
+     0.0007133448100480671,
+     -0.010213353412238349,
+     0.011281938267054703
+    ],
+    [
+     -0.00015224858582023153,
+     0.0007481659364031445,
+     -0.009992482240919948
+    ],
+    [
+     -0.0005610962242297273,
+     0.009465187475834635,
+     -0.001289456026132979
+    ]
+   ],
+   "iterations": 9,
+   "fock_builds": 9,
+   "timings": {
+    "diag": 0.004824572010425986,
+    "diis": 0.0007190720039070584,
+    "dipole": 5.0195e-05,
+    "ecp": 5e-08,
+    "energy": 0.043465927,
+    "grad_1e": 0.01670682,
+    "grad_2e": 0.02305433,
+    "grad_2e_setup": 0.013996506,
+    "grad_2e_setup_aux_pairs": 0.000138277,
+    "grad_2e_setup_builders": 0.004141825,
+    "grad_2e_setup_kernels": 0.003474011,
+    "grad_2e_setup_metric": 0.000821375,
+    "grad_2e_setup_metric_host": 4.918e-06,
+    "grad_2e_setup_pack_derivs": 3.2e-07,
+    "grad_2e_setup_pack_ints": 1.3e-07,
+    "grad_2e_setup_plan": 8.483e-06,
+    "grad_2e_setup_upload": 0.000623988,
+    "grad_2e_setup_wait": 0.008948409,
+    "grad_ecp": 6.71e-07,
+    "grad_pairs": 9.5554e-05,
+    "grad_xc": 0.004354335,
+    "grad_xc_setup": 0.00156993,
+    "grad_xc_setup_blocks": 9e-08,
+    "grad_xc_setup_layout": 0.001412643,
+    "grad_xc_setup_layout_blocks": 0.000316245,
+    "grad_xc_setup_layout_lists": 0.00010248400000000013,
+    "grad_xc_setup_layout_plans": 0.000216756,
+    "grad_xc_setup_layout_screen": 0.000772542,
+    "grid": 0.001340744,
+    "jk": 0.002366567,
+    "jk_setup": 0.010873572,
+    "one_electron": 6.5508e-05,
+    "pairs": 4.2884e-05,
+    "scf_setup": 0.000789066,
+    "scf_total": 0.026214099,
+    "total": 0.072345963,
+    "xc": 0.015753094000000002,
+    "xc_setup": 0.001116589
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.00027541816234588623,
+    "scf_loop_device_mib": 0.8457756042480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.3358330252879997,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3358330252879997,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.518085479736328,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3358330252879997,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.1134774005231733,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.713653564453125
+  },
+  {
+   "step": 2,
+   "wall": 0.0739643550477922,
+   "prepare": 3.300374373793602e-07,
+   "call": 0.07396356400568038,
+   "drop": 4.6100467443466187e-07,
+   "python": 0.0006051090056803793,
+   "rusage": {
+    "utime": 0.160375,
+    "stime": 0.005323,
+    "minflt": 1539,
+    "majflt": 0
+   },
+   "energy": -76.35807670943326,
+   "gradient": [
+    [
+     -0.00016263822699127484,
+     0.0028586143671768954,
+     0.0007735118595956214
+    ],
+    [
+     0.0004888466087644636,
+     -0.0081095093912959,
+     0.0013948371299246087
+    ],
+    [
+     -0.00032620838177641574,
+     0.005250895024123292,
+     -0.002168348989523533
+    ]
+   ],
+   "iterations": 8,
+   "fock_builds": 8,
+   "timings": {
+    "diag": 0.00410305803512609,
+    "diis": 0.0006341760012728628,
+    "dipole": 4.3966e-05,
+    "ecp": 5e-08,
+    "energy": 0.040146118,
+    "grad_1e": 0.021344491,
+    "grad_2e": 0.027756287,
+    "grad_2e_setup": 0.018710862,
+    "grad_2e_setup_aux_pairs": 0.000123976,
+    "grad_2e_setup_builders": 0.00485676,
+    "grad_2e_setup_kernels": 0.004137559,
+    "grad_2e_setup_metric": 0.000766422,
+    "grad_2e_setup_metric_host": 4.787e-06,
+    "grad_2e_setup_pack_derivs": 4e-07,
+    "grad_2e_setup_pack_ints": 3.01e-07,
+    "grad_2e_setup_plan": 7.661e-06,
+    "grad_2e_setup_upload": 0.000674834,
+    "grad_2e_setup_wait": 0.013014,
+    "grad_ecp": 2.8e-07,
+    "grad_pairs": 8.1553e-05,
+    "grad_xc": 0.004282306,
+    "grad_xc_setup": 0.001538031,
+    "grad_xc_setup_blocks": 1.2e-07,
+    "grad_xc_setup_layout": 0.001399643,
+    "grad_xc_setup_layout_blocks": 0.000305519,
+    "grad_xc_setup_layout_lists": 9.369e-05,
+    "grad_xc_setup_layout_plans": 0.000218468,
+    "grad_xc_setup_layout_screen": 0.0007776390000000001,
+    "grid": 0.001434235,
+    "jk": 0.002201337,
+    "jk_setup": 0.010822987,
+    "one_electron": 6.5719e-05,
+    "pairs": 3.6125e-05,
+    "scf_setup": 0.000789747,
+    "scf_total": 0.023469664,
+    "total": 0.073358455,
+    "xc": 0.014142566999999998,
+    "xc_setup": 0.001113303
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8369865417480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.3376130524685669,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3376130524685669,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.511417388916016,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3376130524685669,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.019955222286070776,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.7191696166992188
+  },
+  {
+   "step": 3,
+   "wall": 0.07398627803195268,
+   "prepare": 5.710171535611153e-07,
+   "call": 0.07398542697774246,
+   "drop": 2.800370566546917e-07,
+   "python": 0.000616205977742465,
+   "rusage": {
+    "utime": 0.154944,
+    "stime": 0.00313,
+    "minflt": 1604,
+    "majflt": 0
+   },
+   "energy": -76.35821510716647,
+   "gradient": [
+    [
+     -0.00015143185618240063,
+     0.0026304946118180725,
+     0.0006184851362314725
+    ],
+    [
+     0.0003408363397859517,
+     -0.0056021888054269,
+     0.0011442668218732965
+    ],
+    [
+     -0.00018940448360581057,
+     0.002971694193609431,
+     -0.001762751958105574
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.003468497993614793,
+    "diis": 0.0005567679999803659,
+    "dipole": 4.8022e-05,
+    "ecp": 5e-08,
+    "energy": 0.038900406,
+    "grad_1e": 0.022476442,
+    "grad_2e": 0.028770071,
+    "grad_2e_setup": 0.01978076,
+    "grad_2e_setup_aux_pairs": 0.000116525,
+    "grad_2e_setup_builders": 0.004120834,
+    "grad_2e_setup_kernels": 0.003452179,
+    "grad_2e_setup_metric": 0.000753302,
+    "grad_2e_setup_metric_host": 4.416e-06,
+    "grad_2e_setup_pack_derivs": 2.71e-07,
+    "grad_2e_setup_pack_ints": 1.51e-07,
+    "grad_2e_setup_plan": 7.822e-06,
+    "grad_2e_setup_upload": 0.0006218840000000001,
+    "grad_2e_setup_wait": 0.014831732,
+    "grad_ecp": 5.21e-07,
+    "grad_pairs": 7.5133e-05,
+    "grad_xc": 0.00427156,
+    "grad_xc_setup": 0.001532784,
+    "grad_xc_setup_blocks": 2.31e-07,
+    "grad_xc_setup_layout": 0.001380334,
+    "grad_xc_setup_layout_blocks": 0.000296525,
+    "grad_xc_setup_layout_lists": 8.949399999999986e-05,
+    "grad_xc_setup_layout_plans": 0.000217937,
+    "grad_xc_setup_layout_screen": 0.0007721010000000001,
+    "grid": 0.001405082,
+    "jk": 0.002026707,
+    "jk_setup": 0.012408209,
+    "one_electron": 5.8808e-05,
+    "pairs": 3.5543e-05,
+    "scf_setup": 0.00079148,
+    "scf_total": 0.020623686,
+    "total": 0.073369221,
+    "xc": 0.012344941000000002,
+    "xc_setup": 0.001074074
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8281974792480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.33721986456744973,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.33721986456744973,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.505657196044922,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.33721986456744973,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.011943338398610797,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.7249107360839844
+  },
+  {
+   "step": 4,
+   "wall": 0.07247305399505422,
+   "prepare": 2.800370566546917e-07,
+   "call": 0.07247235300019383,
+   "drop": 4.209578037261963e-07,
+   "python": 0.0005794610001938344,
+   "rusage": {
+    "utime": 0.144505,
+    "stime": 0.008735,
+    "minflt": 1554,
+    "majflt": 0
+   },
+   "energy": -76.35832532676841,
+   "gradient": [
+    [
+     1.895739733107603e-05,
+     -0.0004968858221065936,
+     -0.00034196725424223695
+    ],
+    [
+     1.6274399703072873e-06,
+     3.0026156173201812e-05,
+     6.0266680915466164e-06
+    ],
+    [
+     -2.058483730195404e-05,
+     0.0004668596659369584,
+     0.0003359405861486364
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.003471178929970861,
+    "diis": 0.0005460160047223326,
+    "dipole": 4.1723e-05,
+    "ecp": 7e-08,
+    "energy": 0.038074394,
+    "grad_1e": 0.001429228,
+    "grad_2e": 0.028583699999999997,
+    "grad_2e_setup": 0.019589863,
+    "grad_2e_setup_aux_pairs": 0.000123565,
+    "grad_2e_setup_builders": 0.004352562,
+    "grad_2e_setup_kernels": 0.003635094,
+    "grad_2e_setup_metric": 0.000797208,
+    "grad_2e_setup_metric_host": 5.008e-06,
+    "grad_2e_setup_pack_derivs": 4.51e-07,
+    "grad_2e_setup_pack_ints": 1.5e-07,
+    "grad_2e_setup_plan": 7.531e-06,
+    "grad_2e_setup_upload": 0.000673683,
+    "grad_2e_setup_wait": 0.014360864,
+    "grad_ecp": 1.21e-07,
+    "grad_pairs": 9.7327e-05,
+    "grad_xc": 0.004124358,
+    "grad_xc_setup": 0.001379253,
+    "grad_xc_setup_blocks": 5e-08,
+    "grad_xc_setup_layout": 0.001227024,
+    "grad_xc_setup_layout_blocks": 0.000149735,
+    "grad_xc_setup_layout_lists": 9.0205e-05,
+    "grad_xc_setup_layout_plans": 0.000215744,
+    "grad_xc_setup_layout_screen": 0.0007668929999999999,
+    "grid": 0.00105763,
+    "jk": 0.0020022489999999998,
+    "jk_setup": 0.011951543,
+    "one_electron": 5.6875e-05,
+    "pairs": 4.7902e-05,
+    "scf_setup": 0.000784398,
+    "scf_total": 0.02057934,
+    "total": 0.071892892,
+    "xc": 0.012337672000000001,
+    "xc_setup": 0.00107803
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8281974792480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.3365469719398995,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3365469719398995,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.499919891357422,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3365469719398995,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.02386447604216338,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.73046875
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+[package]
+name = "linus-scf"
+description = "The self-consistent field of linus (RHF, UHF, RKS, UKS) as one algorithm, its linear response (CPHF/CPKS) and the reference determinant derivatives expand around"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The algorithms over the method families' terms (linus-base's `terms`): no family crate below
+# it (ARCHITECTURE.md, "Crates"; tools/check_layering.py).
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-base = { path = "../linus-base" }
+linus-ints = { path = "../linus-ints" }
+linus-num = { path = "../linus-num" }
+faer.workspace = true
+rayon.workspace = true
+serde.workspace = true

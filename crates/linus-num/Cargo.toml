@@ -1,0 +1,16 @@
+[package]
+name = "linus-num"
+description = "Numerical primitives of linus: thread-count independent (deterministic) accumulation and the run-time dispatched SIMD layer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# A leaf: no other linus crate. Every crate that sums in parallel or dispatches on the CPU's
+# instruction set (linus-ints, linus-grid, linus, linus-gpu's host side) uses it.
+[dependencies]
+rayon.workspace = true
+faer.workspace = true

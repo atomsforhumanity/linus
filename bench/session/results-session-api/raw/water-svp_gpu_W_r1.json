@@ -1,0 +1,948 @@
+{
+ "system": "water-svp",
+ "platform": "gpu",
+ "mode": "W",
+ "nsteps": 5,
+ "job_wall": 1.1683764457702637,
+ "started": 1794558011.323978,
+ "worker": {
+  "hello": {
+   "protocol": 1,
+   "program": "linus",
+   "version": "0.1.0",
+   "capabilities": {
+    "calctypes": [
+     "energy",
+     "gradient",
+     "hessian"
+    ],
+    "methods": {
+     "hf": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "slater": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "hfs": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "xalpha-2/3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "lda": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "lsda": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "lsd": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "vwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn-rpa": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "svwn3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "vwn3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "vwn-rpa": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "bp86": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b-p": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b88p86": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "bp86-vwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "bp86-vwn": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "blyp": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbe": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbe0": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbeh": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pbe1pbe": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp/g": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp-rpa": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b3lyp-vwn5": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "tpss": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "tpssh": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "scan": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "r2scan": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "m06-2x": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x-v": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97m-v": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "cam-b3lyp": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "pw6b95": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b97m-v": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x-d3": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97x-d3bj": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "wb97m-d3bj": [
+      "energy",
+      "gradient",
+      "hessian"
+     ],
+     "b97m-d3bj": [
+      "energy",
+      "gradient",
+      "hessian"
+     ]
+    },
+    "sessions": true,
+    "batches": false,
+    "in_process": true,
+    "thread_safe": true,
+    "gpu": true,
+    "driver": false,
+    "extras": {
+     "numerics_epoch": 7
+    }
+   },
+   "extras": {
+    "numerics_epoch": 7
+   }
+  },
+  "exit": 0,
+  "command": [
+   "python",
+   "serve.py",
+   "linus"
+  ]
+ },
+ "steps": [
+  {
+   "step": 0,
+   "wall": 0.3451307479990646,
+   "prepare": 0.14588680700398982,
+   "call": 0.1992439409950748,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.24,
+    "stime": 0.24,
+    "minflt": 128365,
+    "majflt": 0
+   },
+   "energy": -76.3487698669463,
+   "gradient": [
+    [
+     -0.0033702244934341345,
+     0.06706398882159408,
+     0.046546344870994016
+    ],
+    [
+     0.0009208254510012451,
+     -0.015475832448434285,
+     0.002139204577113807
+    ],
+    [
+     0.002449399042433322,
+     -0.05158815637316064,
+     -0.048685549448111126
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.005654730021684527,
+    "diis": 0.0008911999998090324,
+    "dipole": 5.6494e-05,
+    "ecp": 3e-08,
+    "energy": 0.168920076,
+    "grad_1e": 0.001308637,
+    "grad_2e": 0.021408948,
+    "grad_2e_setup": 0.006446399,
+    "grad_2e_setup_aux_pairs": 0.000132279,
+    "grad_2e_setup_builders": 0.005501369,
+    "grad_2e_setup_kernels": 0.004481075,
+    "grad_2e_setup_metric": 0.000840743,
+    "grad_2e_setup_metric_host": 6.319e-06,
+    "grad_2e_setup_pack_derivs": 3.1e-07,
+    "grad_2e_setup_pack_ints": 3.11e-07,
+    "grad_2e_setup_plan": 1.4812e-05,
+    "grad_2e_setup_upload": 0.0007786290000000001,
+    "grad_2e_setup_wait": 1.833e-06,
+    "grad_ecp": 3.61e-07,
+    "grad_pairs": 0.000112769,
+    "grad_xc": 0.005716922,
+    "grad_xc_setup": 0.002932357,
+    "grad_xc_setup_blocks": 8e-08,
+    "grad_xc_setup_layout": 0.001922309,
+    "grad_xc_setup_layout_blocks": 0.000283456,
+    "grad_xc_setup_layout_lists": 0.0002027750000000001,
+    "grad_xc_setup_layout_plans": 0.000466371,
+    "grad_xc_setup_layout_screen": 0.0009634679999999999,
+    "grid": 0.001379683,
+    "guess": 0.00342643,
+    "jk": 0.017179433000000004,
+    "jk_setup": 0.094069766,
+    "one_electron": 0.000229054,
+    "pairs": 0.000988656,
+    "scf_setup": 0.020502846,
+    "scf_total": 0.065623622,
+    "total": 0.197794804,
+    "xc": 0.019062079000000003,
+    "xc_setup": 0.002211564
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.0002749040722846985,
+    "scf_loop_device_mib": 0.8545646667480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.31907836009784385,
+    "products": 2,
+    "skipped": "gap_above_threshold",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": null,
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.898506164550781,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.31907836009784385,
+   "warm_start": false,
+   "guess": {
+    "distance": null,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": false,
+    "reason": "no_history",
+    "source": "sad"
+   },
+   "peak_memory_gib": 0.7101554870605469
+  },
+  {
+   "step": 1,
+   "wall": 0.08751659700646996,
+   "prepare": 3.1100353226065636e-07,
+   "call": 0.0875162860029377,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.19,
+    "stime": 0.01,
+    "minflt": 2655,
+    "majflt": 0
+   },
+   "energy": -76.3577936080972,
+   "gradient": [
+    [
+     0.0007133448100480671,
+     -0.010213353412238349,
+     0.011281938267054703
+    ],
+    [
+     -0.00015224858582023153,
+     0.0007481659364031445,
+     -0.009992482240919948
+    ],
+    [
+     -0.0005610962242297273,
+     0.009465187475834635,
+     -0.001289456026132979
+    ]
+   ],
+   "iterations": 9,
+   "fock_builds": 9,
+   "timings": {
+    "diag": 0.004770292086028159,
+    "diis": 0.0007604160037299152,
+    "dipole": 7.306e-05,
+    "ecp": 7e-08,
+    "energy": 0.049560539,
+    "grad_1e": 0.024299733,
+    "grad_2e": 0.030356495,
+    "grad_2e_setup": 0.020983959,
+    "grad_2e_setup_aux_pairs": 0.000123055,
+    "grad_2e_setup_builders": 0.004758291,
+    "grad_2e_setup_kernels": 0.003999642,
+    "grad_2e_setup_metric": 0.000804329,
+    "grad_2e_setup_metric_host": 4.777e-06,
+    "grad_2e_setup_pack_derivs": 2.21e-07,
+    "grad_2e_setup_pack_ints": 1.5e-07,
+    "grad_2e_setup_plan": 8.423e-06,
+    "grad_2e_setup_upload": 0.0007089959999999999,
+    "grad_2e_setup_wait": 0.015338103,
+    "grad_ecp": 2.71e-07,
+    "grad_pairs": 0.00013302,
+    "grad_xc": 0.005258273,
+    "grad_xc_setup": 0.001864342,
+    "grad_xc_setup_blocks": 7e-08,
+    "grad_xc_setup_layout": 0.001576039,
+    "grad_xc_setup_layout_blocks": 0.000308403,
+    "grad_xc_setup_layout_lists": 0.00010447699999999996,
+    "grad_xc_setup_layout_plans": 0.000316757,
+    "grad_xc_setup_layout_screen": 0.000839072,
+    "grid": 0.001239493,
+    "jk": 0.002525133,
+    "jk_setup": 0.01276187,
+    "one_electron": 6.4447e-05,
+    "pairs": 5.4402e-05,
+    "scf_setup": 0.000832952,
+    "scf_total": 0.030076114,
+    "total": 0.086337144,
+    "xc": 0.019242502,
+    "xc_setup": 0.001266143
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.00027541816234588623,
+    "scf_loop_device_mib": 0.8457756042480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.3358330252879997,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3358330252879997,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.4871826171875,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3358330252879997,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.1134774005231733,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.7199287414550781
+  },
+  {
+   "step": 2,
+   "wall": 0.09065382200060412,
+   "prepare": 1.800362952053547e-07,
+   "call": 0.09065364196430892,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.2,
+    "stime": 0.0,
+    "minflt": 1619,
+    "majflt": 0
+   },
+   "energy": -76.35807670943326,
+   "gradient": [
+    [
+     -0.00016263822699127484,
+     0.0028586143671768954,
+     0.0007735118595956214
+    ],
+    [
+     0.0004888466087644636,
+     -0.0081095093912959,
+     0.0013948371299246087
+    ],
+    [
+     -0.00032620838177641574,
+     0.005250895024123292,
+     -0.002168348989523533
+    ]
+   ],
+   "iterations": 8,
+   "fock_builds": 8,
+   "timings": {
+    "diag": 0.004082960979712069,
+    "diis": 0.000672767998505151,
+    "dipole": 6.0581e-05,
+    "ecp": 3e-08,
+    "energy": 0.045528109,
+    "grad_1e": 0.031654576000000004,
+    "grad_2e": 0.03773184,
+    "grad_2e_setup": 0.028648538,
+    "grad_2e_setup_aux_pairs": 0.000127221,
+    "grad_2e_setup_builders": 0.005396301,
+    "grad_2e_setup_kernels": 0.004531541,
+    "grad_2e_setup_metric": 0.000844629,
+    "grad_2e_setup_metric_host": 5.618e-06,
+    "grad_2e_setup_pack_derivs": 1.41e-07,
+    "grad_2e_setup_pack_ints": 1.81e-07,
+    "grad_2e_setup_plan": 9.835e-06,
+    "grad_2e_setup_upload": 0.00081177,
+    "grad_2e_setup_wait": 0.022313937,
+    "grad_ecp": 2.9e-07,
+    "grad_pairs": 0.00013321,
+    "grad_xc": 0.004799785,
+    "grad_xc_setup": 0.001694768,
+    "grad_xc_setup_blocks": 9e-08,
+    "grad_xc_setup_layout": 0.001529348,
+    "grad_xc_setup_layout_blocks": 0.000319129,
+    "grad_xc_setup_layout_lists": 0.00011723599999999995,
+    "grad_xc_setup_layout_plans": 0.000273581,
+    "grad_xc_setup_layout_screen": 0.000814094,
+    "grid": 0.001524411,
+    "jk": 0.0023632320000000003,
+    "jk_setup": 0.012592116,
+    "one_electron": 4.5728e-05,
+    "pairs": 3.8998e-05,
+    "scf_setup": 0.000820954,
+    "scf_total": 0.02649417,
+    "total": 0.089570934,
+    "xc": 0.016815996000000003,
+    "xc_setup": 0.001256508
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8369865417480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.3376130524685669,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3376130524685669,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.477313995361328,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3376130524685669,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.019955222286070776,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.7257423400878906
+  },
+  {
+   "step": 3,
+   "wall": 0.07904539495939389,
+   "prepare": 1.8998980522155762e-07,
+   "call": 0.07904520496958867,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.16,
+    "stime": 0.01,
+    "minflt": 1398,
+    "majflt": 0
+   },
+   "energy": -76.35821510716647,
+   "gradient": [
+    [
+     -0.00015143185618240063,
+     0.0026304946118180725,
+     0.0006184851362314725
+    ],
+    [
+     0.0003408363397859517,
+     -0.0056021888054269,
+     0.0011442668218732965
+    ],
+    [
+     -0.00018940448360581057,
+     0.002971694193609431,
+     -0.001762751958105574
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.0034834579498979447,
+    "diis": 0.0005575039988034406,
+    "dipole": 5.3741e-05,
+    "ecp": 6.1e-08,
+    "energy": 0.038785885,
+    "grad_1e": 0.0016014760000000001,
+    "grad_2e": 0.033033188000000005,
+    "grad_2e_setup": 0.024033021,
+    "grad_2e_setup_aux_pairs": 7.2789e-05,
+    "grad_2e_setup_builders": 0.005034396,
+    "grad_2e_setup_kernels": 0.004307455,
+    "grad_2e_setup_metric": 0.000714224,
+    "grad_2e_setup_metric_host": 4.647e-06,
+    "grad_2e_setup_pack_derivs": 2.2e-07,
+    "grad_2e_setup_pack_ints": 2.9e-07,
+    "grad_2e_setup_plan": 7.492e-06,
+    "grad_2e_setup_upload": 0.0006847590000000001,
+    "grad_2e_setup_wait": 0.018205623,
+    "grad_ecp": 2.31e-07,
+    "grad_pairs": 0.000115624,
+    "grad_xc": 0.004519482,
+    "grad_xc_setup": 0.001585413,
+    "grad_xc_setup_blocks": 4e-08,
+    "grad_xc_setup_layout": 0.001419334,
+    "grad_xc_setup_layout_blocks": 0.000288304,
+    "grad_xc_setup_layout_lists": 0.00010029000000000006,
+    "grad_xc_setup_layout_plans": 0.000240151,
+    "grad_xc_setup_layout_screen": 0.0007856809999999999,
+    "grid": 0.00110457,
+    "jk": 0.0020068970000000005,
+    "jk_setup": 0.011325642,
+    "one_electron": 5.8378e-05,
+    "pairs": 5.4883e-05,
+    "scf_setup": 0.00079134,
+    "scf_total": 0.021652904,
+    "total": 0.077756367,
+    "xc": 0.013335313000000001,
+    "xc_setup": 0.001110149
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8281974792480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.33721986456744973,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.33721986456744973,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.471099853515625,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.33721986456744973,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.011943338398610797,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.7306900024414062
+  },
+  {
+   "step": 4,
+   "wall": 0.07785959198372439,
+   "prepare": 1.700245775282383e-07,
+   "call": 0.07785942195914686,
+   "drop": 0.0,
+   "rusage": {
+    "utime": 0.16,
+    "stime": 0.01,
+    "minflt": 137,
+    "majflt": 0
+   },
+   "energy": -76.35832532676841,
+   "gradient": [
+    [
+     1.895739733107603e-05,
+     -0.0004968858221065936,
+     -0.00034196725424223695
+    ],
+    [
+     1.6274399703072873e-06,
+     3.0026156173201812e-05,
+     6.0266680915466164e-06
+    ],
+    [
+     -2.058483730195404e-05,
+     0.0004668596659369584,
+     0.0003359405861486364
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.0034477130200898645,
+    "diis": 0.0005687360072915907,
+    "dipole": 5.2108e-05,
+    "ecp": 5e-08,
+    "energy": 0.038734828,
+    "grad_1e": 0.026292237,
+    "grad_2e": 0.03264821,
+    "grad_2e_setup": 0.023576626,
+    "grad_2e_setup_aux_pairs": 0.000124757,
+    "grad_2e_setup_builders": 0.004659513,
+    "grad_2e_setup_kernels": 0.0039160060000000005,
+    "grad_2e_setup_metric": 0.000789186,
+    "grad_2e_setup_metric_host": 4.847e-06,
+    "grad_2e_setup_pack_derivs": 1.4e-07,
+    "grad_2e_setup_pack_ints": 1.4e-07,
+    "grad_2e_setup_plan": 8.153e-06,
+    "grad_2e_setup_upload": 0.0006964370000000001,
+    "grad_2e_setup_wait": 0.018046314,
+    "grad_ecp": 3.01e-07,
+    "grad_pairs": 0.000102604,
+    "grad_xc": 0.004436398,
+    "grad_xc_setup": 0.001565633,
+    "grad_xc_setup_blocks": 3e-08,
+    "grad_xc_setup_layout": 0.001403439,
+    "grad_xc_setup_layout_blocks": 0.000274883,
+    "grad_xc_setup_layout_lists": 9.900900000000016e-05,
+    "grad_xc_setup_layout_plans": 0.000237347,
+    "grad_xc_setup_layout_screen": 0.0007875039999999999,
+    "grid": 0.001234255,
+    "jk": 0.002072868,
+    "jk_setup": 0.011255407,
+    "one_electron": 5.4692e-05,
+    "pairs": 2.8212e-05,
+    "scf_setup": 0.000788545,
+    "scf_total": 0.021764993,
+    "total": 0.076922614,
+    "xc": 0.013385485999999999,
+    "xc_setup": 0.001076909
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8281974792480469
+   },
+   "closed_shell_probe": {
+    "gap": 0.3365469719398995,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3365469719398995,
+    "last_gap": 0.31907836009784385
+   },
+   "df": {
+    "budget_gib": 89.73887274414301,
+    "integrals": "device",
+    "k_block": 113,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "rung": "on the device: the tensor (0.00 GiB) and a build's workspace fit the 89.74 GiB the engine may hold",
+    "storage": "device",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+    "placement": {
+     "jk": "gpu",
+     "xc": "gpu",
+     "gradient_jk": "gpu",
+     "gradient_xc": "gpu",
+     "scf_loop": "device"
+    },
+    "fallbacks": [],
+    "precision": "emulated"
+   },
+   "memory": {
+    "available_gib": 15.466320037841797,
+    "df_tensor_budget_gib": 89.73887274414301,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3365469719398995,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.02386447604216338,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.7308387756347656
+  }
+ ]
+}

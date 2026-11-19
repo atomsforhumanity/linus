@@ -1,0 +1,30 @@
+# linus with its GPU backend (cargo feature `gpu`), for cluster jobs on NVIDIA GPUs. CUDA 13.0
+# runtime base: linus loads NVRTC, cuBLAS and cuSOLVER at run time (driver >= 580).
+FROM rust:1.99.0-bookworm AS build
+RUN apt-get update && apt-get install -y --no-install-recommends cmake python3-venv \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+ENV LINUS_DIST=1
+RUN cargo build --profile dist -p linus-cli --features gpu
+RUN python3 -m venv /opt/maturin && /opt/maturin/bin/pip install --no-cache-dir "maturin>=1.9,<2" \
+ && python3 tools/cuda13_distribution.py \
+ && (cd crates/linus-py && /opt/maturin/bin/maturin build --profile dist --strip --features gpu -o /wheels) \
+ && python3 tools/cuda13_distribution.py --undo
+RUN mkdir -p /out/share/linus && cp -rL data/basis /out/share/linus/basis
+
+FROM nvidia/cuda:13.0.3-runtime-ubuntu24.04
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv /opt/venv
+# The venv's python3 first on PATH: tasks and job-runner's shard-runner use it.
+ENV PATH=/opt/venv/bin:$PATH
+COPY --from=build /src/target/dist/linus /usr/local/bin/linus
+COPY --from=build /out/share/linus /usr/local/share/linus
+ENV LINUS_BASIS_DIR=/usr/local/share/linus/basis
+COPY --from=build /wheels /tmp/wheels
+RUN pip install --no-cache-dir "$(ls /tmp/wheels/afh_linus_cuda13-*.whl)" qccompute==0.23.0 qcdata==0.24.0 \
+ && rm -rf /tmp/wheels \
+ && printf '3\n\nO 0 0 0.1173\nH 0 0.7572 -0.4692\nH 0 -0.7572 -0.4692\n' > /tmp/w.xyz \
+ && linus /tmp/w.xyz --method hf --basis def2-svp --json | python3 -c "import json,sys; r=json.load(sys.stdin); assert r['success']; print('linus ok (cpu)', r['energy'])" \
+ && rm /tmp/w.xyz

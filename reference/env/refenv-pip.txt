@@ -1,0 +1,9 @@
+eval_type_backport==0.4.0
+h5py==3.16.0
+pyscf==2.15.0
+qccodec==0.21.0
+qccompute==0.22.0
+qcdata==0.23.1
+qcref==0.5.1
+toml==0.10.2
+tomli_w==1.2.0

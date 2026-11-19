@@ -1,0 +1,33 @@
+{
+ "structure": {
+  "symbols": [
+   "C",
+   "N"
+  ],
+  "charge": 0,
+  "multiplicity": 2,
+  "geometry": [
+   [
+    0.0,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    2.2147590195639206
+   ]
+  ]
+ },
+ "calctype": "energy",
+ "method": "hf",
+ "basis": "def2-svp",
+ "jk": {
+  "kind": "df"
+ },
+ "scf": {
+  "convergence": "extreme",
+  "max_iter": 300
+ },
+ "threads": 2
+}

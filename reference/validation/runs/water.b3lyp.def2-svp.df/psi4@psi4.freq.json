@@ -1,0 +1,1 @@
+{"case": "water.b3lyp.def2-svp.df", "run": "psi4@psi4", "program": "psi4", "program_version": "1.11", "hessian_hash": "ee59f6f330f3bc4f", "masses": [15.99491461957, 1.00782503223, 1.00782503223], "analysis": "psi4 harmonic analysis (bench/vib/refs.py), translations and rotations projected", "frequencies": [1603.5050525959211, 3906.0888760636194, 4009.3485123143264]}

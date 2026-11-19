@@ -1,0 +1,31 @@
+[package]
+name = "linus-cli"
+description = "Command-line driver for linus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+publish = false
+
+[[bin]]
+name = "linus"
+path = "src/main.rs"
+# the binary shares its name with the library crate; `cargo doc` documents the library
+doc = false
+
+[dependencies]
+linus = { path = "../linus", default-features = false }
+faer.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+serde.workspace = true
+
+[features]
+# D3/D4 dispersion through linus-disp (LGPL-3.0-or-later; THIRD_PARTY_NOTICES.md).
+# --no-default-features builds an MIT-only binary without it.
+default = ["dispersion"]
+dispersion = ["linus/dispersion"]
+# The GPU backend (docs/gpu.md); off by default.
+gpu = ["linus/gpu"]

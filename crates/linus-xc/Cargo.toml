@@ -1,0 +1,29 @@
+[package]
+name = "linus-xc"
+description = "Exchange-correlation functionals for linus: a backend-agnostic XC trait, with libxc 7.0.0 (static, via FFI) as the first backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+# We link the native library `xc` (libxc). Declaring it makes Cargo refuse a
+# second crate that also links libxc, and exports DEP_XC_ROOT / DEP_XC_INCLUDE
+# to direct dependents.
+links = "xc"
+build = "build.rs"
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+rayon.workspace = true
+
+[build-dependencies]
+cmake = "0.1.54"
+cc = "1.2"
+sha2 = "0.10"

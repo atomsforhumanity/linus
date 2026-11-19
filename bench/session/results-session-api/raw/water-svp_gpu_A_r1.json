@@ -1,0 +1,495 @@
+{
+ "system": "water-svp",
+ "platform": "gpu",
+ "mode": "A",
+ "nsteps": 5,
+ "job_wall": 2.517589807510376,
+ "started": 1794558012.5528166,
+ "steps": [
+  {
+   "step": 0,
+   "wall": 0.48987755103735253,
+   "rusage": {
+    "utime": 0.254432,
+    "stime": 0.328002,
+    "minflt": 129736,
+    "majflt": 0
+   },
+   "energy": -76.34876986694626,
+   "gradient": [
+    [
+     -0.0033702244934678397,
+     0.06706398882165396,
+     0.04654634487071302
+    ],
+    [
+     0.0009208254510193869,
+     -0.015475832448702681,
+     0.0021392045773521162
+    ],
+    [
+     0.0024493990424500726,
+     -0.05158815637295286,
+     -0.04868554944807099
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.005676286973378778,
+    "diis": 0.0008516159996797797,
+    "dipole": 4.5408e-05,
+    "ecp": 3e-08,
+    "energy": 0.158252051,
+    "grad_1e": 0.008136229,
+    "grad_2e": 0.019778887000000002,
+    "grad_2e_setup": 0.005614619,
+    "grad_2e_setup_aux_pairs": 7.6045e-05,
+    "grad_2e_setup_builders": 0.004768197,
+    "grad_2e_setup_kernels": 0.003871169,
+    "grad_2e_setup_metric": 0.000750778,
+    "grad_2e_setup_metric_host": 5.619e-06,
+    "grad_2e_setup_pack_derivs": 3.01e-07,
+    "grad_2e_setup_pack_ints": 1.4e-07,
+    "grad_2e_setup_plan": 1.2979e-05,
+    "grad_2e_setup_upload": 0.000659231,
+    "grad_2e_setup_wait": 1.502e-06,
+    "grad_ecp": 3.7e-07,
+    "grad_pairs": 0.000124837,
+    "grad_xc": 0.005314739000000001,
+    "grad_xc_setup": 0.002666018,
+    "grad_xc_setup_blocks": 3e-08,
+    "grad_xc_setup_layout": 0.001785083,
+    "grad_xc_setup_layout_blocks": 0.000324448,
+    "grad_xc_setup_layout_lists": 0.00017814700000000003,
+    "grad_xc_setup_layout_plans": 0.000384939,
+    "grad_xc_setup_layout_screen": 0.000892281,
+    "grid": 0.001548067,
+    "guess": 0.003083264,
+    "jk": 0.014454085000000002,
+    "jk_setup": 0.0908059,
+    "one_electron": 0.00027223,
+    "pairs": 0.000631399,
+    "scf_setup": 0.017563528,
+    "scf_total": 0.058919395,
+    "total": 0.184925581,
+    "xc": 0.01816958,
+    "xc_setup": 0.002025935
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.0002749040722846985,
+    "scf_loop_device_mib": 0.8545646667480469
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3190783600979841,
+   "positions_error_bohr": 8.617551117140465e-13
+  },
+  {
+   "step": 1,
+   "wall": 0.49571877100970596,
+   "rusage": {
+    "utime": 0.252639,
+    "stime": 0.333808,
+    "minflt": 129502,
+    "majflt": 0
+   },
+   "energy": -76.35779360809714,
+   "gradient": [
+    [
+     0.0007133444764362991,
+     -0.01021334763677554,
+     0.01128193838739111
+    ],
+    [
+     -0.00015224841004964074,
+     0.0007481638036479776,
+     -0.009992477577254799
+    ],
+    [
+     -0.0005610960663879581,
+     0.009465183833126362,
+     -0.0012894608101355898
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.00543694502961427,
+    "diis": 0.0008591360080463347,
+    "dipole": 4.9244e-05,
+    "ecp": 2e-08,
+    "energy": 0.162710512,
+    "grad_1e": 0.008833978000000001,
+    "grad_2e": 0.020730318,
+    "grad_2e_setup": 0.006335112,
+    "grad_2e_setup_aux_pairs": 9.1357e-05,
+    "grad_2e_setup_builders": 0.005271673,
+    "grad_2e_setup_kernels": 0.0042212940000000004,
+    "grad_2e_setup_metric": 0.000861825,
+    "grad_2e_setup_metric_host": 1.31e-05,
+    "grad_2e_setup_pack_derivs": 3.41e-07,
+    "grad_2e_setup_pack_ints": 2.41e-07,
+    "grad_2e_setup_plan": 1.4853e-05,
+    "grad_2e_setup_upload": 0.0006890760000000001,
+    "grad_2e_setup_wait": 1.583e-06,
+    "grad_ecp": 3.81e-07,
+    "grad_pairs": 0.000116115,
+    "grad_xc": 0.005819898,
+    "grad_xc_setup": 0.003131497,
+    "grad_xc_setup_blocks": 6e-08,
+    "grad_xc_setup_layout": 0.001693155,
+    "grad_xc_setup_layout_blocks": 0.000323236,
+    "grad_xc_setup_layout_lists": 9.641500000000009e-05,
+    "grad_xc_setup_layout_plans": 0.000402765,
+    "grad_xc_setup_layout_screen": 0.000862626,
+    "grid": 0.001523139,
+    "guess": 0.003034782,
+    "jk": 0.015424743000000001,
+    "jk_setup": 0.093875234,
+    "one_electron": 0.000230026,
+    "pairs": 0.000564048,
+    "scf_setup": 0.018463169,
+    "scf_total": 0.060407913,
+    "total": 0.190744237,
+    "xc": 0.018029148,
+    "xc_setup": 0.00212898
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.00027541816234588623,
+    "scf_loop_device_mib": 0.8545646667480469
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3358330229300799,
+   "positions_error_bohr": 9.314771176605063e-13
+  },
+  {
+   "step": 2,
+   "wall": 0.5082303259987384,
+   "rusage": {
+    "utime": 0.260752,
+    "stime": 0.335969,
+    "minflt": 129574,
+    "majflt": 0
+   },
+   "energy": -76.3580767094332,
+   "gradient": [
+    [
+     -0.00016263794549395763,
+     0.00285860906592713,
+     0.0007735096378134187
+    ],
+    [
+     0.000488846595289345,
+     -0.008109509569811046,
+     0.0013948349492074463
+    ],
+    [
+     -0.0003262086497989123,
+     0.005250900503883049,
+     -0.0021683445870165075
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.005384995952600598,
+    "diis": 0.0008757440041226802,
+    "dipole": 4.9133e-05,
+    "ecp": 2e-08,
+    "energy": 0.167127772,
+    "grad_1e": 0.00833729,
+    "grad_2e": 0.019309532,
+    "grad_2e_setup": 0.005639416,
+    "grad_2e_setup_aux_pairs": 0.000131187,
+    "grad_2e_setup_builders": 0.004771151,
+    "grad_2e_setup_kernels": 0.003871959,
+    "grad_2e_setup_metric": 0.000779612,
+    "grad_2e_setup_metric_host": 5.499e-06,
+    "grad_2e_setup_pack_derivs": 4.6e-07,
+    "grad_2e_setup_pack_ints": 1.41e-07,
+    "grad_2e_setup_plan": 1.352e-05,
+    "grad_2e_setup_upload": 0.00069204,
+    "grad_2e_setup_wait": 1.482e-06,
+    "grad_ecp": 3.6e-07,
+    "grad_pairs": 0.000113681,
+    "grad_xc": 0.005440637999999999,
+    "grad_xc_setup": 0.002692327,
+    "grad_xc_setup_blocks": 2e-08,
+    "grad_xc_setup_layout": 0.001827787,
+    "grad_xc_setup_layout_blocks": 0.000316606,
+    "grad_xc_setup_layout_lists": 0.0001833850000000001,
+    "grad_xc_setup_layout_plans": 0.000423236,
+    "grad_xc_setup_layout_screen": 0.0008989909999999999,
+    "grid": 0.001272874,
+    "guess": 0.00332032,
+    "jk": 0.015003609999999999,
+    "jk_setup": 0.098089167,
+    "one_electron": 0.000244468,
+    "pairs": 0.000692611,
+    "scf_setup": 0.01781103,
+    "scf_total": 0.060427592,
+    "total": 0.193493479,
+    "xc": 0.019258916999999997,
+    "xc_setup": 0.002140447
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8545646667480469
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3376130577332913,
+   "positions_error_bohr": 7.859407569199561e-13
+  },
+  {
+   "step": 3,
+   "wall": 0.46472793200518936,
+   "rusage": {
+    "utime": 0.253969,
+    "stime": 0.320312,
+    "minflt": 129385,
+    "majflt": 0
+   },
+   "energy": -76.35821510716644,
+   "gradient": [
+    [
+     -0.00015143129761763545,
+     0.0026304846432184947,
+     0.0006184815212607053
+    ],
+    [
+     0.0003408362519741418,
+     -0.005602188339717512,
+     0.0011442623241818828
+    ],
+    [
+     -0.00018940495435647124,
+     0.002971703696499295,
+     -0.0017627438454420608
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.005314654975597501,
+    "diis": 0.0008463360009191092,
+    "dipole": 8.8883e-05,
+    "ecp": 3e-08,
+    "energy": 0.155418343,
+    "grad_1e": 0.007907565,
+    "grad_2e": 0.0189083,
+    "grad_2e_setup": 0.005518114,
+    "grad_2e_setup_aux_pairs": 7.991e-05,
+    "grad_2e_setup_builders": 0.004675488,
+    "grad_2e_setup_kernels": 0.003775114,
+    "grad_2e_setup_metric": 0.000752661,
+    "grad_2e_setup_metric_host": 5.278e-06,
+    "grad_2e_setup_pack_derivs": 3.41e-07,
+    "grad_2e_setup_pack_ints": 2e-07,
+    "grad_2e_setup_plan": 1.4061e-05,
+    "grad_2e_setup_upload": 0.000696647,
+    "grad_2e_setup_wait": 1.503e-06,
+    "grad_ecp": 4.4e-07,
+    "grad_pairs": 0.00011324,
+    "grad_xc": 0.0050636299999999995,
+    "grad_xc_setup": 0.002590844,
+    "grad_xc_setup_blocks": 1.2e-07,
+    "grad_xc_setup_layout": 0.001720496,
+    "grad_xc_setup_layout_blocks": 0.000325559,
+    "grad_xc_setup_layout_lists": 0.000109465,
+    "grad_xc_setup_layout_plans": 0.00039957,
+    "grad_xc_setup_layout_screen": 0.000878981,
+    "grid": 0.001405342,
+    "guess": 0.003195353,
+    "jk": 0.013895264,
+    "jk_setup": 0.088745804,
+    "one_electron": 0.000229875,
+    "pairs": 0.000688505,
+    "scf_setup": 0.017678531,
+    "scf_total": 0.058063409,
+    "total": 0.181034102,
+    "xc": 0.018157759,
+    "xc_setup": 0.00212942
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8545646667480469
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.33721986495190354,
+   "positions_error_bohr": 8.333334022836425e-13
+  },
+  {
+   "step": 4,
+   "wall": 0.5568850240088068,
+   "rusage": {
+    "utime": 0.265947,
+    "stime": 0.329735,
+    "minflt": 129841,
+    "majflt": 0
+   },
+   "energy": -76.35832532676828,
+   "gradient": [
+    [
+     1.8957389125885595e-05,
+     -0.0004968826304769178,
+     -0.0003419717619332352
+    ],
+    [
+     1.62771245890668e-06,
+     3.0020421680931886e-05,
+     6.031357954960903e-06
+    ],
+    [
+     -2.0585101582374504e-05,
+     0.00046686220879665896,
+     0.0003359404039756375
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.005304852032982827,
+    "diis": 0.0008768000009877141,
+    "dipole": 5.0406e-05,
+    "ecp": 3e-08,
+    "energy": 0.167107911,
+    "grad_1e": 0.001291712,
+    "grad_2e": 0.019983646,
+    "grad_2e_setup": 0.005791936,
+    "grad_2e_setup_aux_pairs": 0.000119399,
+    "grad_2e_setup_builders": 0.004896039,
+    "grad_2e_setup_kernels": 0.003990698,
+    "grad_2e_setup_metric": 0.000800633,
+    "grad_2e_setup_metric_host": 5.628e-06,
+    "grad_2e_setup_pack_derivs": 4e-07,
+    "grad_2e_setup_pack_ints": 2.11e-07,
+    "grad_2e_setup_plan": 1.33e-05,
+    "grad_2e_setup_upload": 0.000692993,
+    "grad_2e_setup_wait": 1.332e-06,
+    "grad_ecp": 3.7e-07,
+    "grad_pairs": 0.000189755,
+    "grad_xc": 0.005681289,
+    "grad_xc_setup": 0.002828321,
+    "grad_xc_setup_blocks": 3e-08,
+    "grad_xc_setup_layout": 0.001826425,
+    "grad_xc_setup_layout_blocks": 0.000280382,
+    "grad_xc_setup_layout_lists": 0.00017991100000000005,
+    "grad_xc_setup_layout_plans": 0.000427452,
+    "grad_xc_setup_layout_screen": 0.0009331019999999999,
+    "grid": 0.001217209,
+    "guess": 0.003052628,
+    "jk": 0.015311262999999999,
+    "jk_setup": 0.097124497,
+    "one_electron": 0.000277517,
+    "pairs": 0.0007985,
+    "scf_setup": 0.0182238,
+    "scf_total": 0.061551281,
+    "total": 0.194398559,
+    "xc": 0.01960182,
+    "xc_setup": 0.002131454
+   },
+   "resources": {
+    "df_bytes_per_elem": 8.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_2e_setup_upload_gib": 0.000275246798992157,
+    "scf_loop_device_mib": 0.8545646667480469
+   },
+   "closed_shell_probe": null,
+   "stability_probe": null,
+   "probe_trigger": null,
+   "df": null,
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": null,
+     "xc": null,
+     "gradient_jk": null,
+     "gradient_xc": null,
+     "scf_loop": null
+    },
+    "fallbacks": null,
+    "precision": null
+   },
+   "memory": null,
+   "s2": 0.0,
+   "homo_lumo_gap": 0.336546981161574,
+   "positions_error_bohr": 7.409628466348295e-13
+  }
+ ]
+}

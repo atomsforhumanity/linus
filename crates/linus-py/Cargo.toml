@@ -1,0 +1,34 @@
+[package]
+name = "linus-py"
+description = "Python bindings for linus (module linus._linus)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish = false
+
+[lib]
+name = "_linus"
+crate-type = ["cdylib"]
+# an extension module has no libpython to link a test binary against; tests are in tests/ (pytest)
+test = false
+doctest = false
+
+[dependencies]
+linus = { path = "../linus", default-features = false }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py311"] }
+numpy = "0.23"
+faer.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+
+[features]
+# D3/D4 dispersion through linus-disp (LGPL-3.0-or-later; THIRD_PARTY_NOTICES.md).
+# --no-default-features builds an MIT-only binary without it.
+default = ["dispersion"]
+dispersion = ["linus/dispersion"]
+# The GPU backend (docs/gpu.md); off by default (maturin build --features gpu).
+gpu = ["linus/gpu"]

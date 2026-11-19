@@ -1,0 +1,29 @@
+[package]
+name = "linus-solvent"
+description = "The implicit solvent of linus: polarizable continuum models (C-PCM, COSMO, IEF-PCM, SS(V)PE) on Gaussian surface charges, SMD, and the solvent database"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# A method family: on linus-base's terms (it implements EnvironmentTerm and EnvironmentResponse)
+# and the leaves; no other family, no algorithm crate (ARCHITECTURE.md, "Crates";
+# tools/check_layering.py).
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-base = { path = "../linus-base" }
+linus-num = { path = "../linus-num" }
+linus-ints = { path = "../linus-ints" }
+linus-grid = { path = "../linus-grid" }
+faer.workspace = true
+rayon.workspace = true
+serde.workspace = true
+# the orca PCM preset's constants (surface::OrcaPcm); float_roundtrip: correctly rounded parsing
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+linus-ints = { path = "../linus-ints", features = ["reference"] }

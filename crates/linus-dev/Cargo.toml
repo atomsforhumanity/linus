@@ -1,0 +1,26 @@
+[package]
+name = "linus-dev"
+description = "Study, check and benchmark programs of linus development (examples/; not published)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+linus = { path = "../linus" }
+linus-core = { path = "../linus-core" }
+linus-base = { path = "../linus-base" }
+linus-scf = { path = "../linus-scf" }
+linus-jk = { path = "../linus-jk" }
+linus-dft = { path = "../linus-dft" }
+linus-solvent = { path = "../linus-solvent" }
+linus-vib = { path = "../linus-vib" }
+linus-ints = { path = "../linus-ints" }
+linus-grid = { path = "../linus-grid" }
+linus-xc = { path = "../linus-xc" }
+faer.workspace = true
+rayon.workspace = true
+serde_json.workspace = true

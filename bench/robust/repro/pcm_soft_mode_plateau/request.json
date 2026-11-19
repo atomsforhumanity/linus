@@ -1,0 +1,32 @@
+{
+ "structure": {
+  "symbols": [
+   "F"
+  ],
+  "charge": 0,
+  "multiplicity": 2,
+  "geometry": [
+   [
+    0,
+    0,
+    0
+   ]
+  ]
+ },
+ "calctype": "energy",
+ "method": "hf",
+ "basis": "def2-svp",
+ "jk": {
+  "kind": "df",
+  "aux": "def2-universal-jkfit"
+ },
+ "threads": 1,
+ "scf": {
+  "convergence": "extreme",
+  "max_iter": 150
+ },
+ "solvent": {
+  "model": "cpcm",
+  "name": "acetonitrile"
+ }
+}

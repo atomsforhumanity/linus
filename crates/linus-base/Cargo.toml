@@ -1,0 +1,22 @@
+[package]
+name = "linus-base"
+description = "The base of linus's method crates: the errors of a calculation, deterministic dense linear algebra, memory limits, and the method families' terms (the traits the SCF and the response call the J/K, XC and environment families through)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# Under every method crate (linus-jk, linus-dft, linus-scf, linus-solvent, linus-vib) and the
+# facade; on the leaves only (ARCHITECTURE.md, "Crates"; tools/check_layering.py).
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-ints = { path = "../linus-ints" }
+linus-grid = { path = "../linus-grid" }
+linus-xc = { path = "../linus-xc" }
+faer.workspace = true
+rayon.workspace = true
+serde.workspace = true
+thiserror.workspace = true

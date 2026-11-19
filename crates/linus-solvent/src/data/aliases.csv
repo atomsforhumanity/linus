@@ -1,0 +1,223 @@
+alias,key,source
+acetic acid,ACETIC_ACID,minnesota
+acetone,ACETONE,minnesota
+acetonitrile,ACETONITRILE,minnesota
+acn,ACETONITRILE,pyscf
+ch3cn,ACETONITRILE,common
+mecn,ACETONITRILE,pyscf
+acetophenone,ACETOPHENONE,minnesota
+2-propen-1-ol,ALLYL_ALCOHOL,minnesota
+aniline,ANILINE,minnesota
+anisole,ANISOLE,minnesota
+benzaldehyde,BENZALDEHYDE,minnesota
+benzene,BENZENE,minnesota
+thiophenol,BENZENETHIOL,minnesota
+benzonitrile,BENZONITRILE,minnesota
+benzyl alcohol,BENZYL_ALCOHOL,minnesota
+bromobenzene,BROMOBENZENE,minnesota
+bromoethane,BROMOETHANE,minnesota
+1-bromooctane,BROMOOCTANE_1,minnesota
+1-bromopentane,BROMOPENTANE_1,minnesota
+1-bromopropane,BROMOPROPANE_1,minnesota
+2-bromopropane,BROMOPROPANE_2,minnesota
+1-bromo-2-methylpropane,BROMO_2_METHYLPROPANE_1,minnesota
+butanal,BUTANAL,minnesota
+butanonitrile,BUTANENITRILE,minnesota
+butanoic acid,BUTANOIC_ACID,minnesota
+1-butanol,BUTANOL_1,minnesota
+2-butanol,BUTANOL_2,minnesota
+butanone,BUTANONE_2,minnesota
+butylamine,BUTYLAMINE,minnesota
+n-butylbenzene,BUTYLBENZENE,minnesota
+butyl ethanoate,BUTYL_ACETATE,minnesota
+carbon disulfide,CARBON_DISULFIDE,minnesota
+chlorobenzene,CHLOROBENZENE,minnesota
+phcl,CHLOROBENZENE,common
+2-chlorobutane,CHLOROBUTANE_2,minnesota
+1-chlorohexane,CHLOROHEXANE_1,minnesota
+a-chlorotoluene,CHLOROMETHYL_BENZENE,minnesota
+1-chloropentane,CHLOROPENTANE_1,minnesota
+1-chloropropane,CHLOROPROPANE_1,minnesota
+o-chlorotoluene,CHLOROTOLUENE_2,minnesota
+"cis-1,2-dimethylcyclohexane",CIS_1_2_DIMETHYLCYCLOHEXANE,minnesota
+cis-decalin,CIS_DECAHYDRONAPHTHALENE,minnesota
+cyclohexane,CYCLOHEXANE,minnesota
+cyclohexanone,CYCLOHEXANONE,minnesota
+cyclopentane,CYCLOPENTANE,minnesota
+cyclopentanol,CYCLOPENTANOL,minnesota
+cyclopentanone,CYCLOPENTANONE,minnesota
+decalin,DECALIN,common
+decalin (cis/trans mixture),DECALIN,minnesota
+n-decane,DECANE,minnesota
+1-decanol,DECANOL_1,minnesota
+"1,2-dibromoethane",DIBROMOETHANE_1_2,minnesota
+dibromomethane,DIBROMOMETHANE,minnesota
+butylether,DIBUTYL_ETHER,pyscf
+dibutyl ether,DIBUTYL_ETHER,minnesota
+"1,2-dichloroethane",DICHLOROETHANE_1_2,minnesota
+dce,DICHLOROETHANE_1_2,common
+ch2cl2,DICHLOROMETHANE,common
+dcm,DICHLOROMETHANE,pyscf
+dichloromethane,DICHLOROMETHANE,minnesota
+methylene chloride,DICHLOROMETHANE,common
+diethylamine,DIETHYLAMINE,minnesota
+diethyl ether,DIETHYL_ETHER,minnesota
+et2o,DIETHYL_ETHER,pyscf
+ether,DIETHYL_ETHER,pyscf
+diethyl sulfide,DIETHYL_SULFIDE,minnesota
+diiodomethane,DIIODOMETHANE,minnesota
+diisopropyl ether,DIISOPROPYL_ETHER,minnesota
+dme,DIMETHOXYETHANE_1_2,common
+"2,4-dimethylpentane",DIMETHYLPENTANE_2_4,minnesota
+"2,4-dimethylpyridine",DIMETHYLPYRIDINE_2_4,minnesota
+"2,6-dimethylpyridine",DIMETHYLPYRIDINE_2_6,minnesota
+dimethyl disulfide,DIMETHYL_DISULFIDE,minnesota
+dimethylsulfoxide,DIMETHYL_SULFOXIDE,pyscf
+dimethyl sulfoxide (DMSO),DIMETHYL_SULFOXIDE,minnesota
+dmso,DIMETHYL_SULFOXIDE,pyscf
+"1,4-dioxane",DIOXANE_1_4,minnesota
+dioxane,DIOXANE_1_4,common
+diphenyl ether,DIPHENYL_ETHER,minnesota
+dipropylamine,DIPROPYLAMINE,minnesota
+n-dodecane,DODECANE,minnesota
+"1,2-ethanediol",ETHANEDIOL_1_2,minnesota
+ethylene glycol,ETHANEDIOL_1_2,common
+ethanethiol,ETHANETHIOL,minnesota
+ethanol,ETHANOL,minnesota
+etoh,ETHANOL,pyscf
+ethyl phenyl ether,ETHOXYBENZENE,minnesota
+ethylbenzene,ETHYLBENZENE,minnesota
+ethyl acetate,ETHYL_ACETATE,common
+ethyl ethanoate,ETHYL_ACETATE,minnesota
+etoac,ETHYL_ACETATE,common
+ethyl methanoate,ETHYL_FORMATE,minnesota
+"E-1,2-dichloroethene",E_1_2_DICHLOROETHENE,minnesota
+E-2-pentene,E_2_PENTENE,minnesota
+fluorobenzene,FLUOROBENZENE,minnesota
+1-fluorooctane,FLUOROOCTANE_1,minnesota
+formamide,FORMAMIDE,minnesota
+formic acid,FORMIC_ACID,minnesota
+n-heptane,HEPTANE,minnesota
+1-heptanol,HEPTANOL_1,minnesota
+2-heptanone,HEPTANONE_2,minnesota
+4-heptanone,HEPTANONE_4,minnesota
+n-hexadecane,HEXADECANE,minnesota
+perfluorobenzene,HEXAFLUOROBENZENE,minnesota
+hmpa,HEXAMETHYLPHOSPHORIC_TRIAMIDE,common
+n-hexane,HEXANE,minnesota
+hexanoic acid,HEXANOIC_ACID,minnesota
+1-hexanol,HEXANOL_1,minnesota
+2-hexanone,HEXANONE_2,minnesota
+1-hexene,HEXENE_1,minnesota
+1-hexyne,HEXYNE_1,minnesota
+iodobenzene,IODOBENZENE,minnesota
+1-iodobutane,IODOBUTANE_1,minnesota
+iodoethane,IODOETHANE,minnesota
+1-iodohexadecane,IODOHEXADECANE_1,minnesota
+iodomethane,IODOMETHANE,minnesota
+1-iodopentane,IODOPENTANE_1,minnesota
+1-iodopropane,IODOPROPANE_1,minnesota
+isopropylbenzene,ISOPROPYLBENZENE,minnesota
+p-isopropyltoluene,ISOPROPYL_4_METHYLBENZENE_1,minnesota
+meoh,METHANOL,pyscf
+methanol,METHANOL,minnesota
+2-methoxyethanol,METHOXYETHANOL_2,minnesota
+methylcyclohexane,METHYLCYCLOHEXANE,minnesota
+2-methylpentane,METHYLPENTANE_2,minnesota
+2-methylpyridine,METHYLPYRIDINE_2,minnesota
+3-methylpyridine,METHYLPYRIDINE_3,minnesota
+4-methylpyridine,METHYLPYRIDINE_4,minnesota
+2-methf,METHYLTETRAHYDROFURAN_2,common
+2-methyltetrahydrofuran,METHYLTETRAHYDROFURAN_2,common
+2-methyl-1-propanol,METHYL_1_PROPANOL_2,minnesota
+4-methyl-2-pentanone,METHYL_2_PENTANONE_4,minnesota
+2-methyl-2-propanol,METHYL_2_PROPANOL_2,minnesota
+methyl ethanoate,METHYL_ACETATE,minnesota
+methyl benzoate,METHYL_BENZOATE,minnesota
+methyl butanoate,METHYL_BUTANOATE,minnesota
+methyl methanoate,METHYL_FORMATE,minnesota
+methyl propanoate,METHYL_PROPANOATE,minnesota
+m-cresol,M_CRESOL,minnesota
+m-xylene,M_XYLENE,minnesota
+nitrobenzene,NITROBENZENE,minnesota
+phno2,NITROBENZENE,common
+nitroethane,NITROETHANE,minnesota
+meno2,NITROMETHANE,common
+nitromethane,NITROMETHANE,minnesota
+1-nitropropane,NITROPROPANE_1,minnesota
+2-nitropropane,NITROPROPANE_2,minnesota
+o-nitrotoluene,NITROTOLUENE_2,minnesota
+n-nonane,NONANE,minnesota
+1-nonanol,NONANOL_1,minnesota
+5-nonanone,NONANONE_5,minnesota
+N-methylaniline,N_METHYLANILINE,minnesota
+N-methylformamide (E/Z mixture),N_METHYLFORMAMIDE,minnesota
+nmp,N_METHYL_2_PYRROLIDINONE,common
+dma,N_N_DIMETHYLACETAMIDE,pyscf
+dmac,N_N_DIMETHYLACETAMIDE,common
+"N,N-dimethylacetamide",N_N_DIMETHYLACETAMIDE,minnesota
+dmf,N_N_DIMETHYLFORMAMIDE,pyscf
+"N,N-dimethylformamide",N_N_DIMETHYLFORMAMIDE,minnesota
+n-octane,OCTANE,minnesota
+1-octanol,OCTANOL_1,minnesota
+2-octanone,OCTANONE_2,minnesota
+o-cresol,O_CRESOL,minnesota
+o-dichlorobenzene,O_DICHLOROBENZENE,minnesota
+o-xylene,O_XYLENE,minnesota
+n-pentadecane,PENTADECANE,minnesota
+pentanal,PENTANAL,minnesota
+n-pentane,PENTANE,minnesota
+pentanoic acid,PENTANOIC_ACID,minnesota
+1-pentanol,PENTANOL_1,minnesota
+2-pentanone,PENTANONE_2,minnesota
+3-pentanone,PENTANONE_3,minnesota
+1-pentene,PENTENE_1,minnesota
+pentylamine,PENTYLAMINE,minnesota
+pentyl ethanoate,PENTYL_ACETATE,minnesota
+propanal,PROPANAL,minnesota
+propanonitrile,PROPANENITRILE,minnesota
+propanoic acid,PROPANOIC_ACID,minnesota
+1-propanol,PROPANOL_1,minnesota
+2-propanol,PROPANOL_2,minnesota
+ipa,PROPANOL_2,common
+isopropanol,PROPANOL_2,common
+isopropyl alcohol,PROPANOL_2,common
+propylamine,PROPYLAMINE,minnesota
+pc,PROPYLENE_CARBONATE,common
+propyl ethanoate,PROPYL_ACETATE,minnesota
+pyridine,PYRIDINE,minnesota
+p-xylene,P_XYLENE,minnesota
+sec-butylbenzene,SEC_BUTYLBENZENE,minnesota
+sulfolane,SULFOLANE,common
+"tetrahydrothiophene-S,S-dioxide",SULFOLANE,minnesota
+tert-butylbenzene,TERT_BUTYLBENZENE,minnesota
+tetrachloroethene,TETRACHLOROETHENE,minnesota
+carbon tetrachloride,TETRACHLOROMETHANE,minnesota
+ccl4,TETRACHLOROMETHANE,pyscf
+tetrahydrofuran,TETRAHYDROFURAN,minnesota
+thf,TETRAHYDROFURAN,pyscf
+tetralin,TETRAHYDRONAPHTHALENE_1_2_3_4,minnesota
+thiophene,THIOPHENE,minnesota
+phme,TOLUENE,common
+toluene,TOLUENE,minnesota
+trans-decalin,TRANS_DECAHYDRONAPHTHALENE,minnesota
+bromoform,TRIBROMOMETHANE,minnesota
+tributylphosphate,TRIBUTYL_PHOSPHATE,minnesota
+"1,1,1-trichloroethane",TRICHLOROETHANE_1_1_1,minnesota
+"1,1,2-trichloroethane",TRICHLOROETHANE_1_1_2,minnesota
+trichloroethene,TRICHLOROETHENE,minnesota
+chcl3,TRICHLOROMETHANE,pyscf
+chloroform,TRICHLOROMETHANE,minnesota
+triethylamine,TRIETHYLAMINE,minnesota
+"2,2,2-trifluoroethanol",TRIFLUOROETHANOL_2_2_2,minnesota
+tfe,TRIFLUOROETHANOL_2_2_2,common
+"1,2,4-trimethylbenzene",TRIMETHYLBENZENE_1_2_4,minnesota
+mesitylene,TRIMETHYLBENZENE_1_3_5,minnesota
+"2,2,4-trimethylpentane",TRIMETHYLPENTANE_2_2_4,minnesota
+n-undecane,UNDECANE,minnesota
+h2o,WATER,pyscf
+water,WATER,minnesota
+xylene,XYLENE,common
+xylene (mixture),XYLENE,minnesota
+xylenes,XYLENE,common
+"Z-1,2-dichloroethene",Z_1_2_DICHLOROETHENE,minnesota

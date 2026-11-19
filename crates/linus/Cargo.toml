@@ -1,0 +1,53 @@
+[package]
+name = "linus"
+description = "linus: Hartree-Fock and Kohn-Sham DFT energies, gradients and Hessians"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-base = { path = "../linus-base" }
+linus-scf = { path = "../linus-scf" }
+linus-jk = { path = "../linus-jk" }
+linus-dft = { path = "../linus-dft" }
+linus-solvent = { path = "../linus-solvent" }
+linus-vib = { path = "../linus-vib" }
+linus-num = { path = "../linus-num" }
+linus-ints = { path = "../linus-ints" }
+linus-grid = { path = "../linus-grid" }
+linus-xc = { path = "../linus-xc" }
+# LGPL-3.0 crate; builds with this feature carry LGPL obligations for that part
+linus-disp = { path = "../linus-disp", optional = true }
+# the GPU engines (feature gpu); nothing CUDA is needed at build time
+linus-gpu = { path = "../linus-gpu", optional = true }
+faer.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+# the tests compare against linus-ints' reference integrals
+linus-ints = { path = "../linus-ints", features = ["reference"] }
+# the whole-calculation tests of linus-jk compare against its dense density-fitting references
+linus-jk = { path = "../linus-jk", features = ["reference"] }
+
+[features]
+default = ["dispersion"]
+dispersion = ["dep:linus-disp"]
+# The integral engine's study switches (LINUS_KERNEL, LINUS_NO_GEN, LINUS_ECP_LEVEL).
+dev-switches = ["linus-ints/dev-switches"]
+# The GPU backend (backend "gpu"/"auto"; docs/gpu.md): linus-gpu's engines behind the J/K, XC
+# and response traits. Off by default; the CUDA 13 driver and libraries are loaded at run time.
+gpu = ["dep:linus-gpu", "linus-gpu/gpu"]
+
+[[example]]
+name = "scf_loop_bench"
+required-features = ["gpu"]

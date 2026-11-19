@@ -1,0 +1,1 @@
+{"case": "water.b3lyp.6-31gs-cart.exact", "run": "pyscf@pyscf:5", "program": "pyscf", "program_version": "2.15.0", "hessian_hash": "ebb92b2b589ffe5d", "masses": [15.99491461957, 1.00782503223, 1.00782503223], "analysis": "pyscf harmonic analysis (bench/vib/refs.py), translations and rotations projected", "frequencies": [1683.649694708264, 3871.1398047390144, 3997.800930286786]}

@@ -1,0 +1,13 @@
+[
+ {"name": "mepd.water.wb97x.tz.e", "xyz": "water.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "energy", "memory_gib": "plan", "opts": {"jk": {"kind": "df", "aux": "def2-universal-jkfit"}, "grid": "linus:2"}},
+ {"name": "mepd.caf.wb97x.tz.e", "xyz": "caffeine.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "energy", "memory_gib": "plan", "opts": {"jk": {"kind": "df", "aux": "def2-universal-jkfit"}, "grid": "linus:2"}},
+ {"name": "mepd.lid.wb97x.tz.e", "xyz": "lidocaine.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "energy", "memory_gib": "plan", "opts": {"jk": {"kind": "df", "aux": "def2-universal-jkfit"}, "grid": "linus:2"}},
+ {"name": "mepd.caf.wb97x.tz.g", "xyz": "caffeine.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "gradient", "memory_gib": "plan", "opts": {"jk": {"kind": "df", "aux": "def2-universal-jkfit"}, "grid": "linus:2"}},
+ {"name": "mepd.pbz3.wb97x.tz.ug", "xyz": "p_benzyne.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "gradient", "mult": 3, "memory_gib": "plan"},
+ {"name": "mepd.pbz3.wb97x.tz.uh", "xyz": "p_benzyne.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "hessian", "mult": 3, "memory_gib": "plan"},
+ {"name": "pack.caf.wb97x.tz.e.t8", "xyz": "caffeine.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "energy", "threads": 8, "memory_gib": "plan"},
+ {"name": "pack.caf.b3lyp.svp.g.t8", "xyz": "caffeine.xyz", "method": "b3lyp", "basis": "def2-svp", "calctype": "gradient", "threads": 8, "memory_gib": "plan"},
+ {"name": "pack.caf.b3lyp.svp.h.t8", "xyz": "caffeine.xyz", "method": "b3lyp", "basis": "def2-svp", "calctype": "hessian", "threads": 8, "memory_gib": "plan"},
+ {"name": "pack.caf.hf.svp.exact.g.t8", "xyz": "caffeine.xyz", "method": "hf", "basis": "def2-svp", "calctype": "gradient", "threads": 8, "memory_gib": "plan", "opts": {"jk": "exact"}},
+ {"name": "pack.ts61.wb97x.svp.g.t4", "xyz": "ts61.xyz", "method": "wb97x-d3bj", "basis": "def2-svp", "calctype": "gradient", "threads": 4, "memory_gib": "plan"}
+]

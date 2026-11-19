@@ -1,0 +1,3 @@
+# rustfmt with its defaults (max_width 100). Generated code is #[rustfmt::skip] at its module
+# declarations; see ARCHITECTURE.md, "Generated code".
+max_width = 100

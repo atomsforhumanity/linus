@@ -1,0 +1,64 @@
+# Build and install (into your own venv):
+#   cd crates/linus-py && maturin build --release --strip && pip install ../../target/wheels/afh_linus-*.whl
+# The distribution is afh-linus (`pip install afh-linus`; the PyPI name linus belongs to another
+# project); the import package is `linus`.
+#   pytest tests                       # needs the extras "test"; tests/test_qc.py also uses target/release/linus
+# Release wheels: maturin build --profile dist (stripped, no debug info), in a manylinux_2_28
+# container; the GPU wheel (distribution afh-linus-cuda13, --features gpu) after
+# tools/cuda13_distribution.py renames it in the build's copy of the tree (CONTRIBUTING.md, "Releasing").
+# The wheel ships the basis sets of data/basis: python/linus/basis holds one symlink per file
+# (maturin follows file symlinks, not directory ones). Add a symlink when data/basis gains a set.
+# The licence files are symlinks to the repository's (LICENSE, THIRD_PARTY_NOTICES.md,
+# LICENSES/, crates/linus-disp/NOTICE.md); the wheel carries them in .dist-info/licenses/.
+
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "afh-linus"
+description = "Hartree-Fock and Kohn-Sham DFT energies, analytic gradients, Hessians and frequencies, in-process"
+readme = "README.md"
+requires-python = ">=3.11"
+# the default build links linus-disp (LGPL-3.0-or-later) and libxc (MPL-2.0) and ships
+# BSD-3-Clause basis set data; THIRD_PARTY_NOTICES.md has the parts and their licenses
+license = "MIT AND LGPL-3.0-or-later AND MPL-2.0 AND Apache-2.0 AND BSD-3-Clause AND BSD-2-Clause AND ECL-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "LICENSES/*", "linus-disp-NOTICE.md"]
+authors = [{ name = "Atoms for Humanity" }]
+keywords = ["quantum chemistry", "DFT", "Hartree-Fock", "Hessian", "qcdata"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+# qcdata: the inputs, frames, outputs and models linus reads and returns (ProgramInput, Frame,
+# Request, ProgramError, Orbitals, VibrationalAnalysis); the version with the session data
+dependencies = ["numpy>=1.22", "qcdata>=0.24.0", "pydantic>=2"]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/atomsforhumanity/linus"
+Documentation = "https://github.com/atomsforhumanity/linus/blob/main/docs/usage.md"
+Changelog = "https://github.com/atomsforhumanity/linus/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+# linus.convert.to_pyscf / from_pyscf and the tests against PySCF
+pyscf = ["pyscf>=2.4"]
+test = ["pytest", "qccompute>=0.23.0", "qcinf>=0.6.0", "pyscf>=2.4"]
+
+# linus as a native program of qccompute (linus.qc.program: plans, one-off calculations, sessions)
+[project.entry-points."qccompute.programs"]
+linus = "linus.qc:program"
+
+[tool.maturin]
+python-source = "python"
+module-name = "linus._linus"

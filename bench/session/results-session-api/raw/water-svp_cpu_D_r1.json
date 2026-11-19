@@ -1,0 +1,652 @@
+{
+ "system": "water-svp",
+ "platform": "cpu",
+ "mode": "D",
+ "nsteps": 5,
+ "job_wall": 0.2765519618988037,
+ "started": 1794559958.7418103,
+ "import_linus_s": 0.07201822899514809,
+ "linus_file": "__init__.py",
+ "linus_version": "0.1.0",
+ "steps": [
+  {
+   "step": 0,
+   "wall": 0.05338979902444407,
+   "prepare": 0.004573261016048491,
+   "call": 0.04881626699352637,
+   "drop": 2.7101486921310425e-07,
+   "python": 0.0005624239935263717,
+   "rusage": {
+    "utime": 0.179946,
+    "stime": 0.022589,
+    "minflt": 4503,
+    "majflt": 0
+   },
+   "energy": -76.34876986694628,
+   "gradient": [
+    [
+     -0.00337022449343668,
+     0.06706398882162289,
+     0.046546344870984635
+    ],
+    [
+     0.0009208254510026694,
+     -0.015475832448450855,
+     0.0021392045771457813
+    ],
+    [
+     0.002449399042434214,
+     -0.051588156373172156,
+     -0.048685549448126336
+    ]
+   ],
+   "iterations": 10,
+   "fock_builds": 10,
+   "timings": {
+    "diag": 0.000498548,
+    "diis": 0.000422632,
+    "dipole": 4.2895e-05,
+    "ecp": 5e-08,
+    "energy": 0.042909923,
+    "grad_1e": 7.622400000000001e-05,
+    "grad_2e": 0.001799704,
+    "grad_df_2c": 0.000653903,
+    "grad_df_3c": 0.000356756,
+    "grad_df_3c_build_g": 3.5343e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000258339,
+    "grad_df_3c_pairs": 2.5298e-05,
+    "grad_df_fit": 0.000727153,
+    "grad_df_mo": 0.000694344,
+    "grad_df_mo_half": 1.301e-05,
+    "grad_df_mo_ints": 0.000222685,
+    "grad_df_mo_metric": 0.000358489,
+    "grad_df_mo_pairs": 8.0652e-05,
+    "grad_ecp": 4.4e-07,
+    "grad_pairs": 0.000109385,
+    "grad_xc": 0.003087319,
+    "grid": 0.001321405,
+    "guess": 0.003001029,
+    "jk": 0.000597917,
+    "jk_setup": 0.018326676,
+    "one_electron": 0.00037218,
+    "orthogonalizer": 0.000105749,
+    "pairs": 0.00101167,
+    "scf_total": 0.018654189,
+    "total": 0.048253843,
+    "xc": 0.016883838
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.31907836009787316,
+    "products": 2,
+    "skipped": "gap_above_threshold",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": null,
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.966510772705078,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.31907836009787316,
+   "warm_start": false,
+   "guess": {
+    "distance": null,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": false,
+    "reason": "no_history",
+    "source": "sad"
+   },
+   "peak_memory_gib": 0.0825653076171875
+  },
+  {
+   "step": 1,
+   "wall": 0.02844741300214082,
+   "prepare": 3.500026650726795e-07,
+   "call": 0.02844674198422581,
+   "drop": 3.2101524993777275e-07,
+   "python": 0.0006153139842258112,
+   "rusage": {
+    "utime": 0.163628,
+    "stime": 0.001368,
+    "minflt": 1311,
+    "majflt": 0
+   },
+   "energy": -76.35779360809724,
+   "gradient": [
+    [
+     0.0007133448100492446,
+     -0.010213353412250964,
+     0.011281938267045266
+    ],
+    [
+     -0.00015224858582009795,
+     0.0007481659364044768,
+     -0.009992482240917366
+    ],
+    [
+     -0.000561096224230024,
+     0.00946518747584102,
+     -0.0012894560261279553
+    ]
+   ],
+   "iterations": 9,
+   "fock_builds": 9,
+   "timings": {
+    "diag": 0.000416086,
+    "diis": 0.000343926,
+    "dipole": 4.1232e-05,
+    "ecp": 7e-08,
+    "energy": 0.021449809,
+    "grad_1e": 3.4831e-05,
+    "grad_2e": 0.00184383,
+    "grad_df_2c": 0.000691909,
+    "grad_df_3c": 0.000391298,
+    "grad_df_3c_build_g": 6.1993e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.00026573,
+    "grad_df_3c_pairs": 2.5489e-05,
+    "grad_df_fit": 0.000755646,
+    "grad_df_mo": 0.000678189,
+    "grad_df_mo_half": 1.9139e-05,
+    "grad_df_mo_ints": 0.000227822,
+    "grad_df_mo_metric": 0.000349815,
+    "grad_df_mo_pairs": 6.7131e-05,
+    "grad_ecp": 2.71e-07,
+    "grad_pairs": 7.6134e-05,
+    "grad_xc": 0.004165118,
+    "grid": 0.00099197,
+    "jk": 0.00047729699999999995,
+    "jk_setup": 0.001047925,
+    "one_electron": 5.8628e-05,
+    "orthogonalizer": 4.3375e-05,
+    "pairs": 3.7075e-05,
+    "scf_total": 0.01646562,
+    "total": 0.027831428,
+    "xc": 0.015063652999999998
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.3358330252880108,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3358330252880108,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.955123901367188,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3358330252880108,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.1134774005231733,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.08608627319335938
+  },
+  {
+   "step": 2,
+   "wall": 0.024431617988739163,
+   "prepare": 4.899920895695686e-07,
+   "call": 0.02443087799474597,
+   "drop": 2.500019036233425e-07,
+   "python": 0.00046434799474597,
+   "rusage": {
+    "utime": 0.14127,
+    "stime": 0.005411,
+    "minflt": 198,
+    "majflt": 0
+   },
+   "energy": -76.35807670943326,
+   "gradient": [
+    [
+     -0.00016263822699161701,
+     0.0028586143671707753,
+     0.0007735118595948443
+    ],
+    [
+     0.0004888466087644844,
+     -0.008109509391298009,
+     0.0013948371299262186
+    ],
+    [
+     -0.000326208381776303,
+     0.005250895024122515,
+     -0.0021683489895222285
+    ]
+   ],
+   "iterations": 8,
+   "fock_builds": 8,
+   "timings": {
+    "diag": 0.00037642599999999996,
+    "diis": 0.000296785,
+    "dipole": 4.1282e-05,
+    "ecp": 4e-08,
+    "energy": 0.019156022,
+    "grad_1e": 3.6325e-05,
+    "grad_2e": 0.001366574,
+    "grad_df_2c": 0.000235845,
+    "grad_df_3c": 0.000375674,
+    "grad_df_3c_build_g": 3.7686e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000266711,
+    "grad_df_3c_pairs": 2.5218e-05,
+    "grad_df_fit": 0.000293892,
+    "grad_df_mo": 0.000676346,
+    "grad_df_mo_half": 1.1418e-05,
+    "grad_df_mo_ints": 0.000219309,
+    "grad_df_mo_metric": 0.000350116,
+    "grad_df_mo_pairs": 8.0351e-05,
+    "grad_ecp": 1.61e-07,
+    "grad_pairs": 8.673e-05,
+    "grad_xc": 0.003051094,
+    "grid": 0.000935115,
+    "jk": 0.00044306699999999995,
+    "jk_setup": 0.001030138,
+    "one_electron": 4.631e-05,
+    "orthogonalizer": 4.651e-05,
+    "pairs": 4.0391e-05,
+    "scf_total": 0.014716352,
+    "total": 0.02396653,
+    "xc": 0.013446503
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.3376130524685754,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3376130524685754,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.95059585571289,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3376130524685754,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.019955222286070776,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.08682632446289062
+  },
+  {
+   "step": 3,
+   "wall": 0.023721201985608786,
+   "prepare": 3.309687599539757e-07,
+   "call": 0.023720631026662886,
+   "drop": 2.399901859462261e-07,
+   "python": 0.0005248890266628878,
+   "rusage": {
+    "utime": 0.128427,
+    "stime": 0.005368,
+    "minflt": 65,
+    "majflt": 0
+   },
+   "energy": -76.35821510716644,
+   "gradient": [
+    [
+     -0.0001514318561729594,
+     0.002630494611818357,
+     0.0006184851362174282
+    ],
+    [
+     0.00034083633978620326,
+     -0.005602188805429731,
+     0.0011442668218810126
+    ],
+    [
+     -0.000189404483606527,
+     0.002971694193619645,
+     -0.0017627519581008277
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.00030461700000000003,
+    "diis": 0.00023503299999999997,
+    "dipole": 4.2965e-05,
+    "ecp": 5e-08,
+    "energy": 0.017735208,
+    "grad_1e": 3.7226e-05,
+    "grad_2e": 0.001359983,
+    "grad_df_2c": 0.000238728,
+    "grad_df_3c": 0.000364788,
+    "grad_df_3c_build_g": 1.5664e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000257737,
+    "grad_df_3c_pairs": 2.7111e-05,
+    "grad_df_fit": 0.000295444,
+    "grad_df_mo": 0.000680572,
+    "grad_df_mo_half": 1.2519e-05,
+    "grad_df_mo_ints": 0.000227041,
+    "grad_df_mo_metric": 0.000357617,
+    "grad_df_mo_pairs": 6.6299e-05,
+    "grad_ecp": 2.51e-07,
+    "grad_pairs": 8.7101e-05,
+    "grad_xc": 0.003712538,
+    "grid": 0.000988115,
+    "jk": 0.000396474,
+    "jk_setup": 0.001026822,
+    "one_electron": 5.8969e-05,
+    "orthogonalizer": 4.6099e-05,
+    "pairs": 3.6995e-05,
+    "scf_total": 0.012832591,
+    "total": 0.023195742,
+    "xc": 0.011757827000000002
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.3372198645674594,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.3372198645674594,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.949882507324219,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.3372198645674594,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.011943338398610797,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.08707427978515625
+  },
+  {
+   "step": 4,
+   "wall": 0.022739536012522876,
+   "prepare": 2.7997884899377823e-07,
+   "call": 0.022739016043487936,
+   "drop": 2.399901859462261e-07,
+   "python": 0.0004919490434879374,
+   "rusage": {
+    "utime": 0.126719,
+    "stime": 0.006016,
+    "minflt": 128,
+    "majflt": 0
+   },
+   "energy": -76.35832532676831,
+   "gradient": [
+    [
+     1.8957397335230258e-05,
+     -0.0004968858221163913,
+     -0.0003419672542334107
+    ],
+    [
+     1.627439970390554e-06,
+     3.002615617692106e-05,
+     6.0266680917409055e-06
+    ],
+    [
+     -2.058483730183608e-05,
+     0.00046685966593673633,
+     0.00033594058614899724
+    ]
+   ],
+   "iterations": 7,
+   "fock_builds": 7,
+   "timings": {
+    "diag": 0.000307634,
+    "diis": 0.000246301,
+    "dipole": 4.1482e-05,
+    "ecp": 7e-08,
+    "energy": 0.017423349,
+    "grad_1e": 3.8808e-05,
+    "grad_2e": 0.001380243,
+    "grad_df_2c": 0.000242094,
+    "grad_df_3c": 0.000389726,
+    "grad_df_3c_build_g": 2.66e-05,
+    "grad_df_3c_erf": 0.0,
+    "grad_df_3c_kernel": 0.000265719,
+    "grad_df_3c_pairs": 2.8913e-05,
+    "grad_df_fit": 0.000300411,
+    "grad_df_mo": 0.000670116,
+    "grad_df_mo_half": 1.1448e-05,
+    "grad_df_mo_ints": 0.000213911,
+    "grad_df_mo_metric": 0.000357487,
+    "grad_df_mo_pairs": 7.0286e-05,
+    "grad_ecp": 1.6e-07,
+    "grad_pairs": 9.2218e-05,
+    "grad_xc": 0.0030543,
+    "grid": 0.000967504,
+    "jk": 0.000390408,
+    "jk_setup": 0.000936117,
+    "one_electron": 6.2614e-05,
+    "orthogonalizer": 4.4246e-05,
+    "pairs": 5.0226e-05,
+    "scf_total": 0.012941746,
+    "total": 0.022247067,
+    "xc": 0.011844676999999998
+   },
+   "resources": {
+    "nbf": 24,
+    "nmo": 24,
+    "df_bytes_per_elem": 8.0,
+    "df_one_sided": 0.0,
+    "df_store_gib": 0.0002710968255996704,
+    "grad_df_3c_blocks": 1.0
+   },
+   "closed_shell_probe": {
+    "gap": 0.33654697193989547,
+    "products": 0,
+    "skipped": "later_geometry",
+    "threshold": 0.15
+   },
+   "stability_probe": 0,
+   "probe_trigger": {
+    "gap": 0.33654697193989547,
+    "last_gap": 0.31907836009787316
+   },
+   "df": {
+    "budget_gib": 12.0,
+    "long_range": "none",
+    "naux": 113,
+    "precision": "f64",
+    "storage": "B",
+    "store_gib": 0.0002710968255996704
+   },
+   "backend": {
+    "device": null,
+    "placement": {
+     "jk": "cpu",
+     "xc": "cpu",
+     "gradient_jk": "cpu",
+     "gradient_xc": "cpu",
+     "scf_loop": "host"
+    },
+    "fallbacks": [],
+    "precision": "double"
+   },
+   "memory": {
+    "available_gib": 15.949638366699219,
+    "df_tensor_budget_gib": 12.0,
+    "df_tensor_budget_source": "cgroup limit",
+    "hbar_gib": null,
+    "limit_gib": 16.0,
+    "reservations": [],
+    "response_slot_gib": 1.0,
+    "source": "cgroup limit",
+    "xc_kernel_gib": 1.0
+   },
+   "s2": 0.0,
+   "homo_lumo_gap": 0.33654697193989547,
+   "warm_start": true,
+   "guess": {
+    "distance": 0.02386447604216338,
+    "from_lineage": null,
+    "lineage": null,
+    "orthonormalized": true,
+    "source": "lineage"
+   },
+   "peak_memory_gib": 0.08756256103515625
+  }
+ ]
+}

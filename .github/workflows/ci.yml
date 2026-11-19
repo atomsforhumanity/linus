@@ -1,0 +1,110 @@
+# Per-push and per-pull-request checks, three jobs at once on GitHub's standard runners: lints,
+# the Rust tests, and pytest against the installed wheel (with the CLI its command-line tests
+# use). CPU only: the GPU backend's tests need an NVIDIA GPU, and tests/python,
+# reference/validate.py and the benchmarks need the reference programs (CONTRIBUTING.md). The
+# slow tests are skipped. The jobs build against the checkout and leave LINUS_DIST unset.
+# Actions are pinned to full commit SHAs (the tag in the comment).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # faster CI builds of the release profile (the same numbers: no thin LTO, no debug info)
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  # libxc 7.0.0 is built once per build.rs version and cached (crates/linus-xc/build.rs)
+  LINUS_XC_CACHE_DIR: ${{ github.workspace }}/.libxc-cache
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # pinned, so that a new stable release's lints cannot break the build; raise it on purpose
+      # (and fix or allow what its clippy reports)
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+        with:
+          toolchain: "1.99"
+          components: rustfmt, clippy
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .libxc-cache
+          key: libxc-${{ runner.os }}-${{ hashFiles('crates/linus-xc/build.rs') }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: rustfmt
+        run: cargo fmt --all --check
+      # clippy.toml: faer's products, solves and factorizations only through linus_base::linalg
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
+      # the crate graph against ARCHITECTURE.md's (tools/check_layering.py)
+      - name: layering
+        run: python3 tools/check_layering.py
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+        with:
+          toolchain: stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .libxc-cache
+          key: libxc-${{ runner.os }}-${{ hashFiles('crates/linus-xc/build.rs') }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # every crate, linus-gpu with its gpu feature off (no device here; its kernel tests run
+      # with --features gpu on a machine with a GPU, CONTRIBUTING.md)
+      - name: cargo test (without the slow tests)
+        run: >-
+          cargo test --release --workspace --exclude linus-py --
+          --skip exhaustive_classes --skip saddle_point_is_left_for_the_minimum
+
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+        with:
+          toolchain: stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .libxc-cache
+          key: libxc-${{ runner.os }}-${{ hashFiles('crates/linus-xc/build.rs') }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: CLI (pytest's command-line tests use target/release/linus)
+        run: cargo build --release -p linus-cli
+      - name: wheel
+        run: |
+          python -m pip install "maturin>=1.9,<2"
+          maturin build --release -m crates/linus-py/Cargo.toml --out dist
+      - name: pytest against the installed wheel
+        # PySCF pinned: the comparisons use abs=1e-9. The slow tests (PySCF's own VV10 runs) are
+        # skipped; linus meets their stored results (crates/linus-py/tests/data/pyscf_vv10.json)
+        run: |
+          python -m venv .venv-ci
+          .venv-ci/bin/pip install dist/*.whl pytest jsonschema qcdata==0.24.0 qccompute==0.23.0 qcinf==0.6.0 pyscf==2.15.0
+          .venv-ci/bin/pytest crates/linus-py/tests -q -m "not slow"

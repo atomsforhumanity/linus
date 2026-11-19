@@ -1,0 +1,1 @@
+{"case": "water.b97m-v.def2-svp.exact", "run": "pyscf@pyscf:5", "program": "pyscf", "program_version": "2.15.0", "hessian_hash": "e10c7d75ca5c9c0c", "masses": [15.99491461957, 1.00782503223, 1.00782503223], "analysis": "pyscf harmonic analysis (bench/vib/refs.py), translations and rotations projected", "frequencies": [1682.700136265163, 3896.5970618658985, 4013.0890126553977]}

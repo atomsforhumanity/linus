@@ -1,0 +1,22 @@
+/target
+**/*.rs.bk
+/literature/
+/reference/src/
+/reference/out/
+/.refenv*
+/.venv*/
+__pycache__/
+# Psi4 writes timer.dat (with the host name) into its working directory
+timer.dat
+*.so
+*.pdf
+/bench/scratch/
+/.claude/
+# Python packaging and tool caches
+dist/
+*.whl
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.DS_Store

@@ -1,0 +1,8 @@
+# Generated files (see ARCHITECTURE.md, "Generated code"): collapsed in diffs.
+crates/linus-ints/src/generated/*.rs linguist-generated
+crates/linus-gpu/src/kernels/eri3c_gen/* linguist-generated
+crates/linus-gpu/src/kernels/pcm_gen/* linguist-generated
+crates/linus-ints/src/core/rys_tables.rs linguist-generated
+crates/linus-ints/src/core/rys_ref.txt linguist-generated
+crates/linus-grid/src/*_data.rs linguist-generated
+crates/linus-disp/src/data/*.rs linguist-generated

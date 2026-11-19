@@ -1,0 +1,22 @@
+{
+  "about": "ORCA 6.0.0's default C-PCM ('GAUSSIAN VDW' surface) as linus's orca PCM preset reproduces it: values read off ORCA's output and .cpcm files (bench/results/2026-11-07-pcm/orca/NOTES.md; docs/solvation.md); included with permission of FAccTs GmbH.",
+  "lebedev_xi": {
+    "about": "ORCA's sphere grids (points per sphere) and their Gaussian exponent constants xi_N (the published values to three decimals, except 590 and 770)",
+    "by_points": [
+      [14, 4.865],
+      [26, 4.855],
+      [50, 4.893],
+      [110, 4.901],
+      [194, 4.903],
+      [302, 4.905],
+      [434, 4.906],
+      [590, 4.905],
+      [770, 4.899],
+      [974, 4.907],
+      [1202, 4.907]
+    ]
+  },
+  "points_per_angstrom2": 5.0,
+  "cut_swf": 1e-7,
+  "fallback_radius_angstrom": 2.0
+}

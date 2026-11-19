@@ -1,0 +1,101 @@
+
+// The potential slots: per slot (sd[10 y]: batch, address of its t (ns components, stride
+// np), accumulator base, mode, a, component, spin, offset in ints of its point list (-1: all
+// the batch's points), points) and 32 x 32 tile of N = phi^T Y[t] over the slot's points (Y
+// formed on the fly; in @T@, the slot's sum over its points in @T@ too), minus (mode 0: rows on local atom a) the owners' G_s^i, or plus (mode
+// 1, a = owner index >= 0) G_s^j[a]; every element into the packed lower triangle (column-
+// major) at its global (row, column), the diagonal doubled: lower(N + N^T). With @MG@ (meta-
+// GGAs) N also takes the tau term sum_k (d_k phi)^T 1/4 t_tau d_k phi: three more rows of the
+// reduction per point, after the slot's points (k = 0..2 in turn).
+extern "C" __global__ void __launch_bounds__(128) @NAME@(int nc, int nsp, int gga,
+    long long nbf, const long long *__restrict__ hb, const long long *__restrict__ sd,
+    const int *__restrict__ ints, const int *__restrict__ gf, const @T@ *__restrict__ phic,
+    const double *__restrict__ gb, unsigned long long *acc, long long nacc)
+{
+    __shared__ @T@ As[16][33];
+    __shared__ @T@ Bs[16][33];
+    const long long *q = sd + 10LL * blockIdx.y;
+    const long long *d = hb + XH_HB * q[0];
+    const int np = (int)d[H_NP], nf = (int)d[H_NF];
+    const int nt = (nf + 31) / 32;
+    if ((int)blockIdx.x >= nt * nt) return;
+    const int r0 = (blockIdx.x % nt) * 32, c0 = (blockIdx.x / nt) * 32;
+    const long long po = d[H_PHI];
+    const double *t = (const double *)q[1];
+    const int tid = threadIdx.x, tx = tid % 16, ty = tid / 16;
+    @T@ ca[2][4];
+    for (int a = 0; a < 2; ++a)
+        for (int b = 0; b < 4; ++b) ca[a][b] = 0.0;
+    const long long pl = q[7];
+    const int kn = (int)q[8];
+    const int kt = @MG@ ? 4 * kn : kn;
+    const int *pts = ints + (pl < 0 ? 0 : pl);
+    for (int k0 = 0; k0 < kt; k0 += 16) {
+        for (int it = 0; it < 4; ++it) {
+            const int e = tid + 128 * it;
+            const int kk = e % 16, rr = e / 16;
+            const int k = k0 + kk;
+            const int mu = r0 + rr, nv = c0 + rr;
+            if (@MG@ && k >= kn) {
+                // the tau rows: d_c phi_mu and 1/4 t_tau d_c phi_nu at the point
+                const int kc = k < kt ? k - kn : 0;
+                const int c = kc / kn, kg = kc - c * kn;
+                const int g = k < kt ? (pl < 0 ? kg : pts[kg]) : 0;
+                const long long pc = (long long)XH_D1[c] * np + g;
+                As[kk][rr] = (k < kt && mu < nf) ? phic[po + (long long)mu * nc * np + pc] : (@T@)0;
+                @T@ y = 0;
+                if (k < kt && nv < nf)
+                    y = (@T@)0.25 * (@T@)t[4 * np + g] * phic[po + (long long)nv * nc * np + pc];
+                Bs[kk][rr] = y;
+                continue;
+            }
+            const int g = k < kn ? (pl < 0 ? k : pts[k]) : 0;
+            As[kk][rr] = (k < kn && mu < nf) ? phic[po + (long long)mu * nc * np + g] : (@T@)0;
+            @T@ y = 0;
+            if (k < kn && nv < nf) {
+                const @T@ *ph = phic + po + (long long)nv * nc * np + g;
+                y = (@T@)0.5 * (@T@)t[g] * ph[0];
+                if (gga)
+                    y += (@T@)t[np + g] * ph[XH_D1[0] * np] + (@T@)t[2 * np + g] * ph[XH_D1[1] * np]
+                        + (@T@)t[3 * np + g] * ph[XH_D1[2] * np];
+            }
+            Bs[kk][rr] = y;
+        }
+        __syncthreads();
+        for (int kk = 0; kk < 16; ++kk) {
+            const @T@ a0 = As[kk][2 * tx], a1 = As[kk][2 * tx + 1];
+            for (int b = 0; b < 4; ++b) {
+                const @T@ bv = Bs[kk][4 * ty + b];
+                ca[0][b] += a0 * bv;
+                ca[1][b] += a1 * bv;
+            }
+        }
+        __syncthreads();
+    }
+    const int mode = (int)q[3], aa = (int)q[4], ci = (int)q[5], s = (int)q[6];
+    const int no = (int)d[H_NO];
+    const int *la = ints + d[H_LA];
+    const long long fl = d[H_FL], go = d[H_G], nf2 = (long long)nf * nf;
+    for (int a = 0; a < 2; ++a) {
+        const int mu = r0 + 2 * tx + a;
+        if (mu >= nf) continue;
+        for (int b = 0; b < 4; ++b) {
+            const int nv = c0 + 4 * ty + b;
+            if (nv >= nf) continue;
+            double v = (double)ca[a][b];
+            const long long el = (long long)nv * nf + mu;
+            if (mode == 0) {
+                if (la[mu] == aa)
+                    for (int o = 0; o < no; ++o)
+                        v -= gb[go + ((long long)(o * nsp + s) * 3 + ci) * nf2 + el];
+            } else if (aa >= 0) {
+                v += gb[go + ((long long)(aa * nsp + s) * 3 + ci) * nf2 + el];
+            }
+            const long long gm = gf[fl + mu], gn = gf[fl + nv];
+            if (mu == nv) v *= 2.0;
+            const long long hi = gm > gn ? gm : gn, lo = gm > gn ? gn : gm;
+            det_add(acc, nacc, q[2] + lo * (2 * nbf - lo + 1) / 2 + (hi - lo), v);
+        }
+    }
+}
+

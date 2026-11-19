@@ -1,0 +1,75 @@
+{
+ "host": {
+  "cpu": "AMD Ryzen Threadripper PRO 9985WX 64-Cores",
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 610.57.04",
+  "kernel": "7.0.0-42-generic",
+  "python": "3.12.16"
+ },
+ "commit": "a6a9de8c8a34bc924bf0f810e24222b989038e98",
+ "linus_bin": "target/release/linus",
+ "threads": 8,
+ "cpus": "CCD0 physical cores (slice bench)",
+ "gpu_lock": "exclusive (turnstile + lock) per GPU job",
+ "systems": {
+  "water-svp": {
+   "xyz": "tests/molecules/water.xyz",
+   "charge": 0,
+   "mult": 1,
+   "basis": "def2-svp",
+   "platforms": [
+    "cpu",
+    "gpu"
+   ],
+   "mem": "16G",
+   "seed": 11
+  },
+  "la18-svp": {
+   "xyz": "bench/molecules/la18.xyz",
+   "charge": 0,
+   "mult": 1,
+   "basis": "def2-svp",
+   "platforms": [
+    "cpu",
+    "gpu"
+   ],
+   "mem": "24G",
+   "seed": 12
+  },
+  "u1an39-svp": {
+   "xyz": "bench/molecules/u1an39.xyz",
+   "charge": -1,
+   "mult": 1,
+   "basis": "def2-svp",
+   "platforms": [
+    "cpu",
+    "gpu"
+   ],
+   "mem": "32G",
+   "seed": 13
+  },
+  "u1an39-tzvp": {
+   "xyz": "bench/molecules/u1an39.xyz",
+   "charge": -1,
+   "mult": 1,
+   "basis": "def2-tzvp",
+   "platforms": [
+    "gpu"
+   ],
+   "mem": "48G",
+   "seed": 14
+  },
+  "la18cat-svp": {
+   "xyz": "bench/molecules/la18.xyz",
+   "charge": 1,
+   "mult": 2,
+   "basis": "def2-svp",
+   "platforms": [
+    "cpu",
+    "gpu"
+   ],
+   "mem": "24G",
+   "seed": 15
+  }
+ },
+ "method": "b3lyp"
+}

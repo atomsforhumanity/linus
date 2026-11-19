@@ -1,0 +1,95 @@
+[package]
+name = "linus-gpu"
+description = "GPU kernels for linus (in development): device and memory setup, NVRTC compile-and-cache, deterministic fixed-point reductions, density-fitted J/K and XC engines, and a harness that checks GPU results against the CPU code"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish = false
+
+[features]
+# Off by default, so CPU-only builds never need CUDA. Even with it on, nothing CUDA is needed
+# at build time: cudarc loads the driver, NVRTC, cuBLAS and cuSOLVER at run time.
+gpu = ["dep:cudarc", "dep:sha2", "dep:libc"]
+# The test and benchmark kit: the harness (structures, basis sets, grids and comparisons with the
+# CPU code) and the kernel cache's internals. The crate's own tests and examples turn it on (the
+# dev-dependency on itself below); the library linus links never contains it.
+testkit = []
+# The precision studies' variants inside the engines (decision K-b): the XC block paths of the
+# energy, potential and gradient, their density routes, and the emulated and FP32-potential XC
+# products. Production never takes them; the crate's tests of them need it.
+study = []
+
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-num = { path = "../linus-num" }
+linus-ints = { path = "../linus-ints" }
+linus-grid = { path = "../linus-grid" }
+linus-xc = { path = "../linus-xc" }
+thiserror.workspace = true
+# the CPU reference runs of the harness
+rayon.workspace = true
+cudarc = { version = "0.19.10", optional = true, default-features = false, features = ["std", "driver", "nvrtc", "cublas", "cusolver", "cuda-13010", "dynamic-loading"] }
+sha2 = { version = "0.10", optional = true }
+# page-locked host memory: an anonymous mapping registered with the driver (src/cuda/host.rs)
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+# the tests compare against linus-ints' reference integrals
+linus-ints = { path = "../linus-ints", features = ["reference"] }
+# the tests and examples use the test kit
+linus-gpu = { path = ".", features = ["testkit"] }
+
+[[example]]
+name = "spike_bench"
+required-features = ["gpu"]
+
+[[example]]
+name = "gemm_emulation"
+required-features = ["gpu"]
+
+# NVIDIA-only (inline PTX DMMA): an isolated benchmark of a vendor-specific variant
+[[example]]
+name = "dmma_bench"
+required-features = ["gpu"]
+
+# cuSOLVER eigensolvers at the SCF's matrix orders (syevd, Xsyevd, syevj)
+[[example]]
+name = "eigh_bench"
+required-features = ["gpu"]
+
+[[example]]
+name = "eri3c_tune"
+required-features = ["gpu"]
+
+[[example]]
+name = "eri3c_bench"
+required-features = ["gpu"]
+
+# the DF Hessian's two-electron terms (GpuDfHess) of one molecule, phase times
+[[example]]
+name = "hess_bench"
+required-features = ["gpu"]
+
+# the Hessian's explicit XC terms (GpuXcHess) of one molecule, phase times
+[[example]]
+name = "xchess_bench"
+required-features = ["gpu"]
+
+# the Ozaki-scheme FP64 emulation: INT8 shapes, INT8 throughput, emulated DF-K GEMMs
+[[example]]
+name = "ozaki_bench"
+required-features = ["gpu"]
+
+# VV10 on the device (GpuVv10, GpuVv10Grad) of one molecule per pair arithmetic, phase times
+[[example]]
+name = "vv10_bench"
+required-features = ["gpu"]
+
+# vgemm against cuBLAS's grouped and per-product GEMMs on the XC engines' shapes
+[[example]]
+name = "grouped_gemm_bench"
+required-features = ["gpu"]

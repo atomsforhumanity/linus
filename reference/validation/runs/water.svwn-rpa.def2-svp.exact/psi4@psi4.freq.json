@@ -1,0 +1,1 @@
+{"case": "water.svwn-rpa.def2-svp.exact", "run": "psi4@psi4", "program": "psi4", "program_version": "1.11", "hessian_hash": "1dc8e1165c7e638f", "masses": [15.99491461957, 1.00782503223, 1.00782503223], "analysis": "psi4 harmonic analysis (bench/vib/refs.py), translations and rotations projected", "frequencies": [1504.0468657731178, 3931.064996082087, 4044.419522342591]}

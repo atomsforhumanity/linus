@@ -1,0 +1,5011 @@
+{
+ "runs": {
+  "water-svp/cpu/A": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.06797702649782877,
+   "rest_median": 0.06569805425533559,
+   "total": 0.33398507948732004,
+   "totals_per_repeat": [
+    0.3358573869918473,
+    0.33211277198279276
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 50.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.06797702649782877,
+     "rest": 0.06569805425533559
+    },
+    "total": {
+     "first": 0.061467335,
+     "rest": 0.059636775249999996
+    },
+    "outside": {
+     "first": 0.006509691497828773,
+     "rest": 0.006007896246008707
+    },
+    "scf_setup": {
+     "first": 0.031696092,
+     "rest": 0.0319889035
+    },
+    "scf_iter": {
+     "first": 0.0205950225,
+     "rest": 0.0186997175
+    },
+    "gradient": {
+     "first": 0.009176220499999999,
+     "rest": 0.0090574685
+    },
+    "setup": {
+     "first": 0.03294264275,
+     "rest": 0.03331849375
+    },
+    "grad_setup": {
+     "first": 0.00124655075,
+     "rest": 0.0012950734999999998
+    },
+    "ints_pairs": {
+     "first": 0.0010451855,
+     "rest": 0.00116622675
+    },
+    "df": {
+     "first": 0.019234058,
+     "rest": 0.01902231975
+    },
+    "grid_xc": {
+     "first": 0.0022583885,
+     "rest": 0.0023864405
+    },
+    "guess": {
+     "first": 0.0071542335,
+     "rest": 0.00734980525
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0006935575,
+     "rest": 0.00081370725
+    },
+    "t_one_electron": {
+     "first": 0.0002342415,
+     "rest": 0.00024988275000000003
+    },
+    "t_ecp": {
+     "first": 3.0000000000000004e-08,
+     "rest": 3.75e-08
+    },
+    "t_jk_setup": {
+     "first": 0.019234058,
+     "rest": 0.01902231975
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.0022583885,
+     "rest": 0.0023864405
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0071542335,
+     "rest": 0.00734980525
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.0001173565,
+     "rest": 0.00010185325
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 3.75e-08,
+    "grad_pairs": 0.00010185325,
+    "grid": 0.0023864405,
+    "guess": 0.00734980525,
+    "jk_setup": 0.01902231975,
+    "one_electron": 0.00024988275000000003,
+    "pairs": 0.00081370725
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 6309.25,
+   "stime_rest": 0.02901525,
+   "utime_rest": 0.19214525,
+   "closed_shell_probe_ran": 5,
+   "stability_probe_steps": 0
+  },
+  "water-svp/cpu/B": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.06463659198198002,
+   "rest_median": 0.03659875224548159,
+   "total": 0.2120585884549655,
+   "totals_per_repeat": [
+    0.21142847297596745,
+    0.21268870393396355
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 50.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.06463659198198002,
+     "rest": 0.03659875224548159
+    },
+    "total": {
+     "first": 0.0601933915,
+     "rest": 0.03269650675
+    },
+    "outside": {
+     "first": 0.004443200481980016,
+     "rest": 0.003897394992752207
+    },
+    "scf_setup": {
+     "first": 0.0319898975,
+     "rest": 0.004998737749999999
+    },
+    "scf_iter": {
+     "first": 0.019157964,
+     "rest": 0.018570894
+    },
+    "gradient": {
+     "first": 0.00904553,
+     "rest": 0.00924393325
+    },
+    "setup": {
+     "first": 0.03336264475,
+     "rest": 0.006251144124999999
+    },
+    "grad_setup": {
+     "first": 0.00137274725,
+     "rest": 0.001252406375
+    },
+    "ints_pairs": {
+     "first": 0.001142572,
+     "rest": 0.00019890575
+    },
+    "df": {
+     "first": 0.019058354,
+     "rest": 0.0009108485000000001
+    },
+    "grid_xc": {
+     "first": 0.0025360305,
+     "rest": 0.00227750175
+    },
+    "guess": {
+     "first": 0.0072254655,
+     "rest": 1.348575e-05
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0007768975,
+     "rest": 3.60615e-05
+    },
+    "t_one_electron": {
+     "first": 0.00026091250000000003,
+     "rest": 4.955675e-05
+    },
+    "t_ecp": {
+     "first": 3e-08,
+     "rest": 4.2749999999999996e-08
+    },
+    "t_jk_setup": {
+     "first": 0.019058354,
+     "rest": 0.0009108485000000001
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.0025360305,
+     "rest": 0.00227750175
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0072254655,
+     "rest": 1.348575e-05
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.000104732,
+     "rest": 0.00011272900000000001
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4.2749999999999996e-08,
+    "grad_pairs": 0.00011272900000000001,
+    "grid": 0.00227750175,
+    "guess": 1.348575e-05,
+    "jk_setup": 0.0009108485000000001,
+    "one_electron": 4.955675e-05,
+    "pairs": 3.60615e-05
+   },
+   "prepare_rest": 0.003544943501765374,
+   "drop_rest": 0.0001188412425108254,
+   "minflt_rest": 4479.75,
+   "stime_rest": 0.00853275,
+   "utime_rest": 0.18283375000000002,
+   "closed_shell_probe_ran": 5,
+   "stability_probe_steps": 0
+  },
+  "water-svp/cpu/C": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.06469334699795581,
+   "rest_median": 0.032970024993119296,
+   "total": 0.1967622759693768,
+   "totals_per_repeat": [
+    0.19907720599439926,
+    0.1944473459443543
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 50.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.06469334699795581,
+     "rest": 0.032970024993119296
+    },
+    "total": {
+     "first": 0.0603292055,
+     "rest": 0.03276807175
+    },
+    "outside": {
+     "first": 0.004364141497955814,
+     "rest": 0.00020089699259119229
+    },
+    "scf_setup": {
+     "first": 0.0324146965,
+     "rest": 0.00478597275
+    },
+    "scf_iter": {
+     "first": 0.0188819535,
+     "rest": 0.01874212375
+    },
+    "gradient": {
+     "first": 0.009032555500000001,
+     "rest": 0.009313875999999999
+    },
+    "setup": {
+     "first": 0.033728435249999994,
+     "rest": 0.0060413527499999994
+    },
+    "grad_setup": {
+     "first": 0.00131373875,
+     "rest": 0.00125538
+    },
+    "ints_pairs": {
+     "first": 0.0011166175,
+     "rest": 0.00019046625
+    },
+    "df": {
+     "first": 0.019204028,
+     "rest": 0.000870791
+    },
+    "grid_xc": {
+     "first": 0.0024157195,
+     "rest": 0.002307064
+    },
+    "guess": {
+     "first": 0.007500905,
+     "rest": 1.309225e-05
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.00076217,
+     "rest": 4.1505e-05
+    },
+    "t_one_electron": {
+     "first": 0.00024853850000000003,
+     "rest": 5.371325e-05
+    },
+    "t_ecp": {
+     "first": 3e-08,
+     "rest": 4.7499999999999995e-08
+    },
+    "t_jk_setup": {
+     "first": 0.019204028,
+     "rest": 0.000870791
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.0024157195,
+     "rest": 0.002307064
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.007500905,
+     "rest": 1.309225e-05
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.000105879,
+     "rest": 9.607675e-05
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4.7499999999999995e-08,
+    "grad_pairs": 9.607675e-05,
+    "grid": 0.002307064,
+    "guess": 1.309225e-05,
+    "jk_setup": 0.000870791,
+    "one_electron": 5.371325e-05,
+    "pairs": 4.1505e-05
+   },
+   "prepare_rest": 1.037574838846922e-05,
+   "drop_rest": 4.104949766770005e-07,
+   "minflt_rest": 4758.25,
+   "stime_rest": 0.012088999999999999,
+   "utime_rest": 0.17705975000000002,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "water-svp/cpu/D": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.06441483899834566,
+   "rest_median": 0.02803000350104412,
+   "total": 0.17895421250432264,
+   "totals_per_repeat": [
+    0.17803038700367324,
+    0.17987803800497204
+   ],
+   "iterations_median": 8.0,
+   "iterations_median_rest": 7.5,
+   "iterations_total": 41.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.06441483899834566,
+     "rest": 0.02803000350104412
+    },
+    "total": {
+     "first": 0.060050031000000004,
+     "rest": 0.02775591625
+    },
+    "outside": {
+     "first": 0.004364807998345658,
+     "rest": 0.0002740872510441205
+    },
+    "scf_setup": {
+     "first": 0.032116337499999995,
+     "rest": 0.004502119750000001
+    },
+    "scf_iter": {
+     "first": 0.018711962999999998,
+     "rest": 0.01386922225
+    },
+    "gradient": {
+     "first": 0.0092217305,
+     "rest": 0.00943379575
+    },
+    "setup": {
+     "first": 0.03341247,
+     "rest": 0.005745623250000002
+    },
+    "grad_setup": {
+     "first": 0.0012961325,
+     "rest": 0.0012435035000000001
+    },
+    "ints_pairs": {
+     "first": 0.001165882,
+     "rest": 0.00019074925000000002
+    },
+    "df": {
+     "first": 0.0192218345,
+     "rest": 0.0008539180000000001
+    },
+    "grid_xc": {
+     "first": 0.002360847,
+     "rest": 0.00228117
+    },
+    "guess": {
+     "first": 0.007276853,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0008029815000000001,
+     "rest": 3.76615e-05
+    },
+    "t_one_electron": {
+     "first": 0.0002471615,
+     "rest": 5.1042000000000004e-05
+    },
+    "t_ecp": {
+     "first": 3e-08,
+     "rest": 4.7499999999999995e-08
+    },
+    "t_jk_setup": {
+     "first": 0.0192218345,
+     "rest": 0.0008539180000000001
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.002360847,
+     "rest": 0.00228117
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.007276853,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.000115709,
+     "rest": 0.00010009525
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4.7499999999999995e-08,
+    "grad_pairs": 0.00010009525,
+    "grid": 0.00228117,
+    "guess": 0.0,
+    "jk_setup": 0.0008539180000000001,
+    "one_electron": 5.1042000000000004e-05,
+    "pairs": 3.76615e-05
+   },
+   "prepare_rest": 7.767175702610984e-05,
+   "drop_rest": 3.107634256593883e-07,
+   "minflt_rest": 4851.5,
+   "stime_rest": 0.010619,
+   "utime_rest": 0.144558,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "water-svp/gpu/A": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.5202021220029565,
+   "rest_median": 0.5075747742448584,
+   "total": 2.5377268589945743,
+   "totals_per_repeat": [
+    2.5304972579760943,
+    2.5449564600130543
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 50.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.5202021220029565,
+     "rest": 0.5075747742448584
+    },
+    "total": {
+     "first": 0.197025062,
+     "rest": 0.19871528900000002
+    },
+    "outside": {
+     "first": 0.3231770600029565,
+     "rest": 0.30891214674485845
+    },
+    "scf_setup": {
+     "first": 0.12598051500000002,
+     "rest": 0.12787219225
+    },
+    "scf_iter": {
+     "first": 0.042030200000000004,
+     "rest": 0.041994379
+    },
+    "gradient": {
+     "first": 0.029014346999999996,
+     "rest": 0.029420948500000002
+    },
+    "setup": {
+     "first": 0.135236303,
+     "rest": 0.136869209
+    },
+    "grad_setup": {
+     "first": 0.009255788000000001,
+     "rest": 0.00893662375
+    },
+    "ints_pairs": {
+     "first": 0.0011616155000000001,
+     "rest": 0.0011827542500000001
+    },
+    "df": {
+     "first": 0.097715498,
+     "rest": 0.099690025
+    },
+    "grid_xc": {
+     "first": 0.0068771184999999995,
+     "rest": 0.0068001455
+    },
+    "guess": {
+     "first": 0.0074709215,
+     "rest": 0.007446975
+    },
+    "dev_loop": {
+     "first": 0.018148434999999997,
+     "rest": 0.01768638075
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.000731169,
+     "rest": 0.00078065775
+    },
+    "t_one_electron": {
+     "first": 0.00028500849999999996,
+     "rest": 0.0002784085
+    },
+    "t_ecp": {
+     "first": 3e-08,
+     "rest": 3.249999999999999e-08
+    },
+    "t_jk_setup": {
+     "first": 0.091819964,
+     "rest": 0.09386539025
+    },
+    "t_xc_setup": {
+     "first": 0.002334623,
+     "rest": 0.00232892675
+    },
+    "t_grid": {
+     "first": 0.0013276495,
+     "rest": 0.0013761152499999999
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0074709215,
+     "rest": 0.007446975
+    },
+    "t_scf_setup": {
+     "first": 0.018148434999999997,
+     "rest": 0.01768638075
+    },
+    "t_grad_pairs": {
+     "first": 0.000145408,
+     "rest": 0.00012845275
+    },
+    "t_grad_2e_setup": {
+     "first": 0.005895534,
+     "rest": 0.005710829000000001
+    },
+    "t_grad_xc_setup": {
+     "first": 0.003214846,
+     "rest": 0.00307638025
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 3.249999999999999e-08,
+    "grad_2e_setup": 0.005710829000000001,
+    "grad_2e_setup_aux_pairs": 0.0001252155,
+    "grad_2e_setup_builders": 0.00480901125,
+    "grad_2e_setup_kernels": 0.00391664475,
+    "grad_2e_setup_metric": 0.0008137852499999999,
+    "grad_2e_setup_metric_host": 5.70075e-06,
+    "grad_2e_setup_pack_derivs": 4.53e-07,
+    "grad_2e_setup_pack_ints": 1.4025e-07,
+    "grad_2e_setup_plan": 9.204e-06,
+    "grad_2e_setup_upload": 0.0007063810000000001,
+    "grad_2e_setup_wait": 1.27975e-06,
+    "grad_pairs": 0.00012845275,
+    "grad_xc_setup": 0.00307638025,
+    "grad_xc_setup_blocks": 1.029e-06,
+    "grad_xc_setup_layout": 0.0019353830000000002,
+    "grad_xc_setup_layout_blocks": 0.000322557,
+    "grad_xc_setup_layout_lists": 0.00015331025,
+    "grad_xc_setup_layout_plans": 0.0005127432499999999,
+    "grad_xc_setup_layout_screen": 0.0009372310000000001,
+    "grid": 0.0013761152499999999,
+    "guess": 0.007446975,
+    "jk_setup": 0.09386539025,
+    "one_electron": 0.0002784085,
+    "pairs": 0.00078065775,
+    "scf_setup": 0.01768638075,
+    "xc_setup": 0.00232892675
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 129036.0,
+   "stime_rest": 0.32008025,
+   "utime_rest": 0.2798545,
+   "closed_shell_probe_ran": 5,
+   "stability_probe_steps": 0
+  },
+  "water-svp/gpu/B": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.4493508150044363,
+   "rest_median": 0.09001874350360595,
+   "total": 0.8106144800112816,
+   "totals_per_repeat": [
+    0.8122269730083644,
+    0.8090019870141987
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 50.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.4493508150044363,
+     "rest": 0.09001874350360595
+    },
+    "total": {
+     "first": 0.206148657,
+     "rest": 0.08264199925
+    },
+    "outside": {
+     "first": 0.2432021580044363,
+     "rest": 0.0073695962480432
+    },
+    "scf_setup": {
+     "first": 0.132261929,
+     "rest": 0.021915287999999998
+    },
+    "scf_iter": {
+     "first": 0.042552480000000004,
+     "rest": 0.03040525175
+    },
+    "gradient": {
+     "first": 0.03133424800000001,
+     "rest": 0.03025388975
+    },
+    "setup": {
+     "first": 0.1424510745,
+     "rest": 0.03659949999999999
+    },
+    "grad_setup": {
+     "first": 0.0101891455,
+     "rest": 0.01456577175
+    },
+    "ints_pairs": {
+     "first": 0.0011947705,
+     "rest": 0.00021458975
+    },
+    "df": {
+     "first": 0.10392772349999999,
+     "rest": 0.0265549065
+    },
+    "grid_xc": {
+     "first": 0.007528041,
+     "rest": 0.005495004
+    },
+    "guess": {
+     "first": 0.0074514165,
+     "rest": 1.5055e-05
+    },
+    "dev_loop": {
+     "first": 0.018424880499999997,
+     "rest": 0.000990629
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.000798465,
+     "rest": 4.1282e-05
+    },
+    "t_one_electron": {
+     "first": 0.0002626495,
+     "rest": 5.5748749999999994e-05
+    },
+    "t_ecp": {
+     "first": 3.0000000000000004e-08,
+     "rest": 4.7499999999999995e-08
+    },
+    "t_jk_setup": {
+     "first": 0.0972611565,
+     "rest": 0.01410765575
+    },
+    "t_xc_setup": {
+     "first": 0.0028170175,
+     "rest": 0.0018219827499999998
+    },
+    "t_grid": {
+     "first": 0.001322071,
+     "rest": 0.00135118025
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0074514165,
+     "rest": 1.5055e-05
+    },
+    "t_scf_setup": {
+     "first": 0.018424880499999997,
+     "rest": 0.000990629
+    },
+    "t_grad_pairs": {
+     "first": 0.000133626,
+     "rest": 0.00012039825
+    },
+    "t_grad_2e_setup": {
+     "first": 0.006666567,
+     "rest": 0.0121235695
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0033889525,
+     "rest": 0.00222905175
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4.7499999999999995e-08,
+    "grad_2e_setup": 0.0121235695,
+    "grad_2e_setup_aux_pairs": 0.00011571375,
+    "grad_2e_setup_builders": 0.00498967775,
+    "grad_2e_setup_kernels": 0.00393952725,
+    "grad_2e_setup_metric": 0.0008350572499999999,
+    "grad_2e_setup_metric_host": 5.68625e-06,
+    "grad_2e_setup_pack_derivs": 2.9549999999999997e-07,
+    "grad_2e_setup_pack_ints": 1.075e-07,
+    "grad_2e_setup_plan": 1.39935e-05,
+    "grad_2e_setup_upload": 0.00087612125,
+    "grad_2e_setup_wait": 0.0062152067500000005,
+    "grad_pairs": 0.00012039825,
+    "grad_xc_setup": 0.00222905175,
+    "grad_xc_setup_blocks": 1.0044999999999999e-06,
+    "grad_xc_setup_layout": 0.00166557525,
+    "grad_xc_setup_layout_blocks": 0.00029152325,
+    "grad_xc_setup_layout_lists": 8.040574999999996e-05,
+    "grad_xc_setup_layout_plans": 0.00042850625,
+    "grad_xc_setup_layout_screen": 0.000862278,
+    "grid": 0.00135118025,
+    "guess": 1.5055e-05,
+    "jk_setup": 0.01410765575,
+    "one_electron": 5.5748749999999994e-05,
+    "pairs": 4.1282e-05,
+    "scf_setup": 0.000990629,
+    "xc_setup": 0.0018219827499999998
+   },
+   "prepare_rest": 0.004904635003185831,
+   "drop_rest": 0.00212320800346788,
+   "minflt_rest": 2630.75,
+   "stime_rest": 0.01107375,
+   "utime_rest": 0.20051549999999999,
+   "closed_shell_probe_ran": 5,
+   "stability_probe_steps": 0
+  },
+  "water-svp/gpu/C": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.34485466849582735,
+   "rest_median": 0.07982322825409938,
+   "total": 0.6655720974958967,
+   "totals_per_repeat": [
+    0.6663499340065755,
+    0.664794260985218
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 50.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.34485466849582735,
+     "rest": 0.07982322825409938
+    },
+    "total": {
+     "first": 0.20049483099999998,
+     "rest": 0.07956425475000001
+    },
+    "outside": {
+     "first": 0.14435983749582737,
+     "rest": 0.00026722875515573785
+    },
+    "scf_setup": {
+     "first": 0.128366159,
+     "rest": 0.0184849255
+    },
+    "scf_iter": {
+     "first": 0.042915901,
+     "rest": 0.030192007
+    },
+    "gradient": {
+     "first": 0.029212771,
+     "rest": 0.030887803
+    },
+    "setup": {
+     "first": 0.1370687705,
+     "rest": 0.03383335575
+    },
+    "grad_setup": {
+     "first": 0.0087026115,
+     "rest": 0.015348430250000001
+    },
+    "ints_pairs": {
+     "first": 0.0011220815,
+     "rest": 0.00021371875000000001
+    },
+    "df": {
+     "first": 0.10049225049999999,
+     "rest": 0.02512455225
+    },
+    "grid_xc": {
+     "first": 0.0065776540000000005,
+     "rest": 0.0043763055
+    },
+    "guess": {
+     "first": 0.0073110805,
+     "rest": 1.489725e-05
+    },
+    "dev_loop": {
+     "first": 0.0176496105,
+     "rest": 0.00081950125
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0007123855,
+     "rest": 4.15675e-05
+    },
+    "t_one_electron": {
+     "first": 0.00027960500000000004,
+     "rest": 5.52705e-05
+    },
+    "t_ecp": {
+     "first": 2.55e-08,
+     "rest": 4.7499999999999995e-08
+    },
+    "t_jk_setup": {
+     "first": 0.09483824499999999,
+     "rest": 0.011673263
+    },
+    "t_xc_setup": {
+     "first": 0.002354092,
+     "rest": 0.00125201625
+    },
+    "t_grid": {
+     "first": 0.0013050215000000001,
+     "rest": 0.001349658
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0073110805,
+     "rest": 1.489725e-05
+    },
+    "t_scf_setup": {
+     "first": 0.0176496105,
+     "rest": 0.00081950125
+    },
+    "t_grad_pairs": {
+     "first": 0.0001300655,
+     "rest": 0.00011875374999999999
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0056540055,
+     "rest": 0.01347304975
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0029185405,
+     "rest": 0.0018046314999999999
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4.7499999999999995e-08,
+    "grad_2e_setup": 0.01347304975,
+    "grad_2e_setup_aux_pairs": 0.0001119935,
+    "grad_2e_setup_builders": 0.00495042625,
+    "grad_2e_setup_kernels": 0.004014485,
+    "grad_2e_setup_metric": 0.0008045035,
+    "grad_2e_setup_metric_host": 5.3205e-06,
+    "grad_2e_setup_pack_derivs": 3.0025e-07,
+    "grad_2e_setup_pack_ints": 9.749999999999999e-08,
+    "grad_2e_setup_plan": 1.119925e-05,
+    "grad_2e_setup_upload": 0.0008238132499999999,
+    "grad_2e_setup_wait": 0.007569141,
+    "grad_pairs": 0.00011875374999999999,
+    "grad_xc_setup": 0.0018046314999999999,
+    "grad_xc_setup_blocks": 9.9675e-07,
+    "grad_xc_setup_layout": 0.0015442127500000001,
+    "grad_xc_setup_layout_blocks": 0.00029282725000000004,
+    "grad_xc_setup_layout_lists": 8.113675000000003e-05,
+    "grad_xc_setup_layout_plans": 0.00033519375,
+    "grad_xc_setup_layout_screen": 0.00081225575,
+    "grid": 0.001349658,
+    "guess": 1.489725e-05,
+    "jk_setup": 0.011673263,
+    "one_electron": 5.52705e-05,
+    "pairs": 4.15675e-05,
+    "scf_setup": 0.00081950125,
+    "xc_setup": 0.00125201625
+   },
+   "prepare_rest": 1.5125246136449277e-05,
+   "drop_rest": 4.282483132556081e-07,
+   "minflt_rest": 1266.75,
+   "stime_rest": 0.01251475,
+   "utime_rest": 0.18417799999999998,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "water-svp/gpu/D": {
+   "nsteps": 5,
+   "repeats": 2,
+   "first": 0.350037511496339,
+   "rest_median": 0.07893409525422612,
+   "total": 0.6662651594961062,
+   "totals_per_repeat": [
+    0.6616348499956075,
+    0.6708954689966049
+   ],
+   "iterations_median": 8.0,
+   "iterations_median_rest": 7.5,
+   "iterations_total": 41.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.350037511496339,
+     "rest": 0.07893409525422612
+    },
+    "total": {
+     "first": 0.2041989425,
+     "rest": 0.0786014675
+    },
+    "outside": {
+     "first": 0.14583856899633899,
+     "rest": 0.000336066995657483
+    },
+    "scf_setup": {
+     "first": 0.131518672,
+     "rest": 0.018340787
+    },
+    "scf_iter": {
+     "first": 0.042631233500000004,
+     "rest": 0.02290204325
+    },
+    "gradient": {
+     "first": 0.030049037,
+     "rest": 0.03719068825
+    },
+    "setup": {
+     "first": 0.140462276,
+     "rest": 0.04000723825
+    },
+    "grad_setup": {
+     "first": 0.008943604,
+     "rest": 0.02166645125
+    },
+    "ints_pairs": {
+     "first": 0.0013000580000000002,
+     "rest": 0.00019961725
+    },
+    "df": {
+     "first": 0.1029507855,
+     "rest": 0.031427288
+    },
+    "grid_xc": {
+     "first": 0.0070378,
+     "rest": 0.0043796914999999995
+    },
+    "guess": {
+     "first": 0.0072357025,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.017659064500000002,
+     "rest": 0.0008171657499999999
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.000875786,
+     "rest": 3.7757e-05
+    },
+    "t_one_electron": {
+     "first": 0.00030840299999999995,
+     "rest": 5.21435e-05
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 5.75e-08
+    },
+    "t_jk_setup": {
+     "first": 0.097297155,
+     "rest": 0.011626685250000001
+    },
+    "t_xc_setup": {
+     "first": 0.002427833,
+     "rest": 0.00129229925
+    },
+    "t_grid": {
+     "first": 0.0014358225,
+     "rest": 0.00135658375
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0072357025,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.017659064500000002,
+     "rest": 0.0008171657499999999
+    },
+    "t_grad_pairs": {
+     "first": 0.00011582899999999999,
+     "rest": 0.00011134900000000001
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0056536304999999995,
+     "rest": 0.01980060275
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0031741445,
+     "rest": 0.00175191775
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 5.75e-08,
+    "grad_2e_setup": 0.01980060275,
+    "grad_2e_setup_aux_pairs": 0.00010253425,
+    "grad_2e_setup_builders": 0.00478953675,
+    "grad_2e_setup_kernels": 0.003964652,
+    "grad_2e_setup_metric": 0.0008054280000000001,
+    "grad_2e_setup_metric_host": 5.2205e-06,
+    "grad_2e_setup_pack_derivs": 3.1775e-07,
+    "grad_2e_setup_pack_ints": 1.0524999999999999e-07,
+    "grad_2e_setup_plan": 9.006e-06,
+    "grad_2e_setup_upload": 0.0007528534999999999,
+    "grad_2e_setup_wait": 0.01410316675,
+    "grad_pairs": 0.00011134900000000001,
+    "grad_xc_setup": 0.00175191775,
+    "grad_xc_setup_blocks": 1.0912500000000001e-06,
+    "grad_xc_setup_layout": 0.00148963075,
+    "grad_xc_setup_layout_blocks": 0.00028928725000000003,
+    "grad_xc_setup_layout_lists": 7.551599999999992e-05,
+    "grad_xc_setup_layout_plans": 0.00032751225,
+    "grad_xc_setup_layout_screen": 0.0007952975,
+    "grid": 0.00135658375,
+    "guess": 0.0,
+    "jk_setup": 0.011626685250000001,
+    "one_electron": 5.21435e-05,
+    "pairs": 3.7757e-05,
+    "scf_setup": 0.0008171657499999999,
+    "xc_setup": 0.00129229925
+   },
+   "prepare_rest": 9.575149306328967e-05,
+   "drop_rest": 3.982495400123298e-07,
+   "minflt_rest": 1210.0,
+   "stime_rest": 0.00698475,
+   "utime_rest": 0.16981875000000002,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/cpu/A": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 1.4257421865186188,
+   "rest_median": 1.3178051330032758,
+   "total": 26.69354824302718,
+   "totals_per_repeat": [
+    26.525896053994074,
+    26.861200432060286
+   ],
+   "iterations_median": 14.0,
+   "iterations_median_rest": 14.0,
+   "iterations_total": 284.0,
+   "breakdown": {
+    "wall": {
+     "first": 1.4257421865186188,
+     "rest": 1.3178051330032758
+    },
+    "total": {
+     "first": 1.4110398275,
+     "rest": 1.3035627195
+    },
+    "outside": {
+     "first": 0.014702359018618827,
+     "rest": 0.014306013501523829
+    },
+    "scf_setup": {
+     "first": 0.10533770849999996,
+     "rest": 0.10333700700000004
+    },
+    "scf_iter": {
+     "first": 1.03059909,
+     "rest": 0.9334326745
+    },
+    "gradient": {
+     "first": 0.27510302900000005,
+     "rest": 0.266705247
+    },
+    "setup": {
+     "first": 0.13273304799999996,
+     "rest": 0.13053248199999992
+    },
+    "grad_setup": {
+     "first": 0.027395339499999997,
+     "rest": 0.027378634750000002
+    },
+    "ints_pairs": {
+     "first": 0.0080124875,
+     "rest": 0.0073163985
+    },
+    "df": {
+     "first": 0.0642652445,
+     "rest": 0.0629157165
+    },
+    "grid_xc": {
+     "first": 0.046831021,
+     "rest": 0.0469511715
+    },
+    "guess": {
+     "first": 0.0122908965,
+     "rest": 0.012332909
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.002164732,
+     "rest": 0.0017529135
+    },
+    "t_one_electron": {
+     "first": 0.0018678865,
+     "rest": 0.001739494
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 4e-08
+    },
+    "t_jk_setup": {
+     "first": 0.0642652445,
+     "rest": 0.0629157165
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.046831021,
+     "rest": 0.0469511715
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0122908965,
+     "rest": 0.012332909
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.003979829,
+     "rest": 0.0038265095000000002
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4e-08,
+    "grad_pairs": 0.0038265095000000002,
+    "grid": 0.0469511715,
+    "guess": 0.012332909,
+    "jk_setup": 0.0629157165,
+    "one_electron": 0.001739494,
+    "pairs": 0.0017529135
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 162470.0,
+   "stime_rest": 0.2104525,
+   "utime_rest": 8.3987215,
+   "closed_shell_probe_ran": 20,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/cpu/B": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 1.3817609465186251,
+   "rest_median": 1.2839465379947796,
+   "total": 25.976086038528592,
+   "totals_per_repeat": [
+    25.81419945700327,
+    26.137972620053915
+   ],
+   "iterations_median": 14.0,
+   "iterations_median_rest": 14.0,
+   "iterations_total": 284.0,
+   "breakdown": {
+    "wall": {
+     "first": 1.3817609465186251,
+     "rest": 1.2839465379947796
+    },
+    "total": {
+     "first": 1.3768208,
+     "rest": 1.2789535459999999
+    },
+    "outside": {
+     "first": 0.004940146518625177,
+     "rest": 0.00499299199477965
+    },
+    "scf_setup": {
+     "first": 0.10284780200000004,
+     "rest": 0.068379776
+    },
+    "scf_iter": {
+     "first": 1.0042860415,
+     "rest": 0.9413715265
+    },
+    "gradient": {
+     "first": 0.26968695649999996,
+     "rest": 0.2663544355000001
+    },
+    "setup": {
+     "first": 0.13030328500000005,
+     "rest": 0.09611765825000004
+    },
+    "grad_setup": {
+     "first": 0.027455483,
+     "rest": 0.02725679625
+    },
+    "ints_pairs": {
+     "first": 0.007405762,
+     "rest": 0.0060184925
+    },
+    "df": {
+     "first": 0.0625590305,
+     "rest": 0.043069688999999994
+    },
+    "grid_xc": {
+     "first": 0.047174832,
+     "rest": 0.046858261
+    },
+    "guess": {
+     "first": 0.0122881025,
+     "rest": 7.0546e-05
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0017659935000000002,
+     "rest": 0.0007513035
+    },
+    "t_one_electron": {
+     "first": 0.0017716565,
+     "rest": 0.001398997
+    },
+    "t_ecp": {
+     "first": 4.5e-08,
+     "rest": 3.4999999999999996e-08
+    },
+    "t_jk_setup": {
+     "first": 0.0625590305,
+     "rest": 0.043069688999999994
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.047174832,
+     "rest": 0.046858261
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0122881025,
+     "rest": 7.0546e-05
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.003868067,
+     "rest": 0.003861677
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 3.4999999999999996e-08,
+    "grad_pairs": 0.003861677,
+    "grid": 0.046858261,
+    "guess": 7.0546e-05,
+    "jk_setup": 0.043069688999999994,
+    "one_electron": 0.001398997,
+    "pairs": 0.0007513035
+   },
+   "prepare_rest": 0.0037616220070049167,
+   "drop_rest": 0.00019564949616324157,
+   "minflt_rest": 129919.5,
+   "stime_rest": 0.15761150000000002,
+   "utime_rest": 8.4391325,
+   "closed_shell_probe_ran": 20,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/cpu/C": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 1.396949196481728,
+   "rest_median": 1.2915595959930215,
+   "total": 26.196555654983968,
+   "totals_per_repeat": [
+    25.94205162100843,
+    26.451059688959504
+   ],
+   "iterations_median": 14.0,
+   "iterations_median_rest": 14.0,
+   "iterations_total": 284.0,
+   "breakdown": {
+    "wall": {
+     "first": 1.396949196481728,
+     "rest": 1.2915595959930215
+    },
+    "total": {
+     "first": 1.392128965,
+     "rest": 1.291141187
+    },
+    "outside": {
+     "first": 0.0048202314817279435,
+     "rest": 0.00047428748882694105
+    },
+    "scf_setup": {
+     "first": 0.1037959515000001,
+     "rest": 0.0686390415
+    },
+    "scf_iter": {
+     "first": 1.016034433,
+     "rest": 0.949378963
+    },
+    "gradient": {
+     "first": 0.2722985805,
+     "rest": 0.265555714
+    },
+    "setup": {
+     "first": 0.13090755525000008,
+     "rest": 0.09566301999999999
+    },
+    "grad_setup": {
+     "first": 0.02711160375,
+     "rest": 0.0268718275
+    },
+    "ints_pairs": {
+     "first": 0.007420373499999999,
+     "rest": 0.006081271
+    },
+    "df": {
+     "first": 0.06362098100000001,
+     "rest": 0.0432468805
+    },
+    "grid_xc": {
+     "first": 0.0465544955,
+     "rest": 0.045994348000000004
+    },
+    "guess": {
+     "first": 0.0121310315,
+     "rest": 7.524849999999999e-05
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.001793144,
+     "rest": 0.0007804725
+    },
+    "t_one_electron": {
+     "first": 0.0017928434999999999,
+     "rest": 0.0014084905
+    },
+    "t_ecp": {
+     "first": 3e-08,
+     "rest": 4e-08
+    },
+    "t_jk_setup": {
+     "first": 0.06362098100000001,
+     "rest": 0.0432468805
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.0465544955,
+     "rest": 0.045994348000000004
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0121310315,
+     "rest": 7.524849999999999e-05
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.0038343559999999997,
+     "rest": 0.003907811
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4e-08,
+    "grad_pairs": 0.003907811,
+    "grid": 0.045994348000000004,
+    "guess": 7.524849999999999e-05,
+    "jk_setup": 0.0432468805,
+    "one_electron": 0.0014084905,
+    "pairs": 0.0007804725
+   },
+   "prepare_rest": 1.9454004359431565e-05,
+   "drop_rest": 5.059991963207722e-07,
+   "minflt_rest": 113317.0,
+   "stime_rest": 0.141811,
+   "utime_rest": 8.490846000000001,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/cpu/D": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 1.3823678040062077,
+   "rest_median": 1.0303355785144959,
+   "total": 21.492756786494283,
+   "totals_per_repeat": [
+    21.88308407997829,
+    21.102429493010277
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 215.0,
+   "breakdown": {
+    "wall": {
+     "first": 1.3823678040062077,
+     "rest": 1.0303355785144959
+    },
+    "total": {
+     "first": 1.377584582,
+     "rest": 1.0289132565
+    },
+    "outside": {
+     "first": 0.004783222006207732,
+     "rest": 0.0014223220144958804
+    },
+    "scf_setup": {
+     "first": 0.10502491299999994,
+     "rest": 0.0706294555
+    },
+    "scf_iter": {
+     "first": 1.001220616,
+     "rest": 0.6792700065
+    },
+    "gradient": {
+     "first": 0.27133905300000005,
+     "rest": 0.2716534909999999
+    },
+    "setup": {
+     "first": 0.13225570999999994,
+     "rest": 0.0982262645
+    },
+    "grad_setup": {
+     "first": 0.027230797,
+     "rest": 0.02723247675
+    },
+    "ints_pairs": {
+     "first": 0.007789153,
+     "rest": 0.006929737
+    },
+    "df": {
+     "first": 0.064407523,
+     "rest": 0.044278820999999996
+    },
+    "grid_xc": {
+     "first": 0.046792472,
+     "rest": 0.0464123915
+    },
+    "guess": {
+     "first": 0.0121927285,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.002073811,
+     "rest": 0.0007825855
+    },
+    "t_one_electron": {
+     "first": 0.001880741,
+     "rest": 0.0019971305000000003
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 3.4999999999999996e-08
+    },
+    "t_jk_setup": {
+     "first": 0.064407523,
+     "rest": 0.044278820999999996
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.046792472,
+     "rest": 0.0464123915
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0121927285,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.0038345610000000002,
+     "rest": 0.004046104
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 3.4999999999999996e-08,
+    "grad_pairs": 0.004046104,
+    "grid": 0.0464123915,
+    "guess": 0.0,
+    "jk_setup": 0.044278820999999996,
+    "one_electron": 0.0019971305000000003,
+    "pairs": 0.0007825855
+   },
+   "prepare_rest": 0.0009521149913780391,
+   "drop_rest": 5.2098766900599e-07,
+   "minflt_rest": 116641.0,
+   "stime_rest": 0.1554045,
+   "utime_rest": 6.7113525,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/gpu/A": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 1.2003128954966087,
+   "rest_median": 1.132606819999637,
+   "total": 22.840377088956302,
+   "totals_per_repeat": [
+    22.91267361593782,
+    22.768080561974784
+   ],
+   "iterations_median": 14.0,
+   "iterations_median_rest": 14.0,
+   "iterations_total": 284.0,
+   "breakdown": {
+    "wall": {
+     "first": 1.2003128954966087,
+     "rest": 1.132606819999637
+    },
+    "total": {
+     "first": 0.8134965915,
+     "rest": 0.78190368
+    },
+    "outside": {
+     "first": 0.3868163039966087,
+     "rest": 0.3484847029934412
+    },
+    "scf_setup": {
+     "first": 0.20024055049999995,
+     "rest": 0.1958761765
+    },
+    "scf_iter": {
+     "first": 0.4731902065,
+     "rest": 0.443477115
+    },
+    "gradient": {
+     "first": 0.14006583449999999,
+     "rest": 0.14080693850000003
+    },
+    "setup": {
+     "first": 0.22509292399999997,
+     "rest": 0.22116321900000002
+    },
+    "grad_setup": {
+     "first": 0.024852373499999997,
+     "rest": 0.0253084545
+    },
+    "ints_pairs": {
+     "first": 0.0093793875,
+     "rest": 0.009456599
+    },
+    "df": {
+     "first": 0.13987356750000002,
+     "rest": 0.13595049199999998
+    },
+    "grid_xc": {
+     "first": 0.031171778500000004,
+     "rest": 0.0313891655
+    },
+    "guess": {
+     "first": 0.0125894815,
+     "rest": 0.0127985865
+    },
+    "dev_loop": {
+     "first": 0.027529777,
+     "rest": 0.026812934500000003
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0020981875,
+     "rest": 0.0020298155
+    },
+    "t_one_electron": {
+     "first": 0.001821902,
+     "rest": 0.0017517525
+    },
+    "t_ecp": {
+     "first": 4.5e-08,
+     "rest": 3.4999999999999996e-08
+    },
+    "t_jk_setup": {
+     "first": 0.1300323345,
+     "rest": 0.126103165
+    },
+    "t_xc_setup": {
+     "first": 0.0077171705,
+     "rest": 0.007593465000000001
+    },
+    "t_grid": {
+     "first": 0.0139027205,
+     "rest": 0.014174689
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0125894815,
+     "rest": 0.0127985865
+    },
+    "t_scf_setup": {
+     "first": 0.027529777,
+     "rest": 0.026812934500000003
+    },
+    "t_grad_pairs": {
+     "first": 0.005459253,
+     "rest": 0.005677141
+    },
+    "t_grad_2e_setup": {
+     "first": 0.009841233,
+     "rest": 0.009908594
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0095518875,
+     "rest": 0.0096449925
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 3.4999999999999996e-08,
+    "grad_2e_setup": 0.009908594,
+    "grad_2e_setup_aux_pairs": 0.0004073265,
+    "grad_2e_setup_builders": 0.0058536355,
+    "grad_2e_setup_kernels": 0.004054982,
+    "grad_2e_setup_metric": 0.003861723,
+    "grad_2e_setup_metric_host": 5.9935e-06,
+    "grad_2e_setup_pack_derivs": 5.760000000000001e-07,
+    "grad_2e_setup_pack_ints": 1.35e-07,
+    "grad_2e_setup_plan": 7.75915e-05,
+    "grad_2e_setup_upload": 0.0015420170000000001,
+    "grad_2e_setup_wait": 1.9930000000000002e-06,
+    "grad_pairs": 0.005677141,
+    "grad_xc_setup": 0.0096449925,
+    "grad_xc_setup_blocks": 3.7805e-06,
+    "grad_xc_setup_layout": 0.008615085500000001,
+    "grad_xc_setup_layout_blocks": 0.0005591805,
+    "grad_xc_setup_layout_lists": 0.0009897125,
+    "grad_xc_setup_layout_plans": 0.001064925,
+    "grad_xc_setup_layout_screen": 0.005962234,
+    "grid": 0.014174689,
+    "guess": 0.0127985865,
+    "jk_setup": 0.126103165,
+    "one_electron": 0.0017517525,
+    "pairs": 0.0020298155,
+    "scf_setup": 0.026812934500000003,
+    "xc_setup": 0.007593465000000001
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 162131.5,
+   "stime_rest": 0.3888775,
+   "utime_rest": 1.507684,
+   "closed_shell_probe_ran": 20,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/gpu/B": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 1.0216534115024842,
+   "rest_median": 0.6387832539912779,
+   "total": 13.245296376975602,
+   "totals_per_repeat": [
+    13.207764523947844,
+    13.28282823000336
+   ],
+   "iterations_median": 14.0,
+   "iterations_median_rest": 14.0,
+   "iterations_total": 284.0,
+   "breakdown": {
+    "wall": {
+     "first": 1.0216534115024842,
+     "rest": 0.6387832539912779
+    },
+    "total": {
+     "first": 0.8122914195,
+     "rest": 0.6258878825
+    },
+    "outside": {
+     "first": 0.20936199200248423,
+     "rest": 0.012560828498691112
+    },
+    "scf_setup": {
+     "first": 0.19885722549999998,
+     "rest": 0.07262466749999999
+    },
+    "scf_iter": {
+     "first": 0.47251307900000006,
+     "rest": 0.43302463550000003
+    },
+    "gradient": {
+     "first": 0.14092111499999999,
+     "rest": 0.12000175550000003
+    },
+    "setup": {
+     "first": 0.22457506,
+     "rest": 0.096881147
+    },
+    "grad_setup": {
+     "first": 0.0257178345,
+     "rest": 0.0240643345
+    },
+    "ints_pairs": {
+     "first": 0.009324586499999999,
+     "rest": 0.006770974999999999
+    },
+    "df": {
+     "first": 0.13822152299999999,
+     "rest": 0.048332806
+    },
+    "grid_xc": {
+     "first": 0.031611139499999996,
+     "rest": 0.031772277
+    },
+    "guess": {
+     "first": 0.013388998999999999,
+     "rest": 5.72065e-05
+    },
+    "dev_loop": {
+     "first": 0.027521799500000003,
+     "rest": 0.005417605000000001
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.002044277,
+     "rest": 0.0007525455
+    },
+    "t_one_electron": {
+     "first": 0.0017067945,
+     "rest": 0.0014350965
+    },
+    "t_ecp": {
+     "first": 3.4999999999999996e-08,
+     "rest": 4e-08
+    },
+    "t_jk_setup": {
+     "first": 0.12800956349999998,
+     "rest": 0.038477241999999995
+    },
+    "t_xc_setup": {
+     "first": 0.0077329245,
+     "rest": 0.007409744
+    },
+    "t_grid": {
+     "first": 0.01394582,
+     "rest": 0.0148796785
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.013388998999999999,
+     "rest": 5.72065e-05
+    },
+    "t_scf_setup": {
+     "first": 0.027521799500000003,
+     "rest": 0.005417605000000001
+    },
+    "t_grad_pairs": {
+     "first": 0.0055734800000000004,
+     "rest": 0.0045943885
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0102119595,
+     "rest": 0.009890797
+    },
+    "t_grad_xc_setup": {
+     "first": 0.009932395,
+     "rest": 0.009482223500000001
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4e-08,
+    "grad_2e_setup": 0.009890797,
+    "grad_2e_setup_aux_pairs": 0.0003990095,
+    "grad_2e_setup_builders": 0.0058446625,
+    "grad_2e_setup_kernels": 0.0040379825000000005,
+    "grad_2e_setup_metric": 0.0038631845,
+    "grad_2e_setup_metric_host": 6.044e-06,
+    "grad_2e_setup_pack_derivs": 5.760000000000001e-07,
+    "grad_2e_setup_pack_ints": 9.5e-08,
+    "grad_2e_setup_plan": 7.81675e-05,
+    "grad_2e_setup_upload": 0.001539573,
+    "grad_2e_setup_wait": 1.818e-06,
+    "grad_pairs": 0.0045943885,
+    "grad_xc_setup": 0.009482223500000001,
+    "grad_xc_setup_blocks": 3.5004999999999998e-06,
+    "grad_xc_setup_layout": 0.008544659,
+    "grad_xc_setup_layout_blocks": 0.0005691100000000001,
+    "grad_xc_setup_layout_lists": 0.0008783944999999995,
+    "grad_xc_setup_layout_plans": 0.0010993564999999999,
+    "grad_xc_setup_layout_screen": 0.005964322,
+    "grid": 0.0148796785,
+    "guess": 5.72065e-05,
+    "jk_setup": 0.038477241999999995,
+    "one_electron": 0.0014350965,
+    "pairs": 0.0007525455,
+    "scf_setup": 0.005417605000000001,
+    "xc_setup": 0.007409744
+   },
+   "prepare_rest": 0.00489842050592415,
+   "drop_rest": 0.0071359224821208045,
+   "minflt_rest": 12924.5,
+   "stime_rest": 0.0307525,
+   "utime_rest": 1.423232,
+   "closed_shell_probe_ran": 20,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/gpu/C": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 0.9539790775015717,
+   "rest_median": 0.6202905664977152,
+   "total": 12.829130066442303,
+   "totals_per_repeat": [
+    12.828077671991196,
+    12.830182460893411
+   ],
+   "iterations_median": 14.0,
+   "iterations_median_rest": 14.0,
+   "iterations_total": 284.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.9539790775015717,
+     "rest": 0.6202905664977152
+    },
+    "total": {
+     "first": 0.8106742085,
+     "rest": 0.619872674
+    },
+    "outside": {
+     "first": 0.14330486900157174,
+     "rest": 0.0004661449975343346
+    },
+    "scf_setup": {
+     "first": 0.197819154,
+     "rest": 0.06862985500000002
+    },
+    "scf_iter": {
+     "first": 0.4720738665,
+     "rest": 0.4320942325
+    },
+    "gradient": {
+     "first": 0.140781188,
+     "rest": 0.11962761049999998
+    },
+    "setup": {
+     "first": 0.22324792999999998,
+     "rest": 0.09213160000000004
+    },
+    "grad_setup": {
+     "first": 0.025428776,
+     "rest": 0.0235140885
+    },
+    "ints_pairs": {
+     "first": 0.009955223499999999,
+     "rest": 0.006824971000000001
+    },
+    "df": {
+     "first": 0.1387805615,
+     "rest": 0.0454714215
+    },
+    "grid_xc": {
+     "first": 0.031279993,
+     "rest": 0.030154161
+    },
+    "guess": {
+     "first": 0.012813008,
+     "rest": 5.77565e-05
+    },
+    "dev_loop": {
+     "first": 0.026056568500000002,
+     "rest": 0.0052562125
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0022944174999999997,
+     "rest": 0.000824193
+    },
+    "t_one_electron": {
+     "first": 0.0018766645,
+     "rest": 0.0014297235
+    },
+    "t_ecp": {
+     "first": 3e-08,
+     "rest": 4e-08
+    },
+    "t_jk_setup": {
+     "first": 0.12886717,
+     "rest": 0.035765067
+    },
+    "t_xc_setup": {
+     "first": 0.0076521285,
+     "rest": 0.006250667
+    },
+    "t_grid": {
+     "first": 0.0138965915,
+     "rest": 0.0146320565
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.012813008,
+     "rest": 5.77565e-05
+    },
+    "t_scf_setup": {
+     "first": 0.026056568500000002,
+     "rest": 0.0052562125
+    },
+    "t_grad_pairs": {
+     "first": 0.0057841114999999995,
+     "rest": 0.0045131415
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0099133915,
+     "rest": 0.0096981825
+    },
+    "t_grad_xc_setup": {
+     "first": 0.009731273,
+     "rest": 0.009206569
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4e-08,
+    "grad_2e_setup": 0.0096981825,
+    "grad_2e_setup_aux_pairs": 0.00040476849999999997,
+    "grad_2e_setup_builders": 0.005666104,
+    "grad_2e_setup_kernels": 0.0040410624999999995,
+    "grad_2e_setup_metric": 0.0038499800000000002,
+    "grad_2e_setup_metric_host": 5.668e-06,
+    "grad_2e_setup_pack_derivs": 5.654999999999999e-07,
+    "grad_2e_setup_pack_ints": 1e-07,
+    "grad_2e_setup_plan": 8.00655e-05,
+    "grad_2e_setup_upload": 0.001539388,
+    "grad_2e_setup_wait": 1.833e-06,
+    "grad_pairs": 0.0045131415,
+    "grad_xc_setup": 0.009206569,
+    "grad_xc_setup_blocks": 3.4905e-06,
+    "grad_xc_setup_layout": 0.008561114,
+    "grad_xc_setup_layout_blocks": 0.0006380435,
+    "grad_xc_setup_layout_lists": 0.0009659615000000002,
+    "grad_xc_setup_layout_plans": 0.001056042,
+    "grad_xc_setup_layout_screen": 0.005875609,
+    "grid": 0.0146320565,
+    "guess": 5.77565e-05,
+    "jk_setup": 0.035765067,
+    "one_electron": 0.0014297235,
+    "pairs": 0.000824193,
+    "scf_setup": 0.0052562125,
+    "xc_setup": 0.006250667
+   },
+   "prepare_rest": 1.4586999895982444e-05,
+   "drop_rest": 6.110058166086674e-07,
+   "minflt_rest": 9255.5,
+   "stime_rest": 0.016973000000000002,
+   "utime_rest": 1.407464,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "la18-svp/gpu/D": {
+   "nsteps": 20,
+   "repeats": 2,
+   "first": 0.9574103234917857,
+   "rest_median": 0.5001345420023426,
+   "total": 10.761080519514508,
+   "totals_per_repeat": [
+    10.742273341980763,
+    10.779887697048252
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10.0,
+   "iterations_total": 215.0,
+   "breakdown": {
+    "wall": {
+     "first": 0.9574103234917857,
+     "rest": 0.5001345420023426
+    },
+    "total": {
+     "first": 0.81331396,
+     "rest": 0.4981592585
+    },
+    "outside": {
+     "first": 0.14409636349178567,
+     "rest": 0.0016446164949515674
+    },
+    "scf_setup": {
+     "first": 0.20077019400000004,
+     "rest": 0.06999032899999999
+    },
+    "scf_iter": {
+     "first": 0.47250521999999995,
+     "rest": 0.3083904665
+    },
+    "gradient": {
+     "first": 0.14003854599999999,
+     "rest": 0.11965854249999999
+    },
+    "setup": {
+     "first": 0.22603021950000005,
+     "rest": 0.09375874099999999
+    },
+    "grad_setup": {
+     "first": 0.0252600255,
+     "rest": 0.0237775945
+    },
+    "ints_pairs": {
+     "first": 0.009829014,
+     "rest": 0.007570546
+    },
+    "df": {
+     "first": 0.14076583850000002,
+     "rest": 0.046620453
+    },
+    "grid_xc": {
+     "first": 0.031485976,
+     "rest": 0.0301697785
+    },
+    "guess": {
+     "first": 0.012331765,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.0272458555,
+     "rest": 0.0052571449999999995
+    },
+    "probes": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0024535815,
+     "rest": 0.0008274835
+    },
+    "t_one_electron": {
+     "first": 0.0018229144999999999,
+     "rest": 0.001992058
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 4e-08
+    },
+    "t_jk_setup": {
+     "first": 0.130832688,
+     "rest": 0.0368265165
+    },
+    "t_xc_setup": {
+     "first": 0.0076388325,
+     "rest": 0.0062666815
+    },
+    "t_grid": {
+     "first": 0.0140727465,
+     "rest": 0.0146429325
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.012331765,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.0272458555,
+     "rest": 0.0052571449999999995
+    },
+    "t_grad_pairs": {
+     "first": 0.005552478,
+     "rest": 0.0046451905
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0099331505,
+     "rest": 0.009718268
+    },
+    "t_grad_xc_setup": {
+     "first": 0.009774397,
+     "rest": 0.0092566745
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4e-08,
+    "grad_2e_setup": 0.009718268,
+    "grad_2e_setup_aux_pairs": 0.000402149,
+    "grad_2e_setup_builders": 0.0056685225,
+    "grad_2e_setup_kernels": 0.004040727,
+    "grad_2e_setup_metric": 0.003861743,
+    "grad_2e_setup_metric_host": 5.894e-06,
+    "grad_2e_setup_pack_derivs": 5.66e-07,
+    "grad_2e_setup_pack_ints": 9.000000000000001e-08,
+    "grad_2e_setup_plan": 8.014550000000001e-05,
+    "grad_2e_setup_upload": 0.001542848,
+    "grad_2e_setup_wait": 1.9225e-06,
+    "grad_pairs": 0.0046451905,
+    "grad_xc_setup": 0.0092566745,
+    "grad_xc_setup_blocks": 3.6460000000000003e-06,
+    "grad_xc_setup_layout": 0.00860475,
+    "grad_xc_setup_layout_blocks": 0.0006693000000000001,
+    "grad_xc_setup_layout_lists": 0.0009873285000000006,
+    "grad_xc_setup_layout_plans": 0.0010681005,
+    "grad_xc_setup_layout_screen": 0.0058712625,
+    "grid": 0.0146429325,
+    "guess": 0.0,
+    "jk_setup": 0.0368265165,
+    "one_electron": 0.001992058,
+    "pairs": 0.0008274835,
+    "scf_setup": 0.0052571449999999995,
+    "xc_setup": 0.0062666815
+   },
+   "prepare_rest": 0.0011230374948354438,
+   "drop_rest": 5.960027920082211e-07,
+   "minflt_rest": 8652.0,
+   "stime_rest": 0.018659000000000002,
+   "utime_rest": 1.1751215,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/cpu/A": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 13.038775745997555,
+   "rest_median": 12.942640791487065,
+   "total": 388.8378305524966,
+   "totals_per_repeat": [
+    383.30512590392027,
+    394.3705352010729
+   ],
+   "iterations_median": 15.0,
+   "iterations_median_rest": 15.0,
+   "iterations_total": 450.0,
+   "breakdown": {
+    "wall": {
+     "first": 13.038775745997555,
+     "rest": 12.942640791487065
+    },
+    "total": {
+     "first": 12.999442204000001,
+     "rest": 12.9049388105
+    },
+    "outside": {
+     "first": 0.039333541997554455,
+     "rest": 0.03756946650120696
+    },
+    "scf_setup": {
+     "first": 1.0924381519999997,
+     "rest": 1.0744856645
+    },
+    "scf_iter": {
+     "first": 9.24343996,
+     "rest": 9.194979787000001
+    },
+    "gradient": {
+     "first": 2.6635640920000005,
+     "rest": 2.6400913965
+    },
+    "setup": {
+     "first": 1.3100506312499998,
+     "rest": 1.2926019799999993
+    },
+    "grad_setup": {
+     "first": 0.21761247925,
+     "rest": 0.217088658
+    },
+    "ints_pairs": {
+     "first": 0.0361209515,
+     "rest": 0.035219717
+    },
+    "df": {
+     "first": 0.8580200275000001,
+     "rest": 0.844434286
+    },
+    "grid_xc": {
+     "first": 0.40178537849999996,
+     "rest": 0.40006327799999997
+    },
+    "guess": {
+     "first": 0.026597449500000002,
+     "rest": 0.0263792545
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 1.638426518,
+     "rest": 1.6254142575000001
+    },
+    "t_pairs": {
+     "first": 0.0059255060000000005,
+     "rest": 0.0054523365
+    },
+    "t_one_electron": {
+     "first": 0.0134756155,
+     "rest": 0.0127884445
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 4.5e-08
+    },
+    "t_jk_setup": {
+     "first": 0.8580200275000001,
+     "rest": 0.844434286
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.40178537849999996,
+     "rest": 0.40006327799999997
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.026597449500000002,
+     "rest": 0.0263792545
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.016719789999999998,
+     "rest": 0.016775164500000002
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 1.638426518,
+     "rest": 1.6254142575000001
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 1.6254142575000001,
+    "ecp": 4.5e-08,
+    "grad_pairs": 0.016775164500000002,
+    "grid": 0.40006327799999997,
+    "guess": 0.0263792545,
+    "jk_setup": 0.844434286,
+    "one_electron": 0.0127884445,
+    "pairs": 0.0054523365
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 2110746.0,
+   "stime_rest": 2.389733,
+   "utime_rest": 88.60375450000001,
+   "closed_shell_probe_ran": 30,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/cpu/B": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 12.836924768504105,
+   "rest_median": 12.656167052002274,
+   "total": 380.03644184839504,
+   "totals_per_repeat": [
+    377.920769459859,
+    382.1521142369311
+   ],
+   "iterations_median": 15.0,
+   "iterations_median_rest": 15.0,
+   "iterations_total": 450.0,
+   "breakdown": {
+    "wall": {
+     "first": 12.836924768504105,
+     "rest": 12.656167052002274
+    },
+    "total": {
+     "first": 12.8309003665,
+     "rest": 12.647946106
+    },
+    "outside": {
+     "first": 0.006024402004104701,
+     "rest": 0.006626611004166172
+    },
+    "scf_setup": {
+     "first": 1.0759544934999994,
+     "rest": 1.0135221575000006
+    },
+    "scf_iter": {
+     "first": 9.1965726515,
+     "rest": 9.0211871865
+    },
+    "gradient": {
+     "first": 2.5583732215,
+     "rest": 2.6047149570000006
+    },
+    "setup": {
+     "first": 1.2920246289999993,
+     "rest": 1.229023323249999
+    },
+    "grad_setup": {
+     "first": 0.21607013549999998,
+     "rest": 0.21597958
+    },
+    "ints_pairs": {
+     "first": 0.0374098905,
+     "rest": 0.0296140235
+    },
+    "df": {
+     "first": 0.8480018305,
+     "rest": 0.8165864705
+    },
+    "grid_xc": {
+     "first": 0.398375392,
+     "rest": 0.399582711
+    },
+    "guess": {
+     "first": 0.0262878405,
+     "rest": 0.000240667
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 1.611530541,
+     "rest": 1.5434357275
+    },
+    "t_pairs": {
+     "first": 0.0064635565,
+     "rest": 0.002856587
+    },
+    "t_one_electron": {
+     "first": 0.014063754500000001,
+     "rest": 0.010330666
+    },
+    "t_ecp": {
+     "first": 1.4e-07,
+     "rest": 5e-08
+    },
+    "t_jk_setup": {
+     "first": 0.8480018305,
+     "rest": 0.8165864705
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.398375392,
+     "rest": 0.399582711
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0262878405,
+     "rest": 0.000240667
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.0168824395,
+     "rest": 0.016192293
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 1.611530541,
+     "rest": 1.5434357275
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 1.5434357275,
+    "ecp": 5e-08,
+    "grad_pairs": 0.016192293,
+    "grid": 0.399582711,
+    "guess": 0.000240667,
+    "jk_setup": 0.8165864705,
+    "one_electron": 0.010330666,
+    "pairs": 0.002856587
+   },
+   "prepare_rest": 0.00394257900188677,
+   "drop_rest": 0.0002164350007660687,
+   "minflt_rest": 1726202.5,
+   "stime_rest": 1.8860454999999998,
+   "utime_rest": 87.9722125,
+   "closed_shell_probe_ran": 30,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/cpu/C": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 13.256666332992609,
+   "rest_median": 11.36250140699849,
+   "total": 343.4929073884996,
+   "totals_per_repeat": [
+    335.2178249770077,
+    351.7679897999915
+   ],
+   "iterations_median": 15.0,
+   "iterations_median_rest": 15.0,
+   "iterations_total": 450.0,
+   "breakdown": {
+    "wall": {
+     "first": 13.256666332992609,
+     "rest": 11.36250140699849
+    },
+    "total": {
+     "first": 13.250818302999999,
+     "rest": 11.3614059895
+    },
+    "outside": {
+     "first": 0.005848029992608694,
+     "rest": 0.001095417498490292
+    },
+    "scf_setup": {
+     "first": 1.0916391670000003,
+     "rest": 1.0404457574999997
+    },
+    "scf_iter": {
+     "first": 9.447799354,
+     "rest": 7.6719762755000005
+    },
+    "gradient": {
+     "first": 2.711379782,
+     "rest": 2.6596126940000007
+    },
+    "setup": {
+     "first": 1.3249112350000003,
+     "rest": 1.2608217239999995
+    },
+    "grad_setup": {
+     "first": 0.233272068,
+     "rest": 0.21886183524999997
+    },
+    "ints_pairs": {
+     "first": 0.0392621905,
+     "rest": 0.030258887999999998
+    },
+    "df": {
+     "first": 0.8663885634999999,
+     "rest": 0.840186475
+    },
+    "grid_xc": {
+     "first": 0.425104414,
+     "rest": 0.404946531
+    },
+    "guess": {
+     "first": 0.026484926,
+     "rest": 0.0002707625
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 1.6676333,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0055148720000000005,
+     "rest": 0.0029752545
+    },
+    "t_one_electron": {
+     "first": 0.0130274025,
+     "rest": 0.010745786
+    },
+    "t_ecp": {
+     "first": 5.4999999999999996e-08,
+     "rest": 5e-08
+    },
+    "t_jk_setup": {
+     "first": 0.8663885634999999,
+     "rest": 0.840186475
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.425104414,
+     "rest": 0.404946531
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.026484926,
+     "rest": 0.0002707625
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.020719861,
+     "rest": 0.016578393
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 1.6676333,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.0,
+    "ecp": 5e-08,
+    "grad_pairs": 0.016578393,
+    "grid": 0.404946531,
+    "guess": 0.0002707625,
+    "jk_setup": 0.840186475,
+    "one_electron": 0.010745786,
+    "pairs": 0.0029752545
+   },
+   "prepare_rest": 1.9369006622582674e-05,
+   "drop_rest": 5.2098766900599e-07,
+   "minflt_rest": 1599806.5,
+   "stime_rest": 1.8149000000000002,
+   "utime_rest": 78.203554,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/cpu/D": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 12.980005468503805,
+   "rest_median": 8.892188122015796,
+   "total": 271.4654847544589,
+   "totals_per_repeat": [
+    268.29800102690933,
+    274.63296848200844
+   ],
+   "iterations_median": 11.0,
+   "iterations_median_rest": 11.0,
+   "iterations_total": 327.0,
+   "breakdown": {
+    "wall": {
+     "first": 12.980005468503805,
+     "rest": 8.892188122015796
+    },
+    "total": {
+     "first": 12.974282492,
+     "rest": 8.886289256
+    },
+    "outside": {
+     "first": 0.005722976503804489,
+     "rest": 0.0058911994878858565
+    },
+    "scf_setup": {
+     "first": 1.0771862180000005,
+     "rest": 1.034677651
+    },
+    "scf_iter": {
+     "first": 9.238210050500001,
+     "rest": 5.287370105
+    },
+    "gradient": {
+     "first": 2.6588862234999997,
+     "rest": 2.638353527499999
+    },
+    "setup": {
+     "first": 1.3006107322500005,
+     "rest": 1.2513979159999997
+    },
+    "grad_setup": {
+     "first": 0.22342451424999998,
+     "rest": 0.21674415525
+    },
+    "ints_pairs": {
+     "first": 0.035886582,
+     "rest": 0.0346342075
+    },
+    "df": {
+     "first": 0.843177912,
+     "rest": 0.832125292
+    },
+    "grid_xc": {
+     "first": 0.4131465525,
+     "rest": 0.4010370465
+    },
+    "guess": {
+     "first": 0.0259363095,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 1.6373100054999998,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.005747759,
+     "rest": 0.003474761
+    },
+    "t_one_electron": {
+     "first": 0.0132875295,
+     "rest": 0.0146776495
+    },
+    "t_ecp": {
+     "first": 5.55e-08,
+     "rest": 5e-08
+    },
+    "t_jk_setup": {
+     "first": 0.843177912,
+     "rest": 0.832125292
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.4131465525,
+     "rest": 0.4010370465
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0259363095,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.016851237999999998,
+     "rest": 0.016243128000000003
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 1.6373100054999998,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.0,
+    "ecp": 5e-08,
+    "grad_pairs": 0.016243128000000003,
+    "grid": 0.4010370465,
+    "guess": 0.0,
+    "jk_setup": 0.832125292,
+    "one_electron": 0.0146776495,
+    "pairs": 0.003474761
+   },
+   "prepare_rest": 0.004839893997996114,
+   "drop_rest": 5.404872354120016e-07,
+   "minflt_rest": 1561626.0,
+   "stime_rest": 1.724818,
+   "utime_rest": 61.665096500000004,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/gpu/A": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 4.106272880002507,
+   "rest_median": 4.022513100513606,
+   "total": 120.89839769706305,
+   "totals_per_repeat": [
+    119.71781498211203,
+    122.07898041201406
+   ],
+   "iterations_median": 15.0,
+   "iterations_median_rest": 15.0,
+   "iterations_total": 450.0,
+   "breakdown": {
+    "wall": {
+     "first": 4.106272880002507,
+     "rest": 4.022513100513606
+    },
+    "total": {
+     "first": 3.6638887479999998,
+     "rest": 3.6605623720000002
+    },
+    "outside": {
+     "first": 0.44238413200250704,
+     "rest": 0.36346969450546496
+    },
+    "scf_setup": {
+     "first": 0.49748700550000013,
+     "rest": 0.4950405655000003
+    },
+    "scf_iter": {
+     "first": 2.3387008294999996,
+     "rest": 2.3395194925
+    },
+    "gradient": {
+     "first": 0.8277009129999999,
+     "rest": 0.8222609614999998
+    },
+    "setup": {
+     "first": 0.5633786585000002,
+     "rest": 0.5610341295
+    },
+    "grad_setup": {
+     "first": 0.065891653,
+     "rest": 0.06584008150000001
+    },
+    "ints_pairs": {
+     "first": 0.043058148500000004,
+     "rest": 0.043204522499999995
+    },
+    "df": {
+     "first": 0.3224609335,
+     "rest": 0.3199309295
+    },
+    "grid_xc": {
+     "first": 0.1340019125,
+     "rest": 0.13492105999999998
+    },
+    "guess": {
+     "first": 0.0277675295,
+     "rest": 0.026755853
+    },
+    "dev_loop": {
+     "first": 0.028909050999999998,
+     "rest": 0.02923085
+    },
+    "probes": {
+     "first": 0.500569264,
+     "rest": 0.500211975
+    },
+    "t_pairs": {
+     "first": 0.0064650405,
+     "rest": 0.0062947590000000005
+    },
+    "t_one_electron": {
+     "first": 0.0126336225,
+     "rest": 0.012610102500000001
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 4.5500000000000004e-08
+    },
+    "t_jk_setup": {
+     "first": 0.30557276850000004,
+     "rest": 0.30308484300000005
+    },
+    "t_xc_setup": {
+     "first": 0.0164254625,
+     "rest": 0.016579911
+    },
+    "t_grid": {
+     "first": 0.0925324075,
+     "rest": 0.093525615
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0277675295,
+     "rest": 0.026755853
+    },
+    "t_scf_setup": {
+     "first": 0.028909050999999998,
+     "rest": 0.02923085
+    },
+    "t_grad_pairs": {
+     "first": 0.023959445500000003,
+     "rest": 0.0239237715
+    },
+    "t_grad_2e_setup": {
+     "first": 0.016888165,
+     "rest": 0.016939976500000002
+    },
+    "t_grad_xc_setup": {
+     "first": 0.025044042500000002,
+     "rest": 0.0250008975
+    },
+    "t_closed_shell_probe": {
+     "first": 0.500569264,
+     "rest": 0.500211975
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.500211975,
+    "ecp": 4.5500000000000004e-08,
+    "grad_2e_setup": 0.016939976500000002,
+    "grad_2e_setup_aux_pairs": 0.0009957084999999998,
+    "grad_2e_setup_builders": 0.0060319625,
+    "grad_2e_setup_kernels": 0.004116865,
+    "grad_2e_setup_metric": 0.010524953,
+    "grad_2e_setup_metric_host": 6.0089999999999996e-06,
+    "grad_2e_setup_pack_derivs": 5.905e-07,
+    "grad_2e_setup_pack_ints": 1.655e-07,
+    "grad_2e_setup_plan": 0.00022171350000000002,
+    "grad_2e_setup_upload": 0.0016051205,
+    "grad_2e_setup_wait": 2.108e-06,
+    "grad_pairs": 0.0239237715,
+    "grad_xc_setup": 0.0250008975,
+    "grad_xc_setup_blocks": 9.249e-06,
+    "grad_xc_setup_layout": 0.0233556965,
+    "grad_xc_setup_layout_blocks": 0.00121899,
+    "grad_xc_setup_layout_lists": 0.0027045344999999995,
+    "grad_xc_setup_layout_plans": 0.0015908889999999998,
+    "grad_xc_setup_layout_screen": 0.017708404,
+    "grid": 0.093525615,
+    "guess": 0.026755853,
+    "jk_setup": 0.30308484300000005,
+    "one_electron": 0.012610102500000001,
+    "pairs": 0.0062947590000000005,
+    "scf_setup": 0.02923085,
+    "xc_setup": 0.016579911
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 372591.5,
+   "stime_rest": 0.6642175,
+   "utime_rest": 7.0627320000000005,
+   "closed_shell_probe_ran": 30,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/gpu/B": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 3.886412380001275,
+   "rest_median": 3.5307039029867155,
+   "total": 108.00840566497936,
+   "totals_per_repeat": [
+    104.69416469996213,
+    111.3226466299966
+   ],
+   "iterations_median": 15.0,
+   "iterations_median_rest": 15.0,
+   "iterations_total": 450.0,
+   "breakdown": {
+    "wall": {
+     "first": 3.886412380001275,
+     "rest": 3.5307039029867155
+    },
+    "total": {
+     "first": 3.656091327,
+     "rest": 3.492039652
+    },
+    "outside": {
+     "first": 0.23032105300127492,
+     "rest": 0.038184323986715674
+    },
+    "scf_setup": {
+     "first": 0.495808523,
+     "rest": 0.36492607099999996
+    },
+    "scf_iter": {
+     "first": 2.336698857,
+     "rest": 2.3107583314999998
+    },
+    "gradient": {
+     "first": 0.8235839469999999,
+     "rest": 0.8159269449999997
+    },
+    "setup": {
+     "first": 0.562558248,
+     "rest": 0.42821386250000004
+    },
+    "grad_setup": {
+     "first": 0.06674972500000001,
+     "rest": 0.0618883945
+    },
+    "ints_pairs": {
+     "first": 0.042532165499999997,
+     "rest": 0.0332716315
+    },
+    "df": {
+     "first": 0.32088148699999997,
+     "rest": 0.2300953845
+    },
+    "grid_xc": {
+     "first": 0.1354163955,
+     "rest": 0.14109360650000002
+    },
+    "guess": {
+     "first": 0.026919765,
+     "rest": 0.000237242
+    },
+    "dev_loop": {
+     "first": 0.029266201500000002,
+     "rest": 0.0126060605
+    },
+    "probes": {
+     "first": 0.500403461,
+     "rest": 0.482215184
+    },
+    "t_pairs": {
+     "first": 0.006403688,
+     "rest": 0.0029236695
+    },
+    "t_one_electron": {
+     "first": 0.012359381,
+     "rest": 0.010832887499999999
+    },
+    "t_ecp": {
+     "first": 5.4999999999999996e-08,
+     "rest": 5e-08
+    },
+    "t_jk_setup": {
+     "first": 0.303749304,
+     "rest": 0.2129998995
+    },
+    "t_xc_setup": {
+     "first": 0.017060205,
+     "rest": 0.016964260000000002
+    },
+    "t_grid": {
+     "first": 0.09250769,
+     "rest": 0.098652819
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.026919765,
+     "rest": 0.000237242
+    },
+    "t_scf_setup": {
+     "first": 0.029266201500000002,
+     "rest": 0.0126060605
+    },
+    "t_grad_pairs": {
+     "first": 0.023769041499999997,
+     "rest": 0.019320189
+    },
+    "t_grad_2e_setup": {
+     "first": 0.017132183000000002,
+     "rest": 0.0168452805
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0258485005,
+     "rest": 0.024741706000000002
+    },
+    "t_closed_shell_probe": {
+     "first": 0.500403461,
+     "rest": 0.482215184
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.482215184,
+    "ecp": 5e-08,
+    "grad_2e_setup": 0.0168452805,
+    "grad_2e_setup_aux_pairs": 0.000940746,
+    "grad_2e_setup_builders": 0.006044416,
+    "grad_2e_setup_kernels": 0.004091792,
+    "grad_2e_setup_metric": 0.0104292095,
+    "grad_2e_setup_metric_host": 6.5345e-06,
+    "grad_2e_setup_pack_derivs": 5.51e-07,
+    "grad_2e_setup_pack_ints": 1.405e-07,
+    "grad_2e_setup_plan": 0.00023242500000000003,
+    "grad_2e_setup_upload": 0.001614535,
+    "grad_2e_setup_wait": 2.113e-06,
+    "grad_pairs": 0.019320189,
+    "grad_xc_setup": 0.024741706000000002,
+    "grad_xc_setup_blocks": 5.7735e-06,
+    "grad_xc_setup_layout": 0.0230769205,
+    "grad_xc_setup_layout_blocks": 0.0012261149999999998,
+    "grad_xc_setup_layout_lists": 0.0024655300000000005,
+    "grad_xc_setup_layout_plans": 0.00160507,
+    "grad_xc_setup_layout_screen": 0.017707112,
+    "grid": 0.098652819,
+    "guess": 0.000237242,
+    "jk_setup": 0.2129998995,
+    "one_electron": 0.010832887499999999,
+    "pairs": 0.0029236695,
+    "scf_setup": 0.0126060605,
+    "xc_setup": 0.016964260000000002
+   },
+   "prepare_rest": 0.005184567489777692,
+   "drop_rest": 0.03151741001056507,
+   "minflt_rest": 80850.0,
+   "stime_rest": 0.211372,
+   "utime_rest": 7.0466985,
+   "closed_shell_probe_ran": 30,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/gpu/C": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 3.834598568995716,
+   "rest_median": 2.9737129350105533,
+   "total": 90.13300333805091,
+   "totals_per_repeat": [
+    89.71373183905962,
+    90.5522748370422
+   ],
+   "iterations_median": 15.0,
+   "iterations_median_rest": 15.0,
+   "iterations_total": 450.0,
+   "breakdown": {
+    "wall": {
+     "first": 3.834598568995716,
+     "rest": 2.9737129350105533
+    },
+    "total": {
+     "first": 3.715251914,
+     "rest": 2.971379486
+    },
+    "outside": {
+     "first": 0.11934665499571606,
+     "rest": 0.0011580180054551192
+    },
+    "scf_setup": {
+     "first": 0.5100964645000001,
+     "rest": 0.35562528399999993
+    },
+    "scf_iter": {
+     "first": 2.3776485285,
+     "rest": 1.8000260625
+    },
+    "gradient": {
+     "first": 0.8275069209999999,
+     "rest": 0.816754135
+    },
+    "setup": {
+     "first": 0.5796066725000001,
+     "rest": 0.4165079674999999
+    },
+    "grad_setup": {
+     "first": 0.069510208,
+     "rest": 0.0601839615
+    },
+    "ints_pairs": {
+     "first": 0.042773672,
+     "rest": 0.033276063
+    },
+    "df": {
+     "first": 0.334143507,
+     "rest": 0.223430654
+    },
+    "grid_xc": {
+     "first": 0.138995019,
+     "rest": 0.1386083375
+    },
+    "guess": {
+     "first": 0.0264016715,
+     "rest": 0.0002768715
+    },
+    "dev_loop": {
+     "first": 0.029624989500000004,
+     "rest": 0.012363640000000002
+    },
+    "probes": {
+     "first": 0.5286467185,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0061346735,
+     "rest": 0.0030678874999999998
+    },
+    "t_one_electron": {
+     "first": 0.012584758,
+     "rest": 0.010996133
+    },
+    "t_ecp": {
+     "first": 6.05e-08,
+     "rest": 9.000000000000001e-08
+    },
+    "t_jk_setup": {
+     "first": 0.317167315,
+     "rest": 0.206707882
+    },
+    "t_xc_setup": {
+     "first": 0.0164702195,
+     "rest": 0.0158510185
+    },
+    "t_grid": {
+     "first": 0.0940449635,
+     "rest": 0.0985032
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0264016715,
+     "rest": 0.0002768715
+    },
+    "t_scf_setup": {
+     "first": 0.029624989500000004,
+     "rest": 0.012363640000000002
+    },
+    "t_grad_pairs": {
+     "first": 0.02405418,
+     "rest": 0.0189729965
+    },
+    "t_grad_2e_setup": {
+     "first": 0.016976192,
+     "rest": 0.0166724645
+    },
+    "t_grad_xc_setup": {
+     "first": 0.028479836,
+     "rest": 0.024508742
+    },
+    "t_closed_shell_probe": {
+     "first": 0.5286467185,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.0,
+    "ecp": 9.000000000000001e-08,
+    "grad_2e_setup": 0.0166724645,
+    "grad_2e_setup_aux_pairs": 0.0009422085,
+    "grad_2e_setup_builders": 0.005859322,
+    "grad_2e_setup_kernels": 0.0041107555,
+    "grad_2e_setup_metric": 0.010402809999999998,
+    "grad_2e_setup_metric_host": 5.7539999999999995e-06,
+    "grad_2e_setup_pack_derivs": 5.76e-07,
+    "grad_2e_setup_pack_ints": 1.56e-07,
+    "grad_2e_setup_plan": 0.0002390545,
+    "grad_2e_setup_upload": 0.0016144005,
+    "grad_2e_setup_wait": 1.998e-06,
+    "grad_pairs": 0.0189729965,
+    "grad_xc_setup": 0.024508742,
+    "grad_xc_setup_blocks": 5.9335e-06,
+    "grad_xc_setup_layout": 0.023193098,
+    "grad_xc_setup_layout_blocks": 0.001143481,
+    "grad_xc_setup_layout_lists": 0.00276735,
+    "grad_xc_setup_layout_plans": 0.001566838,
+    "grad_xc_setup_layout_screen": 0.017633871500000002,
+    "grid": 0.0985032,
+    "guess": 0.0002768715,
+    "jk_setup": 0.206707882,
+    "one_electron": 0.010996133,
+    "pairs": 0.0030678874999999998,
+    "scf_setup": 0.012363640000000002,
+    "xc_setup": 0.0158510185
+   },
+   "prepare_rest": 1.999500091187656e-05,
+   "drop_rest": 5.954934749752283e-07,
+   "minflt_rest": 74091.5,
+   "stime_rest": 0.156299,
+   "utime_rest": 5.7613345,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "u1an39-svp/gpu/D": {
+   "nsteps": 30,
+   "repeats": 2,
+   "first": 3.830539802511339,
+   "rest_median": 2.487053778997506,
+   "total": 75.47158931997546,
+   "totals_per_repeat": [
+    75.16067963492242,
+    75.78249900502851
+   ],
+   "iterations_median": 11.0,
+   "iterations_median_rest": 11.0,
+   "iterations_total": 327.0,
+   "breakdown": {
+    "wall": {
+     "first": 3.830539802511339,
+     "rest": 2.487053778997506
+    },
+    "total": {
+     "first": 3.683249977,
+     "rest": 2.4808230365
+    },
+    "outside": {
+     "first": 0.14728982551133907,
+     "rest": 0.0064518344821287155
+    },
+    "scf_setup": {
+     "first": 0.5109326610000002,
+     "rest": 0.3629970609999999
+    },
+    "scf_iter": {
+     "first": 2.355729617,
+     "rest": 1.3098538460000002
+    },
+    "gradient": {
+     "first": 0.8165876989999998,
+     "rest": 0.815206008
+    },
+    "setup": {
+     "first": 0.5806838260000002,
+     "rest": 0.422764242
+    },
+    "grad_setup": {
+     "first": 0.069751165,
+     "rest": 0.06029136
+    },
+    "ints_pairs": {
+     "first": 0.0479995105,
+     "rest": 0.037926839500000004
+    },
+    "df": {
+     "first": 0.3293513805,
+     "rest": 0.22729313950000002
+    },
+    "grid_xc": {
+     "first": 0.138577186,
+     "rest": 0.137749248
+    },
+    "guess": {
+     "first": 0.026549734,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.031099436,
+     "rest": 0.012341126000000001
+    },
+    "probes": {
+     "first": 0.505299336,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0066082895,
+     "rest": 0.0035454655
+    },
+    "t_one_electron": {
+     "first": 0.013621282,
+     "rest": 0.01535973
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 4.5e-08
+    },
+    "t_jk_setup": {
+     "first": 0.312450978,
+     "rest": 0.2106497135
+    },
+    "t_xc_setup": {
+     "first": 0.017086438,
+     "rest": 0.015847873499999998
+    },
+    "t_grid": {
+     "first": 0.0964098845,
+     "rest": 0.09779952550000001
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.026549734,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.031099436,
+     "rest": 0.012341126000000001
+    },
+    "t_grad_pairs": {
+     "first": 0.027769899,
+     "rest": 0.0191188515
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0169004025,
+     "rest": 0.0166439565
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0250808635,
+     "rest": 0.0243959815
+    },
+    "t_closed_shell_probe": {
+     "first": 0.505299336,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.0,
+    "ecp": 4.5e-08,
+    "grad_2e_setup": 0.0166439565,
+    "grad_2e_setup_aux_pairs": 0.000933695,
+    "grad_2e_setup_builders": 0.0058570845,
+    "grad_2e_setup_kernels": 0.0041062849999999994,
+    "grad_2e_setup_metric": 0.010394923,
+    "grad_2e_setup_metric_host": 5.6385e-06,
+    "grad_2e_setup_pack_derivs": 6.01e-07,
+    "grad_2e_setup_pack_ints": 1e-07,
+    "grad_2e_setup_plan": 0.0002374475,
+    "grad_2e_setup_upload": 0.001613443,
+    "grad_2e_setup_wait": 2.013e-06,
+    "grad_pairs": 0.0191188515,
+    "grad_xc_setup": 0.0243959815,
+    "grad_xc_setup_blocks": 5.9235e-06,
+    "grad_xc_setup_layout": 0.023068254,
+    "grad_xc_setup_layout_blocks": 0.001124627,
+    "grad_xc_setup_layout_lists": 0.0026973785,
+    "grad_xc_setup_layout_plans": 0.0015630425,
+    "grad_xc_setup_layout_screen": 0.017622123500000003,
+    "grid": 0.09779952550000001,
+    "guess": 0.0,
+    "jk_setup": 0.2106497135,
+    "one_electron": 0.01535973,
+    "pairs": 0.0035454655,
+    "scf_setup": 0.012341126000000001,
+    "xc_setup": 0.015847873499999998
+   },
+   "prepare_rest": 0.005211263007367961,
+   "drop_rest": 6.10991264693439e-07,
+   "minflt_rest": 68308.0,
+   "stime_rest": 0.1512845,
+   "utime_rest": 5.064254,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "u1an39-tzvp/gpu/A": {
+   "nsteps": 30,
+   "repeats": 1,
+   "first": 10.96510197900352,
+   "rest_median": 10.953744214988546,
+   "total": 325.6208852759155,
+   "totals_per_repeat": [
+    325.6208852759155
+   ],
+   "iterations_median": 16.0,
+   "iterations_median_rest": 16,
+   "iterations_total": 467,
+   "breakdown": {
+    "wall": {
+     "first": 10.96510197900352,
+     "rest": 10.953744214988546
+    },
+    "total": {
+     "first": 10.453100755,
+     "rest": 10.462628299
+    },
+    "outside": {
+     "first": 0.5120012240035212,
+     "rest": 0.5014654359860184
+    },
+    "scf_setup": {
+     "first": 1.4197341959999998,
+     "rest": 1.3909182819999997
+    },
+    "scf_iter": {
+     "first": 6.967982366999999,
+     "rest": 7.004296358
+    },
+    "gradient": {
+     "first": 2.065384192,
+     "rest": 2.062033907
+    },
+    "setup": {
+     "first": 1.6741231719999998,
+     "rest": 1.6423245570000007
+    },
+    "grad_setup": {
+     "first": 0.254388976,
+     "rest": 0.253301433
+    },
+    "ints_pairs": {
+     "first": 0.240462072,
+     "rest": 0.237688184
+    },
+    "df": {
+     "first": 0.9136580129999999,
+     "rest": 0.8944314959999999
+    },
+    "grid_xc": {
+     "first": 0.182221478,
+     "rest": 0.173867998
+    },
+    "guess": {
+     "first": 0.267434276,
+     "rest": 0.267514307
+    },
+    "dev_loop": {
+     "first": 0.048675012,
+     "rest": 0.047417182
+    },
+    "probes": {
+     "first": 1.350368327,
+     "rest": 1.368455693
+    },
+    "t_pairs": {
+     "first": 0.023765276,
+     "rest": 0.022344051
+    },
+    "t_one_electron": {
+     "first": 0.053231408,
+     "rest": 0.050571391
+    },
+    "t_ecp": {
+     "first": 2.5e-07,
+     "rest": 2e-07
+    },
+    "t_jk_setup": {
+     "first": 0.868470251,
+     "rest": 0.850400122
+    },
+    "t_xc_setup": {
+     "first": 0.029621155,
+     "rest": 0.026999866
+    },
+    "t_grid": {
+     "first": 0.106864247,
+     "rest": 0.102895245
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.267434276,
+     "rest": 0.267514307
+    },
+    "t_scf_setup": {
+     "first": 0.048675012,
+     "rest": 0.047417182
+    },
+    "t_grad_pairs": {
+     "first": 0.163465138,
+     "rest": 0.165073685
+    },
+    "t_grad_2e_setup": {
+     "first": 0.045187762,
+     "rest": 0.04402118
+    },
+    "t_grad_xc_setup": {
+     "first": 0.045736076,
+     "rest": 0.044445296
+    },
+    "t_closed_shell_probe": {
+     "first": 1.350368327,
+     "rest": 1.368455693
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 1.368455693,
+    "ecp": 2e-07,
+    "grad_2e_setup": 0.04402118,
+    "grad_2e_setup_aux_pairs": 0.000930989,
+    "grad_2e_setup_builders": 0.032942785,
+    "grad_2e_setup_kernels": 0.029321033,
+    "grad_2e_setup_metric": 0.010417281,
+    "grad_2e_setup_metric_host": 7.932e-06,
+    "grad_2e_setup_pack_derivs": 6.71e-07,
+    "grad_2e_setup_pack_ints": 1.7e-07,
+    "grad_2e_setup_plan": 0.000536256,
+    "grad_2e_setup_upload": 0.0030685599999999997,
+    "grad_2e_setup_wait": 2.033e-06,
+    "grad_pairs": 0.165073685,
+    "grad_xc_setup": 0.044445296,
+    "grad_xc_setup_blocks": 7.761e-06,
+    "grad_xc_setup_layout": 0.042485832,
+    "grad_xc_setup_layout_blocks": 0.002450441,
+    "grad_xc_setup_layout_lists": 0.0039492139999999995,
+    "grad_xc_setup_layout_plans": 0.00218973,
+    "grad_xc_setup_layout_screen": 0.033765891,
+    "grid": 0.102895245,
+    "guess": 0.267514307,
+    "jk_setup": 0.850400122,
+    "one_electron": 0.050571391,
+    "pairs": 0.022344051,
+    "scf_setup": 0.047417182,
+    "xc_setup": 0.026999866
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 727495,
+   "stime_rest": 2.344574,
+   "utime_rest": 15.734125,
+   "closed_shell_probe_ran": 30,
+   "stability_probe_steps": 0
+  },
+  "u1an39-tzvp/gpu/B": {
+   "nsteps": 30,
+   "repeats": 1,
+   "first": 10.88835222698981,
+   "rest_median": 10.16908367301221,
+   "total": 301.98418780998327,
+   "totals_per_repeat": [
+    301.98418780998327
+   ],
+   "iterations_median": 16.0,
+   "iterations_median_rest": 16,
+   "iterations_total": 467,
+   "breakdown": {
+    "wall": {
+     "first": 10.88835222698981,
+     "rest": 10.16908367301221
+    },
+    "total": {
+     "first": 10.514332092,
+     "rest": 10.056460453
+    },
+    "outside": {
+     "first": 0.37402013498980935,
+     "rest": 0.11532136502549051
+    },
+    "scf_setup": {
+     "first": 1.3889301839999992,
+     "rest": 0.9904194730000012
+    },
+    "scf_iter": {
+     "first": 7.06769452,
+     "rest": 6.99173902
+    },
+    "gradient": {
+     "first": 2.0577073880000007,
+     "rest": 2.066482852
+    },
+    "setup": {
+     "first": 1.6403381409999993,
+     "rest": 1.1982927710000002
+    },
+    "grad_setup": {
+     "first": 0.251407957,
+     "rest": 0.20788037999999998
+    },
+    "ints_pairs": {
+     "first": 0.234043948,
+     "rest": 0.175131417
+    },
+    "df": {
+     "first": 0.898119517,
+     "rest": 0.797978732
+    },
+    "grid_xc": {
+     "first": 0.17378333,
+     "rest": 0.172984168
+    },
+    "guess": {
+     "first": 0.265148361,
+     "rest": 0.000845089
+    },
+    "dev_loop": {
+     "first": 0.047448869,
+     "rest": 0.032028661
+    },
+    "probes": {
+     "first": 1.365488525,
+     "rest": 1.3609348030000001
+    },
+    "t_pairs": {
+     "first": 0.021154273,
+     "rest": 0.014060636
+    },
+    "t_one_electron": {
+     "first": 0.04999194,
+     "rest": 0.040788532
+    },
+    "t_ecp": {
+     "first": 3.9e-07,
+     "rest": 2.5e-07
+    },
+    "t_jk_setup": {
+     "first": 0.854594103,
+     "rest": 0.754379416
+    },
+    "t_xc_setup": {
+     "first": 0.028220299,
+     "rest": 0.026841017
+    },
+    "t_grid": {
+     "first": 0.100577833,
+     "rest": 0.101830756
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.265148361,
+     "rest": 0.000845089
+    },
+    "t_scf_setup": {
+     "first": 0.047448869,
+     "rest": 0.032028661
+    },
+    "t_grad_pairs": {
+     "first": 0.162897345,
+     "rest": 0.119657309
+    },
+    "t_grad_2e_setup": {
+     "first": 0.043525414,
+     "rest": 0.043490042
+    },
+    "t_grad_xc_setup": {
+     "first": 0.044985198,
+     "rest": 0.044103353
+    },
+    "t_closed_shell_probe": {
+     "first": 1.365488525,
+     "rest": 1.3609348030000001
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 1.3609348030000001,
+    "ecp": 2.5e-07,
+    "grad_2e_setup": 0.043490042,
+    "grad_2e_setup_aux_pairs": 0.000889687,
+    "grad_2e_setup_builders": 0.032456414,
+    "grad_2e_setup_kernels": 0.028840150000000002,
+    "grad_2e_setup_metric": 0.010378824,
+    "grad_2e_setup_metric_host": 8.183e-06,
+    "grad_2e_setup_pack_derivs": 5.61e-07,
+    "grad_2e_setup_pack_ints": 1.7e-07,
+    "grad_2e_setup_plan": 0.000547322,
+    "grad_2e_setup_upload": 0.0030615,
+    "grad_2e_setup_wait": 1.823e-06,
+    "grad_pairs": 0.119657309,
+    "grad_xc_setup": 0.044103353,
+    "grad_xc_setup_blocks": 7.451e-06,
+    "grad_xc_setup_layout": 0.042315467,
+    "grad_xc_setup_layout_blocks": 0.002326616,
+    "grad_xc_setup_layout_lists": 0.0037940310000000033,
+    "grad_xc_setup_layout_plans": 0.002258123,
+    "grad_xc_setup_layout_screen": 0.033705931,
+    "grid": 0.101830756,
+    "guess": 0.000845089,
+    "jk_setup": 0.754379416,
+    "one_electron": 0.040788532,
+    "pairs": 0.014060636,
+    "scf_setup": 0.032028661,
+    "xc_setup": 0.026841017
+   },
+   "prepare_rest": 0.005363118019886315,
+   "drop_rest": 0.1063538409944158,
+   "minflt_rest": 174301,
+   "stime_rest": 1.666766,
+   "utime_rest": 15.3724,
+   "closed_shell_probe_ran": 30,
+   "stability_probe_steps": 0
+  },
+  "u1an39-tzvp/gpu/C": {
+   "nsteps": 30,
+   "repeats": 1,
+   "first": 10.654734039999312,
+   "rest_median": 8.617494586011162,
+   "total": 257.69984416200896,
+   "totals_per_repeat": [
+    257.69984416200896
+   ],
+   "iterations_median": 16.0,
+   "iterations_median_rest": 16,
+   "iterations_total": 467,
+   "breakdown": {
+    "wall": {
+     "first": 10.654734039999312,
+     "rest": 8.617494586011162
+    },
+    "total": {
+     "first": 10.40835676,
+     "rest": 8.614318102
+    },
+    "outside": {
+     "first": 0.24637727999931158,
+     "rest": 0.003356486016151905
+    },
+    "scf_setup": {
+     "first": 1.3872759710000007,
+     "rest": 0.9709223569999997
+    },
+    "scf_iter": {
+     "first": 6.949511062,
+     "rest": 5.579634144
+    },
+    "gradient": {
+     "first": 2.071569727,
+     "rest": 2.064545688000001
+    },
+    "setup": {
+     "first": 1.6414808780000008,
+     "rest": 1.180228198
+    },
+    "grad_setup": {
+     "first": 0.25420490700000004,
+     "rest": 0.207678373
+    },
+    "ints_pairs": {
+     "first": 0.238171918,
+     "rest": 0.177065919
+    },
+    "df": {
+     "first": 0.897514498,
+     "rest": 0.777822098
+    },
+    "grid_xc": {
+     "first": 0.17202531199999999,
+     "rest": 0.17115413299999999
+    },
+    "guess": {
+     "first": 0.264776847,
+     "rest": 0.000868435
+    },
+    "dev_loop": {
+     "first": 0.047268019,
+     "rest": 0.031626317
+    },
+    "probes": {
+     "first": 1.353597269,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.022421512,
+     "rest": 0.015182851
+    },
+    "t_one_electron": {
+     "first": 0.050957023,
+     "rest": 0.041599479
+    },
+    "t_ecp": {
+     "first": 1.51e-07,
+     "rest": 2.51e-07
+    },
+    "t_jk_setup": {
+     "first": 0.853297285,
+     "rest": 0.734351036
+    },
+    "t_xc_setup": {
+     "first": 0.02959896,
+     "rest": 0.025269112
+    },
+    "t_grid": {
+     "first": 0.09723189,
+     "rest": 0.101706876
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.264776847,
+     "rest": 0.000868435
+    },
+    "t_scf_setup": {
+     "first": 0.047268019,
+     "rest": 0.031626317
+    },
+    "t_grad_pairs": {
+     "first": 0.164793232,
+     "rest": 0.120067243
+    },
+    "t_grad_2e_setup": {
+     "first": 0.044217213,
+     "rest": 0.043691373
+    },
+    "t_grad_xc_setup": {
+     "first": 0.045194462,
+     "rest": 0.043928359
+    },
+    "t_closed_shell_probe": {
+     "first": 1.353597269,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.0,
+    "ecp": 2.51e-07,
+    "grad_2e_setup": 0.043691373,
+    "grad_2e_setup_aux_pairs": 0.000935156,
+    "grad_2e_setup_builders": 0.032501803,
+    "grad_2e_setup_kernels": 0.029084516999999997,
+    "grad_2e_setup_metric": 0.010437789,
+    "grad_2e_setup_metric_host": 8.613e-06,
+    "grad_2e_setup_pack_derivs": 5.8e-07,
+    "grad_2e_setup_pack_ints": 1e-07,
+    "grad_2e_setup_plan": 0.000559932,
+    "grad_2e_setup_upload": 0.0030775769999999997,
+    "grad_2e_setup_wait": 1.823e-06,
+    "grad_pairs": 0.120067243,
+    "grad_xc_setup": 0.043928359,
+    "grad_xc_setup_blocks": 2.0942e-05,
+    "grad_xc_setup_layout": 0.042456987,
+    "grad_xc_setup_layout_blocks": 0.002353898,
+    "grad_xc_setup_layout_lists": 0.004106251999999998,
+    "grad_xc_setup_layout_plans": 0.002236892,
+    "grad_xc_setup_layout_screen": 0.03363715,
+    "grid": 0.101706876,
+    "guess": 0.000868435,
+    "jk_setup": 0.734351036,
+    "one_electron": 0.041599479,
+    "pairs": 0.015182851,
+    "scf_setup": 0.031626317,
+    "xc_setup": 0.025269112
+   },
+   "prepare_rest": 2.194297849200666e-05,
+   "drop_rest": 5.100155249238014e-07,
+   "minflt_rest": 159467,
+   "stime_rest": 1.291982,
+   "utime_rest": 13.378571,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "u1an39-tzvp/gpu/D": {
+   "nsteps": 30,
+   "repeats": 1,
+   "first": 10.739066168986028,
+   "rest_median": 6.651662832999136,
+   "total": 210.73378356496687,
+   "totals_per_repeat": [
+    210.73378356496687
+   ],
+   "iterations_median": 10.0,
+   "iterations_median_rest": 10,
+   "iterations_total": 330,
+   "breakdown": {
+    "wall": {
+     "first": 10.739066168986028,
+     "rest": 6.651662832999136
+    },
+    "total": {
+     "first": 10.49359459,
+     "rest": 6.62676087
+    },
+    "outside": {
+     "first": 0.24547157898602734,
+     "rest": 0.020378985995495036
+    },
+    "scf_setup": {
+     "first": 1.435830973,
+     "rest": 1.017354411
+    },
+    "scf_iter": {
+     "first": 6.9807135240000004,
+     "rest": 3.5096648139999997
+    },
+    "gradient": {
+     "first": 2.0770500930000004,
+     "rest": 2.065333667
+    },
+    "setup": {
+     "first": 1.6930626640000002,
+     "rest": 1.228148345
+    },
+    "grad_setup": {
+     "first": 0.257231691,
+     "rest": 0.209917857
+    },
+    "ints_pairs": {
+     "first": 0.24177205799999998,
+     "rest": 0.198145136
+    },
+    "df": {
+     "first": 0.938057253,
+     "rest": 0.806496312
+    },
+    "grid_xc": {
+     "first": 0.176545174,
+     "rest": 0.17169347299999999
+    },
+    "guess": {
+     "first": 0.266652278,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.047815728,
+     "rest": 0.031678818
+    },
+    "probes": {
+     "first": 1.372445106,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.022304119,
+     "rest": 0.021336174
+    },
+    "t_one_electron": {
+     "first": 0.052732577,
+     "rest": 0.054452462
+    },
+    "t_ecp": {
+     "first": 1.4e-07,
+     "rest": 2.6e-07
+    },
+    "t_jk_setup": {
+     "first": 0.893343246,
+     "rest": 0.762750099
+    },
+    "t_xc_setup": {
+     "first": 0.032302555,
+     "rest": 0.025394333
+    },
+    "t_grid": {
+     "first": 0.098460157,
+     "rest": 0.102271144
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.266652278,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.047815728,
+     "rest": 0.031678818
+    },
+    "t_grad_pairs": {
+     "first": 0.166735222,
+     "rest": 0.121872331
+    },
+    "t_grad_2e_setup": {
+     "first": 0.044714007,
+     "rest": 0.043786984
+    },
+    "t_grad_xc_setup": {
+     "first": 0.045782462,
+     "rest": 0.04397137
+    },
+    "t_closed_shell_probe": {
+     "first": 1.372445106,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.0,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "closed_shell_probe": 0.0,
+    "ecp": 2.6e-07,
+    "grad_2e_setup": 0.043786984,
+    "grad_2e_setup_aux_pairs": 0.000975266,
+    "grad_2e_setup_builders": 0.032600032,
+    "grad_2e_setup_kernels": 0.029162916,
+    "grad_2e_setup_metric": 0.010472228,
+    "grad_2e_setup_metric_host": 7.04e-06,
+    "grad_2e_setup_pack_derivs": 5.71e-07,
+    "grad_2e_setup_pack_ints": 1.1e-07,
+    "grad_2e_setup_plan": 0.000575925,
+    "grad_2e_setup_upload": 0.003075281,
+    "grad_2e_setup_wait": 2.103e-06,
+    "grad_pairs": 0.121872331,
+    "grad_xc_setup": 0.04397137,
+    "grad_xc_setup_blocks": 1.4532e-05,
+    "grad_xc_setup_layout": 0.042521892,
+    "grad_xc_setup_layout_blocks": 0.002416201,
+    "grad_xc_setup_layout_lists": 0.004146532000000001,
+    "grad_xc_setup_layout_plans": 0.002232706,
+    "grad_xc_setup_layout_screen": 0.033656679999999994,
+    "grid": 0.102271144,
+    "guess": 0.0,
+    "jk_setup": 0.762750099,
+    "one_electron": 0.054452462,
+    "pairs": 0.021336174,
+    "scf_setup": 0.031678818,
+    "xc_setup": 0.025394333
+   },
+   "prepare_rest": 0.017063994018826634,
+   "drop_rest": 4.910107236355543e-07,
+   "minflt_rest": 130093,
+   "stime_rest": 1.092372,
+   "utime_rest": 11.83457,
+   "closed_shell_probe_ran": 1,
+   "stability_probe_steps": 0
+  },
+  "la18cat-svp/cpu/A": {
+   "nsteps": 24,
+   "repeats": 2,
+   "first": 3.5679745115048718,
+   "rest_median": 2.8057538389984984,
+   "total": 71.07090677200176,
+   "totals_per_repeat": [
+    69.08247052301886,
+    73.05934302098467
+   ],
+   "iterations_median": 20.0,
+   "iterations_median_rest": 20.0,
+   "iterations_total": 504.0,
+   "breakdown": {
+    "wall": {
+     "first": 3.5679745115048718,
+     "rest": 2.8057538389984984
+    },
+    "total": {
+     "first": 3.5541509655,
+     "rest": 2.7907480135
+    },
+    "outside": {
+     "first": 0.013823546004871679,
+     "rest": 0.01663788149161416
+    },
+    "scf_setup": {
+     "first": 0.1035902704999998,
+     "rest": 0.1051647309999999
+    },
+    "scf_iter": {
+     "first": 3.109769747,
+     "rest": 2.363539842
+    },
+    "gradient": {
+     "first": 0.3407909480000002,
+     "rest": 0.32640307199999996
+    },
+    "setup": {
+     "first": 0.1312015112499998,
+     "rest": 0.13315693350000013
+    },
+    "grad_setup": {
+     "first": 0.027611240750000002,
+     "rest": 0.027631932749999998
+    },
+    "ints_pairs": {
+     "first": 0.007113267499999999,
+     "rest": 0.007406791500000001
+    },
+    "df": {
+     "first": 0.0633939615,
+     "rest": 0.064132891
+    },
+    "grid_xc": {
+     "first": 0.04757462750000001,
+     "rest": 0.0477268715
+    },
+    "guess": {
+     "first": 0.0121794495,
+     "rest": 0.012377027499999999
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.19873259799999998,
+     "rest": 0.189218221
+    },
+    "t_pairs": {
+     "first": 0.001499689,
+     "rest": 0.0017941419999999999
+    },
+    "t_one_electron": {
+     "first": 0.0017896215,
+     "rest": 0.0017605925
+    },
+    "t_ecp": {
+     "first": 3e-08,
+     "rest": 4e-08
+    },
+    "t_jk_setup": {
+     "first": 0.0633939615,
+     "rest": 0.064132891
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.04757462750000001,
+     "rest": 0.0477268715
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0121794495,
+     "rest": 0.012377027499999999
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.003823927,
+     "rest": 0.0038537015
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.19873259799999998,
+     "rest": 0.189218221
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4e-08,
+    "grad_pairs": 0.0038537015,
+    "grid": 0.0477268715,
+    "guess": 0.012377027499999999,
+    "jk_setup": 0.064132891,
+    "one_electron": 0.0017605925,
+    "pairs": 0.0017941419999999999,
+    "stability": 0.189218221
+   },
+   "prepare_rest": 0.0,
+   "drop_rest": 0.0,
+   "minflt_rest": 168049.5,
+   "stime_rest": 0.25441,
+   "utime_rest": 18.096892500000003,
+   "closed_shell_probe_ran": 0,
+   "stability_probe_steps": 24
+  },
+  "la18cat-svp/cpu/B": {
+   "nsteps": 24,
+   "repeats": 2,
+   "first": 3.3500415254820837,
+   "rest_median": 2.734609692997765,
+   "total": 68.0737223604956,
+   "totals_per_repeat": [
+    68.58779751896509,
+    67.5596472020261
+   ],
+   "iterations_median": 20.0,
+   "iterations_median_rest": 20.0,
+   "iterations_total": 504.0,
+   "breakdown": {
+    "wall": {
+     "first": 3.3500415254820837,
+     "rest": 2.734609692997765
+    },
+    "total": {
+     "first": 3.344976689,
+     "rest": 2.7294171255
+    },
+    "outside": {
+     "first": 0.005064836482083779,
+     "rest": 0.004934615989909519
+    },
+    "scf_setup": {
+     "first": 0.1056050150000003,
+     "rest": 0.06758240150000017
+    },
+    "scf_iter": {
+     "first": 2.9221664379999996,
+     "rest": 2.3448450355
+    },
+    "gradient": {
+     "first": 0.3172052359999997,
+     "rest": 0.3152329395000002
+    },
+    "setup": {
+     "first": 0.13229237800000032,
+     "rest": 0.09468662025000024
+    },
+    "grad_setup": {
+     "first": 0.026687363,
+     "rest": 0.027068495249999998
+    },
+    "ints_pairs": {
+     "first": 0.007464288,
+     "rest": 0.005951479500000001
+    },
+    "df": {
+     "first": 0.0643463675,
+     "rest": 0.0424491915
+    },
+    "grid_xc": {
+     "first": 0.045602505,
+     "rest": 0.0462753055
+    },
+    "guess": {
+     "first": 0.0123523325,
+     "rest": 6.9855e-05
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.189377046,
+     "rest": 0.1852509295
+    },
+    "t_pairs": {
+     "first": 0.001824071,
+     "rest": 0.000737138
+    },
+    "t_one_electron": {
+     "first": 0.0017540665,
+     "rest": 0.0013866685
+    },
+    "t_ecp": {
+     "first": 4e-08,
+     "rest": 3.4999999999999996e-08
+    },
+    "t_jk_setup": {
+     "first": 0.0643463675,
+     "rest": 0.0424491915
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.045602505,
+     "rest": 0.0462753055
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0123523325,
+     "rest": 6.9855e-05
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.0038861104999999996,
+     "rest": 0.003853927
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.189377046,
+     "rest": 0.1852509295
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 3.4999999999999996e-08,
+    "grad_pairs": 0.003853927,
+    "grid": 0.0462753055,
+    "guess": 6.9855e-05,
+    "jk_setup": 0.0424491915,
+    "one_electron": 0.0013866685,
+    "pairs": 0.000737138,
+    "stability": 0.1852509295
+   },
+   "prepare_rest": 0.0037477869918802753,
+   "drop_rest": 0.0002021690015681088,
+   "minflt_rest": 131405.5,
+   "stime_rest": 0.1813515,
+   "utime_rest": 17.881161,
+   "closed_shell_probe_ran": 0,
+   "stability_probe_steps": 24
+  },
+  "la18cat-svp/cpu/C": {
+   "nsteps": 24,
+   "repeats": 2,
+   "first": 3.481852678989526,
+   "rest_median": 2.69817507249536,
+   "total": 67.2455175575742,
+   "totals_per_repeat": [
+    66.17944212112343,
+    68.31159299402498
+   ],
+   "iterations_median": 20.0,
+   "iterations_median_rest": 20.0,
+   "iterations_total": 504.0,
+   "breakdown": {
+    "wall": {
+     "first": 3.481852678989526,
+     "rest": 2.69817507249536
+    },
+    "total": {
+     "first": 3.477087499,
+     "rest": 2.697672015
+    },
+    "outside": {
+     "first": 0.004765179989525858,
+     "rest": 0.0005239445104243678
+    },
+    "scf_setup": {
+     "first": 0.10961350999999997,
+     "rest": 0.07049819400000001
+    },
+    "scf_iter": {
+     "first": 3.0346911115,
+     "rest": 2.2966787445
+    },
+    "gradient": {
+     "first": 0.33278287750000013,
+     "rest": 0.33020086299999996
+    },
+    "setup": {
+     "first": 0.13763000399999997,
+     "rest": 0.0980447605000003
+    },
+    "grad_setup": {
+     "first": 0.028016494000000003,
+     "rest": 0.027496725
+    },
+    "ints_pairs": {
+     "first": 0.0075565935,
+     "rest": 0.0061560785
+    },
+    "df": {
+     "first": 0.065964101,
+     "rest": 0.0442960295
+    },
+    "grid_xc": {
+     "first": 0.048480191000000006,
+     "rest": 0.0470181655
+    },
+    "guess": {
+     "first": 0.0121914925,
+     "rest": 7.65505e-05
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.19329977399999998,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.00200003,
+     "rest": 0.000789529
+    },
+    "t_one_electron": {
+     "first": 0.00178013,
+     "rest": 0.0013967945
+    },
+    "t_ecp": {
+     "first": 3.4999999999999996e-08,
+     "rest": 4e-08
+    },
+    "t_jk_setup": {
+     "first": 0.065964101,
+     "rest": 0.0442960295
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.048480191000000006,
+     "rest": 0.0470181655
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0121914925,
+     "rest": 7.65505e-05
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.0037763985,
+     "rest": 0.003951958
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.19329977399999998,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 4e-08,
+    "grad_pairs": 0.003951958,
+    "grid": 0.0470181655,
+    "guess": 7.65505e-05,
+    "jk_setup": 0.0442960295,
+    "one_electron": 0.0013967945,
+    "pairs": 0.000789529,
+    "stability": 0.0
+   },
+   "prepare_rest": 2.0149993360973895e-05,
+   "drop_rest": 5.204929038882256e-07,
+   "minflt_rest": 115454.0,
+   "stime_rest": 0.178985,
+   "utime_rest": 17.470381,
+   "closed_shell_probe_ran": 0,
+   "stability_probe_steps": 2
+  },
+  "la18cat-svp/cpu/D": {
+   "nsteps": 24,
+   "repeats": 2,
+   "first": 3.5048328199918615,
+   "rest_median": 1.8834842200012645,
+   "total": 65.27969007643696,
+   "totals_per_repeat": [
+    63.20417288891622,
+    67.35520726395771
+   ],
+   "iterations_median": 14.0,
+   "iterations_median_rest": 14.0,
+   "iterations_total": 509.0,
+   "breakdown": {
+    "wall": {
+     "first": 3.5048328199918615,
+     "rest": 1.8834842200012645
+    },
+    "total": {
+     "first": 3.5000254565,
+     "rest": 1.8818472195
+    },
+    "outside": {
+     "first": 0.004807363491861505,
+     "rest": 0.001676720504259599
+    },
+    "scf_setup": {
+     "first": 0.10529731649999996,
+     "rest": 0.07077763400000014
+    },
+    "scf_iter": {
+     "first": 3.0661569475,
+     "rest": 1.4902743410000001
+    },
+    "gradient": {
+     "first": 0.3285711924999999,
+     "rest": 0.32058942450000005
+    },
+    "setup": {
+     "first": 0.13250395274999996,
+     "rest": 0.09802771725000015
+    },
+    "grad_setup": {
+     "first": 0.02720663625,
+     "rest": 0.0272945755
+    },
+    "ints_pairs": {
+     "first": 0.007626435,
+     "rest": 0.0067133240000000005
+    },
+    "df": {
+     "first": 0.0645692945,
+     "rest": 0.044756288000000005
+    },
+    "grid_xc": {
+     "first": 0.0464061685,
+     "rest": 0.046906005
+    },
+    "guess": {
+     "first": 0.0123024695,
+     "rest": 0.0
+    },
+    "dev_loop": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "probes": {
+     "first": 0.195411485,
+     "rest": 0.0
+    },
+    "t_pairs": {
+     "first": 0.0018282745000000001,
+     "rest": 0.0007830345
+    },
+    "t_one_electron": {
+     "first": 0.0017945735,
+     "rest": 0.0020083404999999997
+    },
+    "t_ecp": {
+     "first": 3.4999999999999996e-08,
+     "rest": 3.55e-08
+    },
+    "t_jk_setup": {
+     "first": 0.0645692945,
+     "rest": 0.044756288000000005
+    },
+    "t_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grid": {
+     "first": 0.0464061685,
+     "rest": 0.046906005
+    },
+    "t_nlc_grid": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_guess": {
+     "first": 0.0123024695,
+     "rest": 0.0
+    },
+    "t_scf_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_pairs": {
+     "first": 0.0040035520000000005,
+     "rest": 0.003888148
+    },
+    "t_grad_2e_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_grad_xc_setup": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_closed_shell_probe": {
+     "first": 0.0,
+     "rest": 0.0
+    },
+    "t_stability": {
+     "first": 0.195411485,
+     "rest": 0.0
+    }
+   },
+   "setup_timers_rest": {
+    "ecp": 3.55e-08,
+    "grad_pairs": 0.003888148,
+    "grid": 0.046906005,
+    "guess": 0.0,
+    "jk_setup": 0.044756288000000005,
+    "one_electron": 0.0020083404999999997,
+    "pairs": 0.0007830345,
+    "stability": 0.0
+   },
+   "prepare_rest": 0.0011328215041430667,
+   "drop_rest": 5.909823812544346e-07,
+   "minflt_rest": 118109.5,
+   "stime_rest": 0.16150399999999998,
+   "utime_rest": 12.4598435,
+   "closed_shell_probe_ran": 0,
+   "stability_probe_steps": 2
+  }
+ },
+ "energies": {
+  "la18-svp/cpu": {
+   "max_dE": 3.069544618483633e-12,
+   "max_dE_sad_modes": 1.2505552149377763e-12,
+   "max_dgrad": 1.1464533599125915e-06,
+   "max_dgrad_sad_modes": 1.848410313698423e-12,
+   "runs": 8
+  },
+  "la18-svp/gpu": {
+   "max_dE": 2.6147972675971687e-12,
+   "max_dE_sad_modes": 7.958078640513122e-13,
+   "max_dgrad": 1.1464532816973794e-06,
+   "max_dgrad_sad_modes": 1.8396395518038844e-12,
+   "runs": 8
+  },
+  "la18cat-svp/cpu": {
+   "max_dE": 0.0009153441542366636,
+   "max_dE_sad_modes": 1.0231815394945443e-12,
+   "max_dgrad": 0.017615297587179835,
+   "max_dgrad_sad_modes": 1.554478767928913e-12,
+   "runs": 8
+  },
+  "u1an39-svp/cpu": {
+   "max_dE": 8.185452315956354e-12,
+   "max_dE_sad_modes": 7.275957614183426e-12,
+   "max_dgrad": 6.8794442961706e-07,
+   "max_dgrad_sad_modes": 2.7634422528066693e-12,
+   "runs": 8
+  },
+  "u1an39-svp/gpu": {
+   "max_dE": 5.002220859751105e-12,
+   "max_dE_sad_modes": 4.547473508864641e-12,
+   "max_dgrad": 6.879452492947191e-07,
+   "max_dgrad_sad_modes": 2.444988655980751e-12,
+   "runs": 8
+  },
+  "u1an39-tzvp/gpu": {
+   "max_dE": 8.185452315956354e-12,
+   "max_dE_sad_modes": 8.185452315956354e-12,
+   "max_dgrad": 1.1802383612369294e-06,
+   "max_dgrad_sad_modes": 2.1382800044489336e-12,
+   "runs": 4
+  },
+  "water-svp/cpu": {
+   "max_dE": 1.4210854715202004e-13,
+   "max_dE_sad_modes": 8.526512829121202e-14,
+   "max_dgrad": 9.968652923963983e-09,
+   "max_dgrad_sad_modes": 5.113687251423471e-13,
+   "runs": 8
+  },
+  "water-svp/gpu": {
+   "max_dE": 9.947598300641403e-14,
+   "max_dE_sad_modes": 9.947598300641403e-14,
+   "max_dgrad": 9.968621893230445e-09,
+   "max_dgrad_sad_modes": 3.360645095540349e-13,
+   "runs": 8
+  },
+  "water-svp/cpu-vs-gpu": {
+   "max_dE": 9.947598300641403e-14
+  },
+  "u1an39-svp/cpu-vs-gpu": {
+   "max_dE": 4.547473508864641e-12
+  },
+  "la18-svp/cpu-vs-gpu": {
+   "max_dE": 9.094947017729282e-13
+  }
+ }
+}

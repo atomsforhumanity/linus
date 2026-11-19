@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# 1.89: File::lock (linus-xc/build.rs), AVX-512 target features and intrinsics
+rust-version = "1.89"
+license = "MIT"
+authors = ["Atoms for Humanity"]
+repository = "https://github.com/atomsforhumanity/linus"
+
+[workspace.dependencies]
+rayon = "1.10"
+faer = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+approx = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = 1
+
+# Release artifacts (CLI archives, wheels): the release profile without debug info, stripped.
+# cargo build --profile dist -p linus-cli; maturin build --profile dist
+[profile.dist]
+inherits = "release"
+debug = 0
+strip = true
+
+# Tests and other correctness builds: the release profile without thin LTO, in 16 codegen units.
+# The same numbers as release (Rust has no fast-math: LLVM neither reassociates nor contracts
+# floating-point operations, however much it inlines), but the ~90 test and example binaries
+# link in seconds: under release, thin LTO compiles the whole program again at every link (2-3
+# minutes each). Timings and shipped artifacts still come from release (and dist), the binaries
+# users run. cargo test --profile test-fast --workspace (binaries in target/test-fast/)
+[profile.test-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+
+[profile.dev]
+opt-level = 2

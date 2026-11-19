@@ -1,0 +1,1 @@
+{"case": "water.hf.6-31gs-cart.exact", "run": "psi4", "program": "psi4", "program_version": "1.11", "hessian_hash": "071ccc11fe6e2cab", "masses": [15.99491461957, 1.00782503223, 1.00782503223], "analysis": "psi4 harmonic analysis (bench/vib/refs.py), translations and rotations projected", "frequencies": [1864.6005240041595, 3929.136540961, 4034.276225548735]}

@@ -1,0 +1,6 @@
+4
+nh3 charge=0 mult=1; gas-phase B3LYP/G/def2-SVP (exact J/K, DefGrid2, TightOpt) minimum, ORCA 6.0.0; Angstrom
+N       0.00000000     -0.00002394      0.13183140
+H      -0.00000000      0.93763362     -0.27631747
+H       0.81204269     -0.46885484     -0.27630696
+H      -0.81204269     -0.46885484     -0.27630696

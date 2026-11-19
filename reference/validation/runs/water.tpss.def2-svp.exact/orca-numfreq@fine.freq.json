@@ -1,0 +1,1 @@
+{"case": "water.tpss.def2-svp.exact", "run": "orca-numfreq@fine", "program": "orca", "program_version": "6.0.0", "hessian_hash": "e3b9a386af880d2d", "masses": [15.99491461957, 1.00782503223, 1.00782503223], "analysis": "orca harmonic analysis (bench/vib/refs.py), translations and rotations projected", "frequencies": [1582.0675345432467, 3895.8099224134558, 4007.639296249603]}

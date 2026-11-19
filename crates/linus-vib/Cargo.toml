@@ -1,0 +1,19 @@
+[package]
+name = "linus-vib"
+description = "Harmonic vibrational analysis and ideal-gas thermochemistry from any program's Cartesian Hessian"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# Pure functions of a Hessian: on linus-base (errors, linear algebra) and linus-core (units)
+# only; the facade runs it after a Hessian (`linus::vib`).
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-base = { path = "../linus-base" }
+faer.workspace = true
+serde.workspace = true
+serde_json.workspace = true

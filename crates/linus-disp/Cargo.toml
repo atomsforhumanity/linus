@@ -1,0 +1,25 @@
+[package]
+name = "linus-disp"
+description = "Dispersion corrections for linus: DFT-D3(BJ) with optional ATM three-body term and DFT-D4, energies, analytic gradients and analytic Hessians"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+# Not the workspace's MIT license: this crate ports s-dftd3 and dftd4 (LGPL-3.0-or-later)
+# and multicharge / mctc-lib (Apache-2.0), and links axtb-d4 (LGPL-3.0-or-later).
+# The `linus` crate depends on it through its `dispersion` feature, on by default (linus-cli
+# and linus-py forward the feature). See README.md, NOTICE.md and THIRD_PARTY_NOTICES.md.
+license = "LGPL-3.0-or-later"
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+# DFT-D4 model of axtb (bit-identical to dftd4 4.3.1), the crates.io release of the public
+# atomsforhumanity/axtb repository (LGPL-3.0-or-later), pinned exactly.
+axtb-d4 = "=0.1.1"
+rayon.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }

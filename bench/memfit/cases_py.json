@@ -1,0 +1,5 @@
+[
+ {"name": "mepd.caf.wb97x.tz.e", "xyz": "caffeine.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "energy", "memory_gib": "plan", "opts": {"jk": {"kind": "df", "aux": "def2-universal-jkfit"}, "grid": "linus:2"}},
+ {"name": "mepd.caf.wb97x.tz.g", "xyz": "caffeine.xyz", "method": "wb97x-d3bj", "basis": "def2-tzvp", "calctype": "gradient", "memory_gib": "plan", "opts": {"jk": {"kind": "df", "aux": "def2-universal-jkfit"}, "grid": "linus:2"}},
+ {"name": "pack.caf.b3lyp.svp.h.t8", "xyz": "caffeine.xyz", "method": "b3lyp", "basis": "def2-svp", "calctype": "hessian", "threads": 8, "memory_gib": "plan"}
+]

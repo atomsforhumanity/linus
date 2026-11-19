@@ -1,0 +1,188 @@
+"""Generate Rys quadrature tables for linus-ints (crates/linus-ints/src/core/rys_tables.rs) and the
+reference values used by its tests (crates/linus-ints/src/core/rys_ref.txt).
+
+Rys quadrature of order n at parameter T: nodes x_i = t_i^2 in (0, 1) and weights w_i with
+    sum_i w_i x_i^k = F_k(T) = int_0^1 t^(2k) exp(-T t^2) dt,   k = 0..2n-1.
+Nodes and weights are computed in 60-digit arithmetic (mpmath) from the moments F_k(T) by
+Golub-Welsch, then fitted on [0, T_asym(n)) by piecewise Chebyshev interpolation (intervals of
+width HS[n], degree DEGS[n]) and stored as monomial coefficients in the interval's local variable
+x = (T - T_mid) / (H/2) in [-1, 1]. For T >= T_asym(n) the Gauss-Hermite limit
+x_i = r_i^2 / T, w_i = W_i / sqrt(T) is exact to double precision (r_i > 0 roots of H_2n,
+W_i their Gauss-Hermite weights).
+
+usage: python tools/gen_rys_tables.py   (needs mpmath; about a minute)
+"""
+import pathlib
+import random
+import sys
+from concurrent.futures import ProcessPoolExecutor
+
+import mpmath as mp
+
+mp.mp.dps = 60
+NMAX = 5
+# interval width and polynomial degree per order (finer and lower for the cheap low orders)
+HS = {1: 0.25, 2: 0.5, 3: 0.5, 4: 1.0, 5: 1.0}
+DEGS = {1: 7, 2: 8, 3: 9, 4: 11, 5: 11}
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def boys_all(mmax, T):
+    T = mp.mpf(T)
+    if T == 0:
+        return [mp.mpf(1) / (2 * m + 1) for m in range(mmax + 1)]
+    m = mmax
+    term = mp.mpf(1) / (2 * m + 1)
+    s = term
+    k = 1
+    while True:
+        term *= 2 * T / (2 * m + 2 * k + 1)
+        s += term
+        if abs(term) < s * mp.mpf(10) ** (-(mp.mp.dps + 5)):
+            break
+        k += 1
+    et = mp.exp(-T)
+    out = [mp.mpf(0)] * (mmax + 1)
+    out[mmax] = et * s
+    for m in range(mmax - 1, -1, -1):
+        out[m] = (2 * T * out[m + 1] + et) / (2 * m + 1)
+    return out
+
+
+def rys(n, T):
+    """(nodes ascending, weights) at T by Golub-Welsch from the moments F_0..F_2n."""
+    mu = boys_all(2 * n, T)
+    N = n + 1
+    R = mp.matrix(N, N)
+    for i in range(N):
+        s = mu[2 * i] - sum(R[k, i] ** 2 for k in range(i))
+        R[i, i] = mp.sqrt(s)
+        for j in range(i + 1, N):
+            R[i, j] = (mu[i + j] - sum(R[k, i] * R[k, j] for k in range(i))) / R[i, i]
+    J = mp.matrix(n, n)
+    for j in range(n):
+        a = R[j, j + 1] / R[j, j]
+        if j > 0:
+            a -= R[j - 1, j] / R[j - 1, j - 1]
+        J[j, j] = a
+        if j + 1 < n:
+            J[j, j + 1] = J[j + 1, j] = R[j + 1, j + 1] / R[j, j]
+    E, Q = mp.eigsy(J)
+    idx = sorted(range(n), key=lambda i: E[i])
+    return [E[i] for i in idx], [mu[0] * Q[0, i] ** 2 for i in idx]
+
+
+def hermite_limit(n):
+    m = 2 * n
+    J = mp.matrix(m, m)
+    for i in range(m - 1):
+        J[i, i + 1] = J[i + 1, i] = mp.sqrt(mp.mpf(i + 1) / 2)
+    E, Q = mp.eigsy(J)
+    pairs = sorted([(E[i], mp.sqrt(mp.pi) * Q[0, i] ** 2) for i in range(m)])
+    pos = [(r, w) for r, w in pairs if r > 0]
+    return [r * r for r, _ in pos], [w for _, w in pos]
+
+
+def asym_error(n, T, r2, W):
+    x, w = rys(n, T)
+    T = mp.mpf(T)
+    return max([abs((a - b / T) / a) for a, b in zip(x, r2)] + [abs((a - b / mp.sqrt(T)) / a) for a, b in zip(w, W)])
+
+
+def t_asym(n):
+    """Smallest integer T from which the Hermite limit is within 1e-16 (checked on a fine scan)."""
+    r2, W = hermite_limit(n)
+    T = 30
+    while True:
+        if all(asym_error(n, T + 0.25 * k, r2, W) < 1e-16 for k in range(0, 41)):
+            return T
+        T += 1
+
+
+def cheb_mono(vals):
+    N = len(vals)
+    c = []
+    for k in range(N):
+        s = mp.fsum(vals[j] * mp.cos(mp.pi * k * (j + mp.mpf(1) / 2) / N) for j in range(N))
+        c.append(s * 2 / N)
+    c[0] /= 2
+    Tm = [[mp.mpf(0)] * N for _ in range(N)]
+    Tm[0][0] = mp.mpf(1)
+    Tm[1][1] = mp.mpf(1)
+    for k in range(2, N):
+        for i in range(N):
+            Tm[k][i] = (2 * Tm[k - 1][i - 1] if i > 0 else 0) - Tm[k - 2][i]
+    return [mp.fsum(c[k] * Tm[k][i] for k in range(N)) for i in range(N)]
+
+
+def fit_interval(args):
+    n, a = args
+    N = DEGS[n] + 1
+    h = mp.mpf(HS[n])
+    nodes = [a + h / 2 * (1 + mp.cos(mp.pi * (j + mp.mpf(1) / 2) / N)) for j in range(N)]
+    vals = [rys(n, T) for T in nodes]
+    funcs = [[v[0][i] for v in vals] for i in range(n)] + [[v[1][i] for v in vals] for i in range(n)]
+    return [[float(c) for c in cheb_mono(f)] for f in funcs]
+
+
+def width(n):
+    w = 2 * n
+    return w if w <= 2 else (w + 3) // 4 * 4
+
+
+def main():
+    with ProcessPoolExecutor() as ex:
+        tas = list(ex.map(t_asym, range(1, NMAX + 1)))
+        print("T_asym:", tas, file=sys.stderr)
+        tables = {}
+        for n in range(1, NMAX + 1):
+            nint = round(tas[n - 1] / HS[n])
+            tables[n] = list(ex.map(fit_interval, [(n, mp.mpf(HS[n]) * k) for k in range(nint)]))
+    lim = [hermite_limit(n) for n in range(1, NMAX + 1)]
+    out = []
+    out.append("// @generated by tools/gen_rys_tables.py -- do not edit.\n")
+    out.append("// Rys quadrature tables: piecewise polynomial fits of the nodes x_i = t_i^2 and weights\n")
+    out.append("// w_i on [0, T_ASYM[n]) and the Gauss-Hermite large-T limit (see tools/gen_rys_tables.py).\n\n")
+    out.append(f"pub const NMAX: usize = {NMAX};\n")
+    out.append("/// Interval width in T per order.\npub const H: [f64; NMAX + 1] = [1.0, " + ", ".join(f"{HS[n]!r}" for n in range(1, NMAX + 1)) + "];\n")
+    out.append("/// Number of coefficients per fitted function (degree + 1) per order.\npub const NCS: [usize; NMAX + 1] = [0, " + ", ".join(str(DEGS[n] + 1) for n in range(1, NMAX + 1)) + "];\n")
+    out.append("/// From `T_ASYM[n]` on, `x_i = HERM_R2[n][i] / T` and `w_i = HERM_W[n][i] / sqrt(T)`.\n")
+    out.append("pub const T_ASYM: [f64; NMAX + 1] = [0.0, " + ", ".join(f"{t}.0" for t in tas) + "];\n")
+    out.append("/// Padded function count per order: the n nodes, then the n weights, then zeros.\n")
+    out.append("pub const WIDTH: [usize; NMAX + 1] = [0, " + ", ".join(str(width(n)) for n in range(1, NMAX + 1)) + "];\n")
+    for name, k in (("HERM_R2", 0), ("HERM_W", 1)):
+        rows = []
+        for n in range(1, NMAX + 1):
+            v = [float(x) for x in lim[n - 1][k]] + [0.0] * (NMAX - n)
+            rows.append("[" + ", ".join(f"{x:.17e}" for x in v) + "]")
+        out.append(f"pub const {name}: [[f64; NMAX]; NMAX + 1] = [[0.0; NMAX], " + ", ".join(rows) + "];\n")
+    for n in range(1, NMAX + 1):
+        w = width(n)
+        nint = len(tables[n])
+        flat = []
+        for intv in tables[n]:
+            for d in range(DEGS[n] + 1):
+                for f in range(w):
+                    flat.append(intv[f][d] if f < 2 * n else 0.0)
+        out.append(f"/// Order {n}: [interval][coefficient (constant first)][function (width {w})].\n")
+        out.append(f"pub static RYS{n}: [f64; {nint * (DEGS[n] + 1) * w}] = [\n")
+        for i in range(0, len(flat), 4):
+            out.append("    " + " ".join((f"{x:.17e}," if x != 0.0 else "0.0,") for x in flat[i:i + 4]) + "\n")
+        out.append("];\n")
+    (ROOT / "crates/linus-ints/src/core/rys_tables.rs").write_text("".join(out))
+
+    # reference values: random T over the whole range, interval edges and tiny T
+    random.seed(20261106)
+    lines = ["# n T x_1..x_n w_1..w_n (mpmath, 60 digits)"]
+    for n in range(1, NMAX + 1):
+        ts = [0.0, 1e-12, 1e-6, 1e-3] + [float(HS[n] * k) for k in range(1, round(tas[n - 1] / HS[n]) + 1, max(1, round(1 / HS[n])))]
+        ts += [random.uniform(0, 1.25 * tas[n - 1]) for _ in range(40)] + [10 ** random.uniform(-4, 3) for _ in range(10)]
+        ts += [tas[n - 1] - 1e-9, tas[n - 1] + 1e-9]
+        for T in ts:
+            x, w = rys(n, mp.mpf(T))
+            lines.append(f"{n} {T!r} " + " ".join(f"{float(v):.17e}" for v in x + w))
+    (ROOT / "crates/linus-ints/src/core/rys_ref.txt").write_text("\n".join(lines) + "\n")
+
+
+if __name__ == "__main__":
+    main()

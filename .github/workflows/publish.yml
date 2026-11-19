@@ -1,0 +1,62 @@
+# Upload a published GitHub release's wheels to PyPI, by trusted publishing (no token stored).
+#
+# The wheels are built and tested before the release (CONTRIBUTING.md, "Releasing") and attached
+# to it; nothing is built here. Each PyPI project trusts one (repository, workflow, environment),
+# so each distribution has its own job and environment, and each job downloads only its own
+# wheel, for the release's version (tag vX.Y.Z -> X.Y.Z):
+#   afh_linus-X.Y.Z-*.whl         -> afh-linus         (environment pypi)
+#   afh_linus_cuda13-X.Y.Z-*.whl  -> afh-linus-cuda13  (environment pypi-cuda13)
+# Actions are pinned to full commit SHAs (the tag in the comment).
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  afh-linus:
+    if: github.repository == 'atomsforhumanity/linus'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/afh-linus
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: the release's afh-linus wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist --pattern "afh_linus-${TAG#v}-*.whl"
+          ls -l dist
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/
+
+  afh-linus-cuda13:
+    if: github.repository == 'atomsforhumanity/linus'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi-cuda13
+      url: https://pypi.org/p/afh-linus-cuda13
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: the release's afh-linus-cuda13 wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist --pattern "afh_linus_cuda13-${TAG#v}-*.whl"
+          ls -l dist
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/

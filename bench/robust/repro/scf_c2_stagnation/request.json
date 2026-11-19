@@ -1,0 +1,33 @@
+{
+ "structure": {
+  "symbols": [
+   "C",
+   "C"
+  ],
+  "charge": 0,
+  "multiplicity": 1,
+  "geometry": [
+   [
+    0.0,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    2.3489295745033734
+   ]
+  ]
+ },
+ "calctype": "energy",
+ "method": "pbe",
+ "basis": "def2-svp",
+ "jk": {
+  "kind": "df"
+ },
+ "scf": {
+  "convergence": "extreme",
+  "max_iter": 300
+ },
+ "threads": 2
+}

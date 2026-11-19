@@ -1,0 +1,33 @@
+[package]
+name = "linus-ints"
+description = "Gaussian integrals for linus: basis sets, Boys function, McMurchie-Davidson Hermite engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[features]
+# The study switches LINUS_KERNEL, LINUS_NO_GEN and LINUS_ECP_LEVEL (core::switches); off by
+# default, so release builds ignore them (with a warning).
+dev-switches = []
+# The reference integrals and contractions (linus_ints::reference) that tests check the
+# production kernels against: on in the tests of this crate, linus and linus-gpu (their
+# dev-dependencies), off in release builds.
+reference = []
+
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-num = { path = "../linus-num" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+# this crate's integration tests and examples use the reference module
+linus-ints = { path = ".", features = ["reference"] }

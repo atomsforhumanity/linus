@@ -1,0 +1,29 @@
+[package]
+name = "linus-dft"
+description = "The exchange-correlation quadrature of linus: XC energies, potentials, gradients, Hessian terms and CPKS kernels on molecular grids, with VV10"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# A method family: on linus-base's terms (it implements XcPotential and ResponseKernel) and the
+# leaves; no other family, no algorithm crate (ARCHITECTURE.md, "Crates";
+# tools/check_layering.py).
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-base = { path = "../linus-base" }
+linus-num = { path = "../linus-num" }
+linus-ints = { path = "../linus-ints" }
+linus-grid = { path = "../linus-grid" }
+linus-xc = { path = "../linus-xc" }
+faer.workspace = true
+rayon.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+# the tests' SCF densities come from the SAD guess
+linus-scf = { path = "../linus-scf" }
+linus-ints = { path = "../linus-ints", features = ["reference"] }

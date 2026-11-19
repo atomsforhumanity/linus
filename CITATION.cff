@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use linus, please cite it as below, together with the methods, functionals, basis sets and libxc you use."
+type: software
+title: "linus: Hartree-Fock and Kohn-Sham DFT energies, analytic gradients and Hessians"
+abstract: >-
+  A from-scratch Hartree-Fock and Kohn-Sham DFT program with a Rust core and a Python
+  front end that speaks qcdata: energies, analytic gradients and analytic Hessians,
+  frequencies and thermochemistry, for closed and open shells, with global,
+  range-separated and VV10 functionals, D3(BJ)/D4 dispersion, effective core potentials
+  and implicit solvent (PCM, SMD), on CPUs and NVIDIA GPUs.
+authors:
+  - given-names: Colton
+    family-names: Hicks
+    affiliation: "Atoms for Humanity (Astera)"
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/atomsforhumanity/linus"
+keywords:
+  - quantum chemistry
+  - density functional theory
+  - Hartree-Fock
+  - analytic Hessians

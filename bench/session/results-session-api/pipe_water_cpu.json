@@ -1,0 +1,43 @@
+{
+ "case": "water B3LYP/STO-3G gradient",
+ "threads": 2,
+ "calls": 300,
+ "in_process": {
+  "call_us": 36228.0,
+  "python_before_binding_us": 53.0,
+  "binding_us": 36024.0,
+  "python_after_binding_us": 143.5,
+  "linus_total_us": 35845.166,
+  "binding_beyond_linus_total_us": 174.42399999999907
+ },
+ "in_process_with_gap": {
+  "gap_us": 312,
+  "call_us": 36300.5,
+  "python_before_binding_us": 49.0,
+  "binding_us": 36087.0,
+  "python_after_binding_us": 152.0,
+  "linus_total_us": 35920.2785,
+  "binding_beyond_linus_total_us": 178.38899999999558
+ },
+ "worker": {
+  "round_trip_us": 36475.0,
+  "client_write_flush_us": 3.0,
+  "pipe_to_worker_us": 5.0,
+  "worker_parse_us": 9.0,
+  "worker_request_validate_us": 12.0,
+  "session_compute_us": 36154.0,
+  "of_it_python_before_binding_us": 47.0,
+  "of_it_binding_us": 35955.5,
+  "of_it_python_after_binding_us": 145.0,
+  "linus_total_us": 35795.481,
+  "worker_model_dump_us": 67.0,
+  "worker_json_dumps_us": 91.0,
+  "worker_write_flush_us": 5.0,
+  "pipe_to_client_us": 7.0,
+  "client_json_loads_us": 71.0,
+  "worker_between_computes_us": 312,
+  "reply_bytes": 7762.5
+ },
+ "worker_minus_in_process_us": 247.0,
+ "binding_worker_minus_in_process_us": -68.5
+}

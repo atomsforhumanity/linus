@@ -1,0 +1,20 @@
+[package]
+name = "linus-grid"
+description = "Molecular integration grids for linus: radial/angular quadratures, pruning, Becke/SSF/LKO partitioning with weight derivatives, batching, and presets reproducing PySCF/Psi4 grids"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-num = { path = "../linus-num" }
+rayon.workspace = true
+serde.workspace = true
+# ORCA's DefGrid tables (crate::orca); float_roundtrip: correctly rounded parsing
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+

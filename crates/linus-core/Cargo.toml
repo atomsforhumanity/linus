@@ -1,0 +1,16 @@
+[package]
+name = "linus-core"
+description = "The shared vocabulary of linus: units and constants, elements, the molecule, spin channels, the error kinds, memory plans, the arithmetic vocabulary, timings and the run record"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The bottom of the crate graph with linus-num: no other linus crate. Everything above it (the
+# method libraries, linus-gpu, the driver) names these types instead of keeping copies.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

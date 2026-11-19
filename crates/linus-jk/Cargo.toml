@@ -1,0 +1,32 @@
+[package]
+name = "linus-jk"
+description = "The Coulomb and exchange (J/K) builders of linus and their derivatives: exact four-center, density fitting (RI-JK, RI-J) and seminumerical exchange (COSX)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# A method family: on linus-base's terms (it implements JkBuilder and ResponseJk) and the leaves;
+# no other family, no algorithm crate (ARCHITECTURE.md, "Crates"; tools/check_layering.py).
+[dependencies]
+linus-core = { path = "../linus-core" }
+linus-base = { path = "../linus-base" }
+linus-num = { path = "../linus-num" }
+linus-ints = { path = "../linus-ints" }
+linus-grid = { path = "../linus-grid" }
+faer.workspace = true
+rayon.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+# the tests compare against linus-ints' reference integrals
+linus-ints = { path = "../linus-ints", features = ["reference"] }
+serde_json.workspace = true
+
+[features]
+# The density-fitting reference builders (`df::reference`: dense RI-JK and its derivatives), the
+# test oracles of the facade's whole-calculation tests.
+reference = []
