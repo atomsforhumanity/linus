@@ -3,7 +3,8 @@
 # The wheels are built and tested before the release (CONTRIBUTING.md, "Releasing") and attached
 # to it; nothing is built here. Each PyPI project trusts one (repository, workflow, environment),
 # so each distribution has its own job and environment, and each job downloads only its own
-# wheel, for the release's version (tag vX.Y.Z -> X.Y.Z):
+# wheel, for the release's version (tag vX.Y.Z -> X.Y.Z). A pre-release (its wheels for testers,
+# not for PyPI) uploads nothing:
 #   afh_linus-X.Y.Z-*.whl         -> afh-linus         (environment pypi)
 #   afh_linus_cuda13-X.Y.Z-*.whl  -> afh-linus-cuda13  (environment pypi-cuda13)
 # Actions are pinned to full commit SHAs (the tag in the comment).
@@ -18,7 +19,7 @@ permissions:
 
 jobs:
   afh-linus:
-    if: github.repository == 'atomsforhumanity/linus'
+    if: github.repository == 'atomsforhumanity/linus' && !github.event.release.prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -40,7 +41,7 @@ jobs:
           packages-dir: dist/
 
   afh-linus-cuda13:
-    if: github.repository == 'atomsforhumanity/linus'
+    if: github.repository == 'atomsforhumanity/linus' && !github.event.release.prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

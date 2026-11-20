@@ -31,11 +31,12 @@
 use crate::batch::{BatchCtx, BatchPlan};
 use crate::points::{nu_of, point_derivs, Points};
 use crate::{
-    eval_functional, gemm, libxc_inputs, mmut, mref, multiversion, sized, Kind, Scratch,
+    eval_functional, gemm, gemm_part, libxc_inputs, mmut, mref, multiversion, sized, Kind, Scratch,
     XcIntegrator,
 };
 use faer::{Mat, MatRef};
 use linus_base::error::LinusError;
+use linus_base::linalg::Whole;
 use linus_base::terms::ResponseKernel;
 use linus_core::channels::Channels;
 use linus_num::det::{merge_all, FixedAcc};
@@ -572,9 +573,11 @@ impl XcIntegrator {
                         ..
                     } = &mut ch[c];
                     let nao_o = nao * o;
+                    // the groups run whole aligned blocks: each block is its own whole
                     let x = VcoInputs {
                         nocc: o,
                         pc,
+                        pc_whole: pc,
                         gga,
                         mgga,
                         phi4,
@@ -610,6 +613,9 @@ impl XcIntegrator {
 pub(crate) struct VcoInputs<'a> {
     pub(crate) nocc: usize,
     pub(crate) pc: usize,
+    /// The perturbations of the whole block the `pc` are a part of (`pc` when they are the
+    /// block): the products take the whole block's kernels (VV10's groups).
+    pub(crate) pc_whole: usize,
     pub(crate) gga: bool,
     pub(crate) mgga: bool,
     pub(crate) phi4: &'a [f64],
@@ -625,6 +631,7 @@ pub(crate) fn push_vco<'o>(b: &BatchCtx<'_>, x: &VcoInputs<'_>, ob: &'o mut Vec<
     let VcoInputs {
         nocc,
         pc,
+        pc_whole,
         gga,
         mgga,
         phi4,
@@ -637,7 +644,12 @@ pub(crate) fn push_vco<'o>(b: &BatchCtx<'_>, x: &VcoInputs<'_>, ob: &'o mut Vec<
     let nao_o = nao * nocc;
     let pks = ld * pcn;
     let ob = sized(ob, pc * nao_o);
-    gemm(
+    let whole = Whole {
+        rows: nao,
+        cols: pc_whole * nocc,
+    };
+    gemm_part(
+        whole,
         mmut(ob, nao, pcn, nao),
         false,
         mref(b.ao, ld, nao, nc * ld).transpose(),
@@ -657,7 +669,8 @@ pub(crate) fn push_vco<'o>(b: &BatchCtx<'_>, x: &VcoInputs<'_>, ob: &'o mut Vec<
     }
     if mgga {
         for kk in 0..3 {
-            gemm(
+            gemm_part(
+                whole,
                 mmut(ob, nao, pcn, nao),
                 true,
                 mref(&b.ao[(1 + kk) * ld..], ld, nao, nc * ld).transpose(),

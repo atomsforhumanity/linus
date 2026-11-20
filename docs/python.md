@@ -440,7 +440,7 @@ faster than a new process per gradient ([bench/session/README.md](../bench/sessi
   `BasisSet` (with its ECPs and the core electrons each replaces), for any program's orbitals.
   linus's AO order is qcdata's default convention (PySCF's).
 - Molden files of a wavefunction: qcinf's `qcinf.molden.write(wavefunction, structure)` (and
-  `qcinf.molden.read`), which writes ECP atoms with their cores (`[core]`, afh-stack#67) as linus's
+  `qcinf.molden.read`), which writes ECP atoms with their cores (`[core]`) as linus's
   own file does (`output.molden`, `results.files["orbitals.molden"]`).
 
 ## Errors

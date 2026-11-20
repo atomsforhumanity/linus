@@ -232,7 +232,7 @@ docker/             container images (Dockerfile.gpu, Dockerfile.cpu, build.sh)
 docs/               usage recipes, CLI reference, grids, solvation, qcdata proposal
 reference/          reference harness (PySCF, Psi4), validation matrix, program quirks
 tests/              molecules and the Python deep checks against PySCF and Psi4
-bench/              benchmark harness (definitive matrix: run_bench.py) and campaign scripts with results
+bench/              benchmark molecules and levels, campaign scripts (bench/README.md)
 tools/              generators: basis export, integral kernels (intgen), Rys tables, solvent tables
 ```
 

@@ -11,8 +11,7 @@ is committed or published.
       machine  /etc/machine-id, outside a container only (an image's machine-id is not the host's).
     None when none is available.
 
-The ids' mapping to node names stays out of the repository, in the coordinator's state (refstore-meta/nodes.json).
-Build it with the id of a known node:
+The ids' mapping to node names stays out of the repository. Build it with the id of a known node:
 
     python3 bench/node_id.py                    this machine's id
     python3 bench/node_id.py --root-uuid UUID   the id of the node whose root file system has UUID

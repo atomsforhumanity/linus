@@ -139,4 +139,5 @@ so that the wheel ships it (`crates/linus-py/pyproject.toml`).
    [.github/workflows/publish.yml](.github/workflows/publish.yml) then uploads them to PyPI by
    trusted publishing: `afh_linus-X.Y.Z-*.whl` to the project `afh-linus` (GitHub environment
    `pypi`) and `afh_linus_cuda13-X.Y.Z-*.whl` to `afh-linus-cuda13` (environment
-   `pypi-cuda13`). Nothing is built in that workflow.
+   `pypi-cuda13`). Nothing is built in that workflow. A GitHub release marked as a pre-release
+   (wheels for testers, `X.Y.ZaN`) uploads nothing.

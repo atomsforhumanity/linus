@@ -602,7 +602,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "linus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "faer",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "linus-base"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus-core",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "linus-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "linus-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "linus-dev"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus",
@@ -679,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "linus-dft"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus-base",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "linus-disp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axtb-d4",
  "rayon",
@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "linus-gpu"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cudarc",
  "libc",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "linus-grid"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "linus-core",
  "linus-num",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "linus-ints"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "approx",
  "linus-core",
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "linus-jk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus-base",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "linus-num"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "rayon",
@@ -770,7 +770,7 @@ dependencies = [
 
 [[package]]
 name = "linus-py"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus",
@@ -782,7 +782,7 @@ dependencies = [
 
 [[package]]
 name = "linus-scf"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus-base",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "linus-solvent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus-base",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "linus-vib"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "faer",
  "linus-base",
@@ -822,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "linus-xc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cc",
  "cmake",

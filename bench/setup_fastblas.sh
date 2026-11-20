@@ -8,7 +8,7 @@
 # parallel region (PySCF's C code and Psi4 call BLAS from inside their parallel loops) and
 # OMP_NUM_THREADS threads outside, which is how both programs expect their BLAS to behave.
 #
-# The bundle is put in front of everything by LD_PRELOAD (run_bench.py variants pyscf-fastblas and
+# The bundle is put in front of everything by LD_PRELOAD (the benchmark harness's variants pyscf-fastblas and
 # psi4-openblas): first .refenv's LLVM libomp (Psi4's own OpenMP runtime; PySCF's GOMP_* calls bind
 # to its GNU-compatible entry points, so the program and its BLAS share one OpenMP runtime), then
 # the OpenMP OpenBLAS, whose libgomp.so.1 and libgfortran.so.5 point back into .refenv so no

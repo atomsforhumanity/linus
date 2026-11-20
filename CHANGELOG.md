@@ -5,6 +5,45 @@ and result (`schema_version`) and the Python package; before 1.0 any minor relea
 them, and every change is listed here. The Rust crates are unstable and not published. Versions follow [Semantic Versioning](https://semver.org); the format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] - 2026-11-20
+
+A bug-fix release: CPU results that could differ in their last bits with `memory_gib` or the
+thread count no longer do. The numbers of 0.1.0 are kept wherever they did not depend on them
+(numerics epoch 10).
+
+### Fixed
+
+- **Results independent of `memory_gib` and the thread count in three more places.** Some steps
+  of a calculation split their work into blocks whose number follows the memory budget
+  (`memory_gib`, or the machine's memory without it) or the thread count, and a matrix product
+  can round differently with its size. So these results could differ in their last bits (round-
+  off, far below any accuracy that matters) between two runs with a different `memory_gib` or
+  thread count, or on another machine; each now has the bits of the run with a single block:
+  - **DF Hessians and frequencies with exact exchange** (Hartree-Fock and hybrid functionals,
+    `jk: "df"`): large molecules, or small `memory_gib`, compute the exchange term in several
+    passes over the atoms. Results with one pass are unchanged (except as noted below).
+  - **Hessians, frequencies and polarizabilities with the RI exchange in the CPHF/CPKS
+    equations** for an open shell with a single electron in one spin (e.g. a doublet with one
+    beta electron), where the response's exchange groups its densities by memory.
+  - **Hessians, frequencies and polarizabilities with VV10 functionals** (ωB97M-V, ωB97X-V,
+    B97M-V and the other `-V` functionals), whose nonlocal kernel groups its perturbations by
+    memory and thread count: large molecules, small `memory_gib`, many threads, and in
+    particular an open shell with a single electron in one spin. A single group (small
+    molecules at the default memory) is unchanged.
+
+  One result that did not depend on them changes in its last bits: the DF Hessian of a hybrid or
+  Hartree-Fock calculation whose 3 × (basis functions) × (occupied orbitals, both spins counted)
+  is one more than a multiple of 256, in the Hessian's row and column of the last atom's z
+  coordinate. The bitwise reference suite is unchanged.
+
+### Changed
+
+- The Python package's classifier is "Development Status :: 3 - Alpha" (it said "5 -
+  Production/Stable"): linus is a 0.x release whose interfaces may still change.
+- A GitHub release marked as a pre-release no longer uploads its wheels to PyPI.
+- The benchmark harness `bench/run_bench.py` (with its summary and run scripts) is no longer in
+  the public repository: it ran only with tooling that is not public.
+
 ## [0.1.0] - 2026-11-19
 
 The first public release: linus feature-complete. The command line, the JSON request and result
@@ -627,18 +666,18 @@ Numerical results change only as listed here.
   at 2/3 of `max_iter`). The escalation record is `{"ran": true, "trigger": "stagnation" |
   "two_thirds", "at", "from_iter", "from_energy", "iterations", "converged"}`.
 - **A plateau is accepted with the warning `loosely_converged`** (it was silent), qcdata's shared
-  warning for a result accepted under a relaxed rule (qc* alpha 6, #64; linus's 0.1.0a2 called it
+  warning for a result accepted under a relaxed rule (qc* alpha 6; linus's 0.1.0a2 called it
   `scf_plateau`, a name that is gone), when the escalation comes due or at `max_iter`; under
   accuracy targets only within them. Its `path` is the threshold missed, `scf.g_tol`; the message
   gives the residual reached and the rule (`scf.plateau_window`).
 - **The qc* releases**: the Python package needs qcdata 0.24.0 (and qccompute 0.23.0 for its
   runner); the container images and CI install that set. qcdata renamed the dipole moment:
   `results.dipole_moment` (was `scf_dipole_moment`), and the request output of that name.
-- **The basis set is `Wavefunction.basis`** (qc* alpha 4, #43): it comes with the orbitals'
+- **The basis set is `Wavefunction.basis`** (qc* alpha 4): it comes with the orbitals'
   coefficients or any AO matrix, and only then; an overlap or a core Hamiltonian alone has the
   basis set and no coefficients (they used to bring the coefficients); `hamiltonian` brings the
   overlap and the orbitals that are its eigenvectors. Each ECP carries the core electrons it
-  replaces (`Ecp.core_electrons`, #44), agreeing with `Orbitals.core_electrons`. Given orbitals
+  replaces (`Ecp.core_electrons`), agreeing with `Orbitals.core_electrons`. Given orbitals
   are read from `given.wavefunction` with its basis set. `linus.convert` follows:
   `to_pyscf(structure, wavefunction)`, `from_pyscf` returns a structure and a `Wavefunction`,
   `to_pyscf_mol(structure, basis)` and `from_pyscf_mol` (a structure and a basis set) carry the
@@ -649,11 +688,11 @@ Numerical results change only as listed here.
   process cannot see fails with kind `environment`); the grant applies on every call, in process
   and in a worker, whose calls may differ in threads; a memory keyword replaces the share in the
   grant (qccompute's rule; linus uses the smaller of keyword and grant as before). The machine's
-  part of the run's environment (`cpu_model`, `libc`) is the runner's to record (#58): linus no
+  part of the run's environment (`cpu_model`, `libc`) is the runner's to record: linus no
   longer fills it, and keeps `devices` (the GPU its backend opened) and
   `peak_device_memory_gib`. The worker's hello carries the numerics epoch in
   `capabilities.extras`.
-- **A runner's stop request ends a calculation at its next step** (qc* alpha 6, #75):
+- **A runner's stop request ends a calculation at its next step** (qc* alpha 6):
   `qccompute.stop(future)` reaches linus as `ctx.stop_requested()`, which linus asks before each
   stage and between its SCF's and its CPHF/CPKS solves' iterations (at most every 50 ms there),
   on the host and the device SCF loops. The calculation fails with the new kind `stopped` (the
@@ -661,12 +700,12 @@ Numerical results change only as listed here.
   SCF's last iterate (`scf.history`'s last `step` is `stopped`), or the converged SCF with the
   gradient (and an IR run's Hessian) computed before the stop. Without a `ctx` nothing is asked;
   numbers are unchanged. Rust: `Session::stop_when`, `LinusError::Stopped`.
-- **`execution.devices` of a failure that reached nothing is left to the runner** (qc* alpha 6,
-  #68: a runner keeps a program's explicit `devices`, and an explicit `[]` means no device): a
+- **`execution.devices` of a failure that reached nothing is left to the runner** (qc* alpha 6:
+  a runner keeps a program's explicit `devices`, and an explicit `[]` means no device): a
   failure with partial results names the device its run opened, as a success does (`[]` on the
   CPU); one that reached nothing leaves `devices` unset, and the runner fills in its grant.
 - **Molden files of a wavefunction are qcinf's** (`qcinf.molden.write(wavefunction, structure)`,
-  qcinf 0.6.0a2, which writes ECP cores in `[core]`, afh-stack#67): `linus.convert.write_molden`
+  qcinf 0.6.0a2, which writes ECP atoms with their cores in `[core]`): `linus.convert.write_molden`
   is gone; `output.molden` (`results.files["orbitals.molden"]`, the CLI's `--molden`) stays
   linus's own file.
 - **Threads under a runner (qc* decision 16)**: a calculation runs on its `threads` keyword (at
@@ -718,7 +757,7 @@ Numerical results change only as listed here.
   setup (and page-locked host memory that cannot be pinned) stops the calculation with kind
   `resource` and code `device_memory` (`host_memory`); it was kind `backend` (Python
   `ResourceError`, was `BackendError`). Setups still fall back to the CPU out of device memory.
-  Every `host_memory` and `device_memory` failure gives its numbers (qc* #45): `required_gib` and
+  Every `host_memory` and `device_memory` failure gives its numbers: `required_gib` and
   `available_gib` in `ErrorInfo.details` (the CLI's failure JSON: `error_details`), both as the
   memory budget (`memory_gib`, `device_memory_gib`) that holds what failed and the one it had, or
   for a device's allocation what it held plus the request against its pool.
@@ -1426,4 +1465,5 @@ was the SCF's; the SCF stage is `timings.energy`, and `timings.calculation` is g
 `df_store_gib`, `df_bytes_per_elem`, `df_one_sided`, `mem_hwm_gb_*` and the block counts moved
 from `timings` to `resources`; the result gained `success`, `molecule` and `resolved`.
 
+[0.1.1]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.1
 [0.1.0]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.0

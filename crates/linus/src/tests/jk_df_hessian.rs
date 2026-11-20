@@ -321,98 +321,133 @@ fn range_separated_without_long_range_is_global_hybrid() {
     });
 }
 
-/// The exchange cross term is assembled in an orientation fixed by the atoms, so the H-bar
-/// atom blocks (one pass per block, their size set by the memory budget) do not change any bit:
-/// limits that give 1, 2, 3 and 4 passes over the four atoms give the same Hessian terms and
-/// F^x C_s bit for bit (closed and open shell; D43).
+/// The exchange cross term is assembled in an orientation fixed by the atoms and each pass's
+/// products are parts of the single pass's, so the H-bar atom blocks (one pass per block, their
+/// size set by the memory budget) do not change any bit: every limit from one block down to one
+/// atom per block (1, 2, 3 and 4 passes over the four atoms) gives the Hessian terms and F^x C_s
+/// of the single pass bit for bit (closed and open shell; D43). At 16 geometries (atoms moved by
+/// up to 1.5e-3 Å): a product taken by another of faer's kernels changes only last bits, which
+/// the final sums round away at most geometries (0.1.0's CI failure was one where they did not).
 #[test]
 fn hbar_passes_do_not_change_the_bits() {
-    for (charge, mult) in [(0, 1), (1, 2)] {
-        let mol = Structure::from_xyz_str(MOL, charge, mult).unwrap();
-        let o = CalcOptions {
-            method: Some("b3lyp".into()),
-            basis: Some("def2-svp".into()),
-            jk: JkMethod::Df {
-                aux: "def2-universal-jkfit".into(),
-            }
-            .into(),
-            threads: Some(4),
-            ..Default::default()
-        };
-        let mut c = Session::new(mol, o).unwrap();
-        c.energy().unwrap();
-        let r = c.last().unwrap().clone();
-        let b = &c.cx.basis;
-        let pairs = PairSet::build(b, PairOptions::with_order(DerivOrder::Two));
-        let aux = BasisSet::new(
-            &c.cx.plan.load_basis("def2-universal-jkfit").unwrap(),
-            &c.cx.mol.z,
-            &c.cx.mol.positions,
-            true,
-        )
-        .unwrap();
-        let metric = linus_jk::df::CoulombMetric::new(&aux, Par::Seq).unwrap();
-        let (ca, cb) = (r.c_a.subcols(0, r.nalpha), r.c_b.subcols(0, r.nbeta));
-        let (occ, f): (Vec<MatRef<'_, f64>>, Vec<f64>) = if r.restricted {
-            (vec![ca], vec![2.0])
-        } else {
-            (vec![ca, cb], vec![1.0, 1.0])
-        };
-        let xop = Some(Operator::Attenuated {
-            coulomb: 0.2,
-            long_range: 0.0,
-            omega: 0.0,
-        });
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(4)
-            .build()
-            .unwrap();
-        let bits = |t: &DfHess2e| -> Vec<u64> {
-            let mut v: Vec<u64> = t.hess.iter().map(|x| x.to_bits()).collect();
-            for m in t.fxo.iter().flatten() {
-                v.extend((0..m.ncols()).flat_map(|j| m.col(j).iter().map(|x| x.to_bits())));
-            }
-            v
-        };
-        // limits from the whole H-bar in one block down to every atom in its own block
-        let mut by_passes: Vec<(usize, Vec<u64>)> = Vec::new();
-        let mut limit = 1usize << 36;
-        while limit > 1 << 12 && by_passes.len() < 4 {
-            let mut t = Timers::default();
-            let mem = MemoryLimit { limit: Some(limit) };
-            let h = pool.install(|| {
-                df_hessian_2e(
-                    b,
-                    &pairs,
-                    &aux,
-                    &metric,
-                    &occ,
-                    &f,
-                    xop,
-                    mem,
-                    Par::rayon(4),
-                    &mut t,
-                )
-            });
-            let passes = t.resources.iter().find(|e| e.0 == "hess_df_passes");
-            let passes = passes.expect("the passes are recorded").1 as usize;
-            if by_passes.iter().all(|e| e.0 != passes) {
-                by_passes.push((passes, bits(&h)));
-            }
-            limit = limit / 5 * 4;
-        }
-        let mut seen: Vec<usize> = by_passes.iter().map(|e| e.0).collect();
-        seen.sort_unstable();
-        assert_eq!(
-            seen,
-            [1, 2, 3, 4],
-            "mult {mult}: the limits gave passes {seen:?}"
+    let mut failures = Vec::new();
+    for shift in 0..16 {
+        let d = 1e-4 * shift as f64;
+        let xyz = format!(
+            "4\n\nO {} -0.05 0.12\nH 0.85 {} -0.03\nH -0.68 0.55 {}\nC 0.20 -1.30 0.60\n",
+            0.10 + d,
+            0.52 - 0.7 * d,
+            0.05 + 0.3 * d
         );
-        for (p, v) in &by_passes[1..] {
-            assert!(
-                *v == by_passes[0].1,
-                "mult {mult}: {p} passes changed the bits of 1"
-            );
+        for (charge, mult) in [(0, 1), (1, 2)] {
+            failures.extend(hbar_pass_differences(&xyz, charge, mult));
         }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// [`hbar_passes_do_not_change_the_bits`] for one molecule: the limits whose passes changed
+/// bits of the single pass.
+fn hbar_pass_differences(xyz: &str, charge: i32, mult: u32) -> Vec<String> {
+    let mol = Structure::from_xyz_str(xyz, charge, mult).unwrap();
+    let o = CalcOptions {
+        method: Some("b3lyp".into()),
+        basis: Some("def2-svp".into()),
+        jk: JkMethod::Df {
+            aux: "def2-universal-jkfit".into(),
+        }
+        .into(),
+        threads: Some(4),
+        ..Default::default()
+    };
+    let mut c = Session::new(mol, o).unwrap();
+    c.energy().unwrap();
+    let r = c.last().unwrap().clone();
+    let b = &c.cx.basis;
+    let pairs = PairSet::build(b, PairOptions::with_order(DerivOrder::Two));
+    let aux = BasisSet::new(
+        &c.cx.plan.load_basis("def2-universal-jkfit").unwrap(),
+        &c.cx.mol.z,
+        &c.cx.mol.positions,
+        true,
+    )
+    .unwrap();
+    let metric = linus_jk::df::CoulombMetric::new(&aux, Par::Seq).unwrap();
+    let (ca, cb) = (r.c_a.subcols(0, r.nalpha), r.c_b.subcols(0, r.nbeta));
+    let (occ, f): (Vec<MatRef<'_, f64>>, Vec<f64>) = if r.restricted {
+        (vec![ca], vec![2.0])
+    } else {
+        (vec![ca, cb], vec![1.0, 1.0])
+    };
+    let xop = Some(Operator::Attenuated {
+        coulomb: 0.2,
+        long_range: 0.0,
+        omega: 0.0,
+    });
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let bits = |t: &DfHess2e| -> Vec<u64> {
+        let mut v: Vec<u64> = t.hess.iter().map(|x| x.to_bits()).collect();
+        for m in t.fxo.iter().flatten() {
+            v.extend((0..m.ncols()).flat_map(|j| m.col(j).iter().map(|x| x.to_bits())));
+        }
+        v
+    };
+    // limits from the whole H-bar in one block (a few MB) down to every atom in its own block
+    let mut single: Option<Vec<u64>> = None;
+    let mut seen: Vec<usize> = Vec::new();
+    let mut out = Vec::new();
+    let mut limit = 1usize << 28;
+    while limit > 1 << 12 && seen.len() < 4 {
+        let mut t = Timers::default();
+        let mem = MemoryLimit { limit: Some(limit) };
+        let h = pool.install(|| {
+            df_hessian_2e(
+                b,
+                &pairs,
+                &aux,
+                &metric,
+                &occ,
+                &f,
+                xop,
+                mem,
+                Par::rayon(4),
+                &mut t,
+            )
+        });
+        let passes = t.resources.iter().find(|e| e.0 == "hess_df_passes");
+        let passes = passes.expect("the passes are recorded").1 as usize;
+        if !seen.contains(&passes) {
+            seen.push(passes);
+        }
+        let v = bits(&h);
+        match &single {
+            None => {
+                assert_eq!(
+                    passes, 1,
+                    "the first limit ({limit} B) gave {passes} passes"
+                );
+                single = Some(v);
+            }
+            Some(s) => {
+                let nd = v.iter().zip(s).filter(|(x, y)| x != y).count();
+                if nd > 0 {
+                    out.push(format!(
+                        "mult {mult}, {xyz:?}: {passes} passes (limit {limit} B) changed {nd} of {} values",
+                        v.len()
+                    ));
+                }
+            }
+        }
+        limit = limit / 5 * 4;
+    }
+    seen.sort_unstable();
+    assert_eq!(
+        seen,
+        [1, 2, 3, 4],
+        "mult {mult}: the limits gave passes {seen:?}"
+    );
+    out
 }

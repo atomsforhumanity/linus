@@ -14,8 +14,8 @@ os.environ.setdefault("OMP_NUM_THREADS", str(min(8, _cpus)))
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "slow: minutes per test (PySCF's own VV10 runs); per-push CI deselects them with -m 'not slow', "
-        "the nightly runs them",
+        "slow: minutes per test (PySCF's own VV10 runs); per-push CI deselects them with -m 'not slow' "
+        "(run them with -m slow)",
     )
 
 ROOT = Path(__file__).resolve().parents[3]

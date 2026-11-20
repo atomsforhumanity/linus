@@ -170,9 +170,9 @@ def execution(r: Mapping[str, Any] | None, threads: int | None, wall: float,
     during it (`linus._resources.PeakMemory`), linus's timings, and the part of the run's
     environment (decision 29) only linus knows: its peak device memory during the request, and
     the GPU its backend opened (``devices``; an explicit empty list when it ran on the CPU, which
-    a runner keeps, qc* #68), from the record of what it reached (`ran`, default `r`; left unset
+    a runner keeps), from the record of what it reached (`ran`, default `r`; left unset
     when a failure reached nothing, for the runner to fill with its grant). The machine's part
-    (host, CPU model, C library) is the runner's to record (qc* #58): one source for each."""
+    (host, CPU model, C library) is the runner's to record: one source for each."""
     r = r or {}
     record = ((r if ran is None else ran).get("resolved") or {}).get("record")
     where = {}

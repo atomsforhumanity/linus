@@ -83,14 +83,10 @@ pub fn version() -> &'static str {
 }
 
 /// A Cargo (SemVer) version in PEP 440's form, as maturin names the wheel and Python's metadata
-/// has it: `0.1.0-alpha.1` -> `0.1.0a1`, `-beta.2` -> `b2`, `-rc.1` -> `rc1`, and build metadata
-/// as the local version label (`0.1.0-alpha.1+cuda13` -> `0.1.0a1+cuda13`).
+/// has it: `0.1.0-alpha.1` -> `0.1.0a1`, `-beta.2` -> `b2`, `-rc.1` -> `rc1`. (The two
+/// distributions have the same version: no local label.)
 pub(crate) fn pep440(cargo: &str) -> String {
-    let (version, local) = match cargo.split_once('+') {
-        Some((v, l)) => (v, Some(l)),
-        None => (cargo, None),
-    };
-    let mut out = match version.split_once('-') {
+    match cargo.split_once('-') {
         Some((release, pre)) => {
             let (tag, n) = pre.split_once('.').unwrap_or((pre, "0"));
             let tag = match tag {
@@ -101,12 +97,8 @@ pub(crate) fn pep440(cargo: &str) -> String {
             };
             format!("{release}{tag}{n}")
         }
-        None => version.to_string(),
-    };
-    if let Some(l) = local {
-        out = format!("{out}+{l}");
+        None => cargo.to_string(),
     }
-    out
 }
 
 #[cfg(test)]
@@ -116,7 +108,6 @@ mod version_tests {
         use super::pep440;
         assert_eq!(pep440("0.1.0"), "0.1.0");
         assert_eq!(pep440("0.1.0-alpha.1"), "0.1.0a1");
-        assert_eq!(pep440("0.1.0-alpha.1+cuda13"), "0.1.0a1+cuda13");
         assert_eq!(pep440("1.2.0-beta.3"), "1.2.0b3");
         assert_eq!(pep440("1.2.0-rc.1"), "1.2.0rc1");
         assert!(!super::version().contains('-'));

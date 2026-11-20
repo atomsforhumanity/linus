@@ -4,7 +4,7 @@ build under test, the locks, the job runner, and the classification of linus's t
 Every timed job is one process (a replay of one trajectory in one mode) run under a memory cap in its
 own systemd scope, pinned to CCD0's eight physical cores (`slice bench`), while the driver holds the
 shared bench lock and, for GPU jobs, the node's writer-preferring exclusive GPU lock (its turnstile,
-then the lock, as tools/internal/refbase/common.py `gpu_lock_prefix(True)`). The driver sleeps 5 s
+then the lock). The driver sleeps 5 s
 after each release of the GPU lock.
 """
 from __future__ import annotations

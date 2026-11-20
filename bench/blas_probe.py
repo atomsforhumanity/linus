@@ -1,6 +1,6 @@
 """Which BLAS/LAPACK a process uses, its version and the CPU kernel it picked; DGEMM speed.
 
-Imported by the benchmark job scripts (bench/jobs/*) to record the BLAS libraries loaded in
+Imported by the benchmark harness's job scripts to record the BLAS libraries loaded in
 the program's own process (`loaded_blas()`), and run from the command line to validate a
 library or an override (OPENBLAS_CORETYPE, LD_PRELOAD):
 

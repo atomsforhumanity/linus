@@ -1,5 +1,5 @@
 {
- "about": "PySCF's results for test_pyscf.py's VV10 cases (written by LINUS_REFRESH_PYSCF_CACHE=1 pytest -m slow -k vv10_functionals; checked by the nightly)",
+ "about": "PySCF's results for test_pyscf.py's VV10 cases (written by LINUS_REFRESH_PYSCF_CACHE=1 pytest -m slow -k vv10_functionals; checked by the slow test)",
  "cases": {
   "nh3/0/1/b97m-v": {
    "e_nlc": 0.041958766994428076,

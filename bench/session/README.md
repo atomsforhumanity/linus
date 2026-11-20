@@ -1,6 +1,6 @@
 # Session state vs a new calculation per gradient (SESSBENCH, 2026-11-12)
 
-**Question (Colton):** how much does computing gradients (or similar repeated calculations) as new
+**Question:** how much does computing gradients (or similar repeated calculations) as new
 calculations from start to finish cost against sharing state across calculations within a session? Does it
 matter, or is it only conceptually interesting?
 
@@ -394,7 +394,7 @@ one; not measured here, and the open-shell example below shows that a warm start
   order and every step is a median over repeats.
 - **Two repeats; TZVP one.** Two repeats are enough to see effects of 5 % or more; differences of 1-2 % between
   A, B and C on the larger systems are within noise. The u1an39 def2-TZVP case (GPU) has one repeat: its second
-  was cut for time (the brief's first cut), because gates' GPU test suites held the shared GPU lock for 10-15
+  was cut for time, because gates' GPU test suites held the shared GPU lock for 10-15
   minutes at a time and our timed GPU jobs queued behind them (lock waits in `results/jobs.jsonl`); for the
   same reason the open-shell case ran on the CPU only. GPU walls repeat to 1-2 % between our repeats of the SVP
   cases.

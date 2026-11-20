@@ -29,8 +29,10 @@
 //! at the end. So only 3 n o naux (Hbar) is stored instead of 3N naux o^2. The o x o blocks
 //! are kept packed (symmetric lower triangle, sqrt 2 off the diagonal). G enters the Hessian in
 //! one orientation fixed by the atoms, G\[x\]\[y\] with atom(x) >= atom(y) (the average with
-//! G\[y\]\[x\] within an atom), which every blocking computes: the Hessian has the same bits for
-//! any number of passes, so it does not depend on the H-bar budget (D43).
+//! G\[y\]\[x\] within an atom), which every blocking computes, and a pass's products (H-bar, its
+//! solve, the Gram blocks of G) are parts of the single pass's, with its kernels
+//! ([`linus_base::linalg::matmul_part`], [`linus_base::linalg::column_blocks`]): the Hessian has
+//! the same bits for any number of passes, so it does not depend on the H-bar budget (D43).
 //!
 //! The explicit second-derivative integrals go through the auxiliary-lane kernel
 //! ([`linus_ints::Eri3DerivPlan::hessian`]) in batches of auxiliary functions with
@@ -62,8 +64,7 @@
 use crate::df::common::{aux_blocks, solve_metric_mmajor, MetricSolve, Mo3c, SendPtr};
 use crate::df::CoulombMetric;
 use faer::{Accum, Mat, MatMut, MatRef, Par};
-use linus_base::linalg::abt_split;
-use linus_base::linalg::matmul;
+use linus_base::linalg::{abt_split_part, column_blocks, matmul, matmul_part, Whole};
 use linus_base::linalg::{solve_lower_in_place, solve_upper_in_place};
 use linus_base::memory::MemoryLimit;
 use linus_core::timing::Timers;
@@ -93,8 +94,10 @@ const DBLOCK_BYTES: usize = 256 << 20;
 /// 3N x sub x o^2 each).
 const RZ_BYTES: usize = 192 << 20;
 
-/// Solve V X = B (V = L L^T) for B naux x w stored row-major (`data`), in column chunks
-/// (column-major copies; faer's solves are slow on the row-major layout).
+/// Solve V X = B (V = L L^T) for B naux x w stored row-major (`data`), in column blocks
+/// (column-major copies; faer's solves are slow on the row-major layout). The blocks
+/// ([`column_blocks`]) give every column the bits it has in any other blocking (an H-bar pass's
+/// columns are a slice of the single pass's).
 fn solve_v_rows(l: MatRef<'_, f64>, data: &mut [f64], w: usize) {
     let naux = l.nrows();
     if w == 0 || naux == 0 {
@@ -105,14 +108,12 @@ fn solve_v_rows(l: MatRef<'_, f64>, data: &mut [f64], w: usize) {
         data.len() >= naux * w,
         "solve_v_rows: buffer shorter than naux x w"
     );
-    let cw = 256.min(w);
+    let blocks: Vec<Range<usize>> = column_blocks(w, 256).collect();
     let ptr = SendPtr(data.as_mut_ptr());
-    (0..w.div_ceil(cw)).into_par_iter().for_each(|c| {
-        let c0 = c * cw;
-        let c1 = (c0 + cw).min(w);
-        let wc = c1 - c0;
+    blocks.into_par_iter().for_each(|cols| {
+        let (c0, wc) = (cols.start, cols.len());
         let mut t = Mat::<f64>::zeros(naux, wc);
-        // SAFETY: each task reads and writes only columns c0..c1 of the naux x w buffer
+        // SAFETY: each task reads and writes only its block of columns of the naux x w buffer
         unsafe {
             let p = ptr.get();
             for r in 0..naux {
@@ -658,14 +659,20 @@ fn df_hessian_2e_op(
                     thresh: DfThresholds::default().deriv_block,
                 };
                 plan3.deriv_block(&blk, rb.clone(), &mut ibuf, &mut ws3);
-                // H rows (k, b in rb, q): one GEMM per k
+                // H rows (k, b in rb, q): one GEMM per k, the rows of this pass's atoms of the
+                // single pass's product
                 for k in 0..3 {
                     let ik = MatRef::from_row_major_slice(
                         &ibuf[(k * n + rb.start) * nq * n..(k * n + rb.end) * nq * n],
                         nb * nq,
                         n,
                     );
-                    let hk = linus_base::linalg::mm(ik, cjm, par); // rows (b, q), cols j
+                    let mut hk = Mat::<f64>::zeros(nb * nq, ot); // rows (b, q), cols j
+                    let whole = Whole {
+                        rows: n * nq,
+                        cols: ot,
+                    };
+                    matmul_part(whole, hk.as_mut(), Accum::Replace, ik, cjm, 1.0, par);
                     hb[p0 * wbar..(p0 + nq) * wbar]
                         .par_chunks_mut(wbar)
                         .enumerate()
@@ -1097,9 +1104,11 @@ fn df_hessian_2e_op(
                     let zb = &zbuf[..nyb * len];
                     let rm = MatRef::from_row_major_slice(r, nr, len);
                     let zm = MatRef::from_row_major_slice(zb, nyb, len);
-                    let gb = abt_split(rm, zm);
+                    // parts of the single pass's products (x on all atoms, y on all atoms): the
+                    // same kernels, so the same bits, for any blocking
+                    let gb = abt_split_part(rm, zm, Whole { rows: n3, cols: n3 });
                     let em = MatRef::from_row_major_slice(e, 3, len);
-                    let pb2 = abt_split(em, zm);
+                    let pb2 = abt_split_part(em, zm, Whole { rows: 3, cols: n3 });
                     for xi in 0..nr {
                         for yi in 0..nyb {
                             gm[s][(x0 + xi, 3 * yb.start + yi)] += gb[(xi, yi)];

@@ -44,8 +44,7 @@ use crate::df::common::{
 };
 use crate::df::{metric_cholesky, CoulombMetric};
 use faer::{Accum, Mat, MatMut, MatRef, Par};
-use linus_base::linalg::matmul;
-use linus_base::linalg::solve_upper_in_place;
+use linus_base::linalg::{matmul, matmul_part, solve_upper_in_place, Whole};
 use linus_base::terms::SINGLE_FLOOR;
 use linus_core::timing::Timers;
 use linus_ints::eri3c::{self, Aux3c};
@@ -134,7 +133,9 @@ pub fn auto_single(work: f64, cphf_tol: Option<f64>) -> bool {
 /// buffer and an accumulator K_t, column-major n x (ng o)) round robin, each slot's in order with
 /// sequential GEMMs, and the slots run in parallel: up to [`T1_SLOTS`] threads stay busy, and
 /// the sums depend neither on the thread count nor on the run (the slots are summed in order,
-/// [`flush_slots`]). (The batched
+/// [`flush_slots`]). The products of a group are parts of the products of all `nd` densities in
+/// one group ([`matmul_part`]): the bits do not depend on how the memory budget groups them.
+/// (The batched
 /// form it replaces, T for the block's nq functions and one parallel GEMM, ran at 4.5-5 of 8
 /// cores: the T buffer's budget left nq at 5-14, so its T step had fewer tasks than threads, and K was
 /// scattered into the outputs serially after every block.)
@@ -143,6 +144,7 @@ fn term1_slots<T: faer::traits::ComplexField + Copy + Default + Send + Sync>(
     im: MatRef<'_, T>,
     ap: &[T],
     ng: usize,
+    nd: usize,
     xb: &[T],
     n: usize,
     nq: usize,
@@ -151,13 +153,24 @@ fn term1_slots<T: faer::traits::ComplexField + Copy + Default + Send + Sync>(
     slots: &mut [(Vec<T>, Vec<T>)],
 ) {
     let w = ng * o;
+    let (t_whole, k_whole) = (
+        Whole {
+            rows: n * nd,
+            cols: o,
+        },
+        Whole {
+            rows: n,
+            cols: nd * o,
+        },
+    );
     let nslot = slots.len();
     let one = faer::traits::ComplexField::one_impl();
     let apm = MatRef::from_row_major_slice(&ap[..n * w], n * ng, o);
     slots.par_iter_mut().enumerate().for_each(|(t, (tb, kb))| {
         for q in (t..nq).step_by(nslot) {
             let xq = MatRef::from_row_major_slice(&xb[q * o * o..(q + 1) * o * o], o, o);
-            matmul(
+            matmul_part(
+                t_whole,
                 MatMut::from_row_major_slice_mut(&mut tb[..n * w], n * ng, o),
                 Accum::Replace,
                 apm,
@@ -166,7 +179,8 @@ fn term1_slots<T: faer::traits::ComplexField + Copy + Default + Send + Sync>(
                 Par::Seq,
             );
             let tq = MatRef::from_row_major_slice(&tb[..n * w], n, w);
-            matmul(
+            matmul_part(
+                k_whole,
                 MatMut::from_column_major_slice_mut(&mut kb[..n * w], n, w),
                 Accum::Add,
                 im.subcols(q * n, n),
@@ -1116,7 +1130,18 @@ impl DfResponseJk {
                                 vec![(im(), &self.x32[s][xs.clone()], 1.0)]
                             };
                             for (im, xb, f) in terms {
-                                term1_slots(im, &ap32[s][g], ng, xb, n, nq, o, f, &mut slots32);
+                                term1_slots(
+                                    im,
+                                    &ap32[s][g],
+                                    ng,
+                                    gen[s].len(),
+                                    xb,
+                                    n,
+                                    nq,
+                                    o,
+                                    f,
+                                    &mut slots32,
+                                );
                             }
                             t_gemm += tg.elapsed().as_secs_f64();
                             let ta = Instant::now();
@@ -1138,7 +1163,18 @@ impl DfResponseJk {
                                 vec![(im(), &ch.x[xs.clone()], 1.0)]
                             };
                             for (im, xb, f) in terms {
-                                term1_slots(im, &ap64[s][g], ng, xb, n, nq, o, f, &mut slots64);
+                                term1_slots(
+                                    im,
+                                    &ap64[s][g],
+                                    ng,
+                                    gen[s].len(),
+                                    xb,
+                                    n,
+                                    nq,
+                                    o,
+                                    f,
+                                    &mut slots64,
+                                );
                             }
                             t_gemm += tg.elapsed().as_secs_f64();
                             let ta = Instant::now();

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 # 1.89: File::lock (linus-xc/build.rs), AVX-512 target features and intrinsics
 rust-version = "1.89"

@@ -27,7 +27,7 @@ license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "LICENSES/*", "linus-disp-
 authors = [{ name = "Atoms for Humanity" }]
 keywords = ["quantum chemistry", "DFT", "Hartree-Fock", "Hessian", "qcdata"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",

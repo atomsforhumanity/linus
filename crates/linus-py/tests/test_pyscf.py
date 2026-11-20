@@ -208,7 +208,7 @@ def test_range_separated_hybrids_match_pyscf(molecules, method, charge, multipli
 VV10_METHODS = pytest.mark.parametrize("method", ["wb97m-v", "wb97x-v", "b97m-v"])
 VV10_SPINS = pytest.mark.parametrize("charge,multiplicity", [(0, 1), (1, 2)], ids=["closed", "cation-doublet"])
 # PySCF's results for the VV10 cases, so that every push compares linus with them in seconds (PySCF's own VV10 SCF and
-# grid-response gradient take minutes per case); the nightly's slow test recomputes and checks them, and
+# grid-response gradient take minutes per case); the slow test (pytest -m slow) recomputes and checks them, and
 # LINUS_REFRESH_PYSCF_CACHE=1 pytest -m slow -k vv10_functionals rewrites them (e.g. after a PySCF update)
 PYSCF_VV10 = Path(__file__).resolve().parent / "data" / "pyscf_vv10.json"
 
@@ -270,7 +270,7 @@ def test_vv10_functionals_match_pyscf(molecules, method, charge, multiplicity):
         if data.get("pyscf") != pyscf.__version__:  # another PySCF: start over
             data = {"pyscf": pyscf.__version__, "cases": {}}
         data["about"] = ("PySCF's results for test_pyscf.py's VV10 cases (written by LINUS_REFRESH_PYSCF_CACHE=1 "
-                         "pytest -m slow -k vv10_functionals; checked by the nightly)")
+                         "pytest -m slow -k vv10_functionals; checked by the slow test)")
         data["cases"][key] = {"inputs": inputs, **ref}
         PYSCF_VV10.parent.mkdir(exist_ok=True)
         PYSCF_VV10.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
@@ -289,11 +289,11 @@ def test_vv10_functionals_match_pyscf(molecules, method, charge, multiplicity):
 @VV10_SPINS
 def test_vv10_functionals_match_stored_pyscf(molecules, method, charge, multiplicity):
     """Per push: linus against PySCF's stored VV10 results (data/pyscf_vv10.json, recomputed and checked by the
-    nightly's test_vv10_functionals_match_pyscf): the same comparison, in seconds."""
+    slow test_vv10_functionals_match_pyscf): the same comparison, in seconds."""
     data = json.loads(PYSCF_VV10.read_text())
     if data["pyscf"] != pyscf.__version__:
         pytest.skip(f"stored results are PySCF {data['pyscf']}'s, PySCF {pyscf.__version__} is installed "
-                    "(the nightly's slow test fails until they are refreshed)")
+                    "(the slow test fails until they are refreshed)")
     s = molecules("nh3", charge, multiplicity)
     stored = data["cases"][vv10_key(method, charge, multiplicity)]
     assert stored["inputs"] == vv10_inputs(s, method)

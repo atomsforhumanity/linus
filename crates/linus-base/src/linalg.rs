@@ -27,6 +27,24 @@
 //! solves, Cholesky panels, the eigensolver's tridiagonalization) run AVX2 on every CPU. faer's
 //! `nightly` feature would give them AVX-512, for under 0.2% of a calculation's time, and would
 //! change the eigensolver's and the Cholesky factorization's bits.
+//!
+//! Kernels and parts (D43). faer picks a product's kernel from its shape (faer 0.22
+//! `matmul_imp`), and the kernels add an element's k products differently: a matrix-vector
+//! product when m or n is 1 (pulp's SIMD partial sums), nano-gemm when m n k <= 16^3 (in order,
+//! restarting every 64 products, alpha fused into the update of the destination), the GEMM
+//! otherwise (in order, restarting every 512). An element's bits follow from its kernel, not from
+//! the rest of the shape ([`Sums`]). A product computed in parts whose sizes follow a pass, a
+//! memory budget or the thread count (blocks of the rows or columns of one whole product) keeps the
+//! whole's bits only if every part takes the whole's kernel. Such parts go through
+//! [`matmul_part`] or [`abt_split_part`], which take the [`Whole`] shape and compute a part whose
+//! own kernel would differ (one small enough for nano-gemm, or one row or column of a wider
+//! whole) padded with zero rows or columns into the whole's kernel. Every other product has its
+//! shape from the problem alone and goes through [`matmul`]. A triangular solve's columns come out
+//! alike at every number of right-hand sides from two up; a single column goes through faer's
+//! matrix-vector kernels in the solve's updates, so solves split into column blocks take
+//! [`column_blocks`]. The DF Hessian's H-bar passes (blocks of atoms sized from `memory_gib`)
+//! broke this until 0.1.1: a pass of one atom sent its exchange Gram products to nano-gemm, the
+//! single pass to the GEMM (GitHub CI's first public run, at another machine's last bits).
 // The wrapped faer functions are disallowed elsewhere (clippy.toml); this module is their home.
 #![allow(clippy::disallowed_methods)]
 
@@ -245,6 +263,175 @@ pub fn mm(a: MatRef<'_, f64>, b: MatRef<'_, f64>, par: Par) -> Mat<f64> {
     let mut c = Mat::<f64>::zeros(a.nrows(), b.ncols());
     matmul(c.as_mut(), Accum::Replace, a, b, 1.0, par);
     c
+}
+
+/// faer 0.22's largest m n k for nano-gemm (`NANO_GEMM_THRESHOLD`).
+const NANO_MAX: usize = 16 * 16 * 16;
+
+/// How faer adds up an element's k products, by the kernel its dispatch picks for the shape and
+/// layouts (module docs, "Kernels and parts").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sums {
+    /// A matrix-vector product (m or n is 1 and the vector contiguous): pulp's SIMD partial sums.
+    Vector,
+    /// A rank-one update (k = 1).
+    RankOne,
+    /// nano-gemm (m n k <= 16^3): in order, restarting every 64 products, alpha fused into the
+    /// destination's update. It matches the GEMM only for k <= 64 without accumulation or with
+    /// alpha = +-1, so it counts as a kernel of its own.
+    Nano,
+    /// The GEMM: in order, restarting every 512 products (on AVX2 and AVX-512 CPUs alike).
+    Gemm,
+}
+
+impl Sums {
+    /// The sums of faer's `matmul_imp` for dst (m x n) = A (m x k) B (k x n) with these strides
+    /// (non-negative: linus's views).
+    pub fn of<T>(dst: MatRef<'_, T>, a: MatRef<'_, T>, b: MatRef<'_, T>) -> Sums {
+        Self::of_shape(dst.nrows(), dst.ncols(), a.ncols(), dst, a, b)
+    }
+
+    /// [`Sums::of`] for an m x n x k product with the strides of `dst`, `a` and `b`.
+    fn of_shape<T>(
+        m: usize,
+        n: usize,
+        k: usize,
+        dst: MatRef<'_, T>,
+        a: MatRef<'_, T>,
+        b: MatRef<'_, T>,
+    ) -> Sums {
+        let (drs, dcs) = (dst.row_stride(), dst.col_stride());
+        let (ars, acs) = (a.row_stride(), a.col_stride());
+        let (brs, bcs) = (b.row_stride(), b.col_stride());
+        if n == 1 && ((drs == 1 && ars == 1) || (brs == 1 && acs == 1)) {
+            return Sums::Vector;
+        }
+        if m == 1 && ((dcs == 1 && bcs == 1) || (acs == 1 && brs == 1)) {
+            return Sums::Vector;
+        }
+        if k == 1 && ((drs == 1 && ars == 1) || (dcs == 1 && bcs == 1)) {
+            return Sums::RankOne;
+        }
+        if m.saturating_mul(n).saturating_mul(k) <= NANO_MAX {
+            Sums::Nano
+        } else {
+            Sums::Gemm
+        }
+    }
+}
+
+/// The rows and columns of a whole product computed in parts ([`matmul_part`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Whole {
+    pub rows: usize,
+    pub cols: usize,
+}
+
+/// [`matmul`] for a part of a whole product: some of its rows and columns (the same k and
+/// layouts), cut by a pass, a memory budget or the thread count. Each element gets the bits it
+/// has in the whole product, however the parts are cut: a part whose own kernel would add
+/// differently from the whole's ([`Sums`]) is computed padded with zero rows or columns into the
+/// whole's kernel (only small parts: nano-gemm sizes, or one row or column of a wider whole).
+/// A part that is the whole is exactly [`matmul`]. With k = 1 (one product per element) every
+/// kernel gives the same bits when alpha is 1 without accumulation, and a part is a plain
+/// [`matmul`]: other k = 1 parts are not cut alike (none in linus).
+pub fn matmul_part<T: ComplexField>(
+    whole: Whole,
+    dst: impl AsMatMut<T = T, Rows = usize, Cols = usize>,
+    beta: Accum,
+    a: impl AsMatRef<T = T, Rows = usize, Cols = usize>,
+    b: impl AsMatRef<T = T, Rows = usize, Cols = usize>,
+    alpha: T,
+    par: Par,
+) {
+    let mut dst = dst;
+    let mut dst = dst.as_mat_mut();
+    let (a, b) = (a.as_mat_ref(), b.as_mat_ref());
+    let (m, n, k) = (dst.nrows(), dst.ncols(), a.ncols());
+    assert!(
+        m <= whole.rows && n <= whole.cols,
+        "a part ({m} x {n}) larger than its whole ({} x {})",
+        whole.rows,
+        whole.cols
+    );
+    let want = Sums::of_shape(whole.rows, whole.cols, k, dst.as_ref(), a, b);
+    if m == 0 || n == 0 || k <= 1 || Sums::of(dst.as_ref(), a, b) == want {
+        matmul(dst, beta, a, b, alpha, par);
+        return;
+    }
+    // the padded shape: no unit dimension unless the whole has one, and above nano-gemm's sizes
+    // for the GEMM's sums
+    let mut mp = if whole.rows > 1 { m.max(2) } else { m };
+    let mut np = if whole.cols > 1 { n.max(2) } else { n };
+    if want == Sums::Gemm && mp * np * k <= NANO_MAX {
+        if mp <= np {
+            mp = NANO_MAX / (np * k) + 1;
+        } else {
+            np = NANO_MAX / (mp * k) + 1;
+        }
+    }
+    // padded copies in the operands' own layouts (nano-gemm's sums follow the layouts too)
+    let mut ap = Padded::zeros(mp, k, a);
+    ap.view().subrows_mut(0, m).copy_from(a);
+    let mut bp = Padded::zeros(k, np, b);
+    bp.view().subcols_mut(0, n).copy_from(b);
+    let mut dp = Padded::zeros(mp, np, dst.as_ref());
+    if beta == Accum::Add {
+        dp.view().submatrix_mut(0, 0, m, n).copy_from(dst.as_ref());
+    }
+    let (ar, br) = (ap.get(), bp.get());
+    debug_assert_eq!(
+        Sums::of(dp.get(), ar, br),
+        want,
+        "padded {m} x {n} x {k} to {mp} x {np}"
+    );
+    matmul(dp.view(), beta, ar, br, alpha, par);
+    dst.copy_from(dp.get().submatrix(0, 0, m, n));
+}
+
+/// A zero matrix stored like `like`: row-major (as a transposed column-major matrix) when its
+/// columns are contiguous and its rows are not, column-major otherwise.
+struct Padded<T: ComplexField> {
+    mat: Mat<T>,
+    row_major: bool,
+}
+
+impl<T: ComplexField> Padded<T> {
+    fn zeros(rows: usize, cols: usize, like: MatRef<'_, T>) -> Self {
+        let row_major = like.col_stride() == 1 && like.row_stride() != 1;
+        let mat = if row_major {
+            Mat::zeros(cols, rows)
+        } else {
+            Mat::zeros(rows, cols)
+        };
+        Padded { mat, row_major }
+    }
+
+    fn view(&mut self) -> MatMut<'_, T> {
+        if self.row_major {
+            self.mat.as_mut().transpose_mut()
+        } else {
+            self.mat.as_mut()
+        }
+    }
+
+    fn get(&self) -> MatRef<'_, T> {
+        if self.row_major {
+            self.mat.as_ref().transpose()
+        } else {
+            self.mat.as_ref()
+        }
+    }
+}
+
+/// Blocks of at most `max` of `w` right-hand-side columns for a triangular solve split into
+/// column blocks (`max` >= 4): of about equal width, none a single column unless `w` is 1. A
+/// column's solution is the same in every block of two or more columns; alone it takes faer's
+/// matrix-vector kernels (module docs, "Kernels and parts").
+pub fn column_blocks(w: usize, max: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
+    assert!(max >= 4, "column blocks of at most {max} columns");
+    let nb = w.div_ceil(max);
+    (0..nb).map(move |i| i * w / nb..(i + 1) * w / nb)
 }
 
 /// Solve L X = B in place on `x` (B), L lower triangular (`l`'s upper triangle is not read),
@@ -503,6 +690,17 @@ const K_SPLIT: usize = 32;
 /// in order (faer's parallel GEMM does not split k, which leaves such inner-product shapes at
 /// a fraction of the machine's throughput). The result does not depend on the thread count.
 pub fn abt_split(a: MatRef<'_, f64>, b: MatRef<'_, f64>) -> Mat<f64> {
+    let whole = Whole {
+        rows: a.nrows(),
+        cols: b.nrows(),
+    };
+    abt_split_part(a, b, whole)
+}
+
+/// [`abt_split`] for a part of a whole A B^T (some rows of A and of B, cut by a pass, a memory
+/// budget or the thread count): each element has the bits of the `whole` product (its k chunks
+/// through [`matmul_part`]).
+pub fn abt_split_part(a: MatRef<'_, f64>, b: MatRef<'_, f64>, whole: Whole) -> Mat<f64> {
     let (m, n, k) = (a.nrows(), b.nrows(), a.ncols());
     let nchunk = K_SPLIT.min(k.div_ceil(256)).max(1);
     let len = k.div_ceil(nchunk);
@@ -513,7 +711,8 @@ pub fn abt_split(a: MatRef<'_, f64>, b: MatRef<'_, f64>) -> Mat<f64> {
             let r1 = ((c + 1) * len).min(k);
             let mut p = Mat::<f64>::zeros(m, n);
             if r1 > r0 {
-                matmul(
+                matmul_part(
+                    whole,
                     p.as_mut(),
                     Accum::Replace,
                     a.subcols(r0, r1 - r0),
@@ -549,6 +748,151 @@ mod tests {
 
     fn max_diff(a: MatRef<'_, f64>, b: MatRef<'_, f64>) -> f64 {
         max_abs((a.to_owned() - b.to_owned()).as_ref())
+    }
+
+    /// Full-precision pseudo-random values in [-0.5, 0.5) (xorshift): products of such values
+    /// round differently in different orders, where small integers would not.
+    fn noise(seed: u64, len: usize) -> Vec<f64> {
+        let mut s = seed | 1;
+        (0..len)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                (s >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+            })
+            .collect()
+    }
+
+    /// Row-major (`rm`) or column-major m x n storage of `v`.
+    fn view(v: &[f64], m: usize, n: usize, rm: bool) -> MatRef<'_, f64> {
+        if rm {
+            MatRef::from_row_major_slice(&v[..m * n], m, n)
+        } else {
+            MatRef::from_column_major_slice(&v[..m * n], m, n)
+        }
+    }
+
+    /// Every part of a product (single rows and columns, blocks small enough for nano-gemm,
+    /// any layout, with and without accumulation) gets the bits the elements have in the whole
+    /// product through `matmul_part`, for wholes of each kind of sums (k = 1: alpha 1 without
+    /// accumulation); through plain `matmul` such parts differ (faer's kernels add differently:
+    /// the H-bar passes' bug).
+    #[test]
+    fn parts_take_the_whole_products_bits() {
+        let mut plain_differs = false;
+        for (mw, nw, k) in [
+            (12, 12, 252), // the GEMM; 3 x 3 parts go to nano-gemm, single rows to pulp
+            (3, 12, 216),  // the GEMM; 3 x 3 parts to nano-gemm
+            (3, 6, 200),   // nano-gemm with k > 64; single columns to pulp
+            (40, 30, 64),  // the GEMM; nano-gemm parts (k = 64)
+            (9, 7, 1),     // rank one (alpha 1, no accumulation)
+            (50, 1, 300),  // a matrix-vector product
+            (1, 40, 700),  // a vector-matrix product, k beyond one GEMM block
+            (20, 20, 1100),
+        ] {
+            let av = noise(mw as u64 * 31 + k as u64, mw * k);
+            let bv = noise(nw as u64 * 17 + k as u64, k * nw);
+            let cv = noise(7 + k as u64, mw * nw);
+            let c0 = view(&cv, mw, nw, false).to_owned();
+            for (arm, brm, drm, add) in [
+                (true, false, false, false),
+                (false, true, true, true),
+                (true, true, false, true),
+                (false, false, true, false),
+            ] {
+                let (a, b) = (view(&av, mw, k, arm), view(&bv, k, nw, brm));
+                let beta = if add && k > 1 {
+                    Accum::Add
+                } else {
+                    Accum::Replace
+                };
+                let alpha = if k > 1 { -0.75 } else { 1.0 };
+                // dst (starting from `d0`) = alpha A B (+ dst), column- or row-major (`drm`)
+                let product = |d0: MatRef<'_, f64>, f: &dyn Fn(MatMut<'_, f64>)| -> Mat<f64> {
+                    if drm {
+                        let mut t = d0.transpose().to_owned();
+                        f(t.as_mut().transpose_mut());
+                        t.transpose().to_owned()
+                    } else {
+                        let mut d = d0.to_owned();
+                        f(d.as_mut());
+                        d
+                    }
+                };
+                let whole = product(c0.as_ref(), &|d| matmul(d, beta, a, b, alpha, Par::Seq));
+                let w = Whole { rows: mw, cols: nw };
+                let cuts = |len: usize| -> Vec<std::ops::Range<usize>> {
+                    let mut v = vec![0..len, 0..1, len - 1..len, 1..len.min(4)];
+                    v.retain(|r| !r.is_empty());
+                    v
+                };
+                for rr in cuts(mw) {
+                    for cc in cuts(nw) {
+                        let (pm, pn) = (rr.len(), cc.len());
+                        let (ap, bp) = (a.subrows(rr.start, pm), b.subcols(cc.start, pn));
+                        let d0 = c0.submatrix(rr.start, cc.start, pm, pn);
+                        let part = product(d0, &|d| {
+                            matmul_part(w, d, beta, ap, bp, alpha, Par::rayon(3))
+                        });
+                        let plain = product(d0, &|d| matmul(d, beta, ap, bp, alpha, Par::Seq));
+                        let expect = whole.submatrix(rr.start, cc.start, pm, pn);
+                        assert!(
+                            part.as_ref() == expect,
+                            "{mw} x {nw} x {k}, part {rr:?} x {cc:?}, layouts {arm} {brm} {drm}"
+                        );
+                        plain_differs |= plain.as_ref() != expect;
+                    }
+                }
+            }
+        }
+        assert!(
+            plain_differs,
+            "faer's kernels no longer add parts differently"
+        );
+    }
+
+    /// Column blocks cover the columns in order, at most `max` wide, never one column alone (of
+    /// more than one), and a triangular solve's columns come out the same in any block of two or
+    /// more columns, but not alone (faer's matrix-vector kernels).
+    #[test]
+    fn solves_in_column_blocks_keep_the_bits() {
+        for (w, max) in [
+            (1, 256),
+            (2, 256),
+            (256, 256),
+            (257, 256),
+            (513, 256),
+            (1000, 7),
+        ] {
+            let b: Vec<_> = column_blocks(w, max).collect();
+            assert_eq!(b.first().map(|r| r.start), Some(0));
+            assert_eq!(b.last().map(|r| r.end), Some(w));
+            assert!(b.windows(2).all(|p| p[0].end == p[1].start));
+            assert!(b.iter().all(|r| r.len() <= max && (w == 1 || r.len() >= 2)));
+        }
+        let n = 111;
+        let gv = noise(5, n * n);
+        let g = view(&gv, n, n, false);
+        let mut a = mm(g, g.transpose(), Par::Seq);
+        for i in 0..n {
+            a[(i, i)] += n as f64;
+        }
+        let l = cholesky(a.as_ref(), Par::Seq).unwrap();
+        let rv = noise(9, n * 300);
+        let rhs = view(&rv, n, 300, false);
+        let solve = |cols: std::ops::Range<usize>| {
+            cholesky_solve(
+                l.as_ref(),
+                rhs.subcols(cols.start, cols.len()),
+                Par::rayon(4),
+            )
+        };
+        let all = solve(0..300);
+        for cols in column_blocks(300, 7).chain([5..7, 290..300, 0..257]) {
+            assert!(solve(cols.clone()).as_ref() == all.subcols(cols.start, cols.len()));
+        }
+        assert!(solve(150..151).as_ref() != all.subcols(150, 1));
     }
 
     /// Products run sequentially below their threads' share of work, and in parallel above it;

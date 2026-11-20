@@ -15,7 +15,7 @@ coefficient r^power exp(-exponent r^2), and the core electrons each replaces,
 `Ecp.core_electrons`, which the orbitals' `Orbitals.core_electrons` agree with).
 
 Molden files of a wavefunction are qcinf's (`qcinf.molden.write(wfn, structure)`, and
-`qcinf.molden.read`), for every program's orbitals, ECP cores included (``[core]``, afh-stack#67).
+`qcinf.molden.read`), for every program's orbitals, ECP cores included (``[core]``).
 linus also writes the Molden file of its own orbitals itself with the setting ``output.molden``
 (``results.files["orbitals.molden"]``; the command line's ``--molden``).
 """

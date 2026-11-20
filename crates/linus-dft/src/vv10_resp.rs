@@ -50,17 +50,21 @@
 //! Every reduction runs in a fixed order (the pair sums over j ascending for each point and
 //! perturbation, lane-wise with explicit FMA as in `crate::vv10`) or in fixed point (the
 //! matrices and the Hessian), so the results do not depend on the number of threads, on the
-//! memory budget's perturbation groups or on the ISA.
+//! memory budget's perturbation groups or on the ISA. A group's products are parts of the single
+//! group's (`GroupPerts`: blocks of perturbations aligned as in one group, each product with
+//! its whole block's kernel, `linus_base::linalg::matmul_part`): faer adds a product's terms
+//! differently by its shape, and the groups' sizes follow the memory budget and the thread
+//! count.
 
 use crate::batch::{BatchCtx, BatchPlan};
 use crate::hessian::{basis_motion, comp_index, local_index, Fns, HBatch, XcHessianTerms, Xs};
 use crate::kernel::{occ_out, occ_u1, push_vco, VcoInputs};
 use crate::points::ExtPotential;
 use crate::vv10::{constants, fuw, local, pair_g, potential, reciprocals, Local, Vv10};
-use crate::{gather_rows, gather_sub, gemm, mmut, mref, scatter_cols, sized};
+use crate::{gather_rows, gather_sub, gemm, gemm_part, mmut, mref, scatter_cols, sized};
 use faer::{Mat, MatRef, Par};
 use linus_base::error::LinusError;
-use linus_base::linalg::mm;
+use linus_base::linalg::{mm, Whole};
 use linus_num::det::{merge_all, FixedAcc};
 use rayon::prelude::*;
 use std::ops::Range;
@@ -443,7 +447,8 @@ impl Vv10 {
             let npp = r.len().div_ceil(NPAD_P) * NPAD_P;
             let t0 = std::time::Instant::now();
             let mut inp = vec![0.0; g.na() * npp * 4];
-            self.cpks_inputs(g, c_o, a, &at, f_ch, r.clone(), npp, &mut inp);
+            let perts = GroupPerts::contiguous(r.clone(), npert);
+            self.cpks_inputs(g, c_o, a, &at, f_ch, &perts, npp, &mut inp);
             let coef = coefficients(g, &inp, npp, None);
             let t1 = std::time::Instant::now();
             let outs = pert_sweep(g, &coef, npp, fp32)?;
@@ -451,7 +456,7 @@ impl Vv10 {
             drop(coef);
             assemble(g, &mut inp, &outs, npp, None);
             drop(outs);
-            let (v, _) = self.contract(g, c_o, &inp, npp, r.len(), None);
+            let (v, _) = self.contract(g, c_o, &inp, npp, &perts, None);
             for (o, vs) in out.iter_mut().zip(v) {
                 o.extend(vs);
             }
@@ -462,8 +467,8 @@ impl Vv10 {
         Ok((out, tm))
     }
 
-    /// The first-order total density (rho1, grad rho1) of the perturbations `range` at the
-    /// active points into `out` (point-major: [point][npp][4]).
+    /// The first-order total density (rho1, grad rho1) of the group's perturbations `perts` at
+    /// the active points into `out` (point-major: [point][npp][4]).
     #[allow(clippy::too_many_arguments)]
     fn cpks_inputs(
         &self,
@@ -472,12 +477,12 @@ impl Vv10 {
         a: &[Vec<Mat<f64>>],
         at: &[Vec<Mat<f64>>],
         f_ch: f64,
-        range: Range<usize>,
+        perts: &GroupPerts,
         npp: usize,
         out: &mut [f64],
     ) {
         let eng = &self.eng;
-        let np = range.len();
+        let np = perts.len();
         let chunks = batch_chunks(out, &g.brange, npp * 4);
         let plan = BatchPlan::new(1, eng.func_thresh);
         eng.for_each_batch_in(&plan, chunks, BatchWork::default, |wk, b, chunk| {
@@ -506,15 +511,15 @@ impl Vv10 {
                 );
                 let phi0 = mref(ao, ld, nao, nc * ld);
                 let phim = mref(f4, ld, nk, s4);
-                // perturbations in blocks of ~2^17 doubles
+                // perturbations in blocks of ~2^17 doubles, as one group has them
                 let per_p = ld * (nk + nao) + 2 * nao * nk;
-                let ps = ((1usize << 17) / per_p.max(1)).clamp(1, np);
-                for b0 in (0..np).step_by(ps) {
-                    let pc = ps.min(np - b0);
+                let ps = ((1usize << 17) / per_p.max(1)).clamp(1, perts.n_all);
+                for (lr, pc_whole) in perts.blocks(ps) {
+                    let (b0, pc) = (lr.start, lr.len());
                     let ab = sized(&mut wk.abuf, nao * pc * nk);
                     let atb = sized(&mut wk.atbuf, nk * pc * nao);
                     for pl in 0..pc {
-                        let p = range.start + b0 + pl;
+                        let p = perts.global(b0 + pl);
                         gather_rows(
                             a[s][p].as_ref(),
                             b.idx,
@@ -527,7 +532,12 @@ impl Vv10 {
                         }
                     }
                     let pb = sized(&mut wk.p, ld * pc * nk);
-                    gemm(
+                    let whole = |w: usize| Whole {
+                        rows: ld,
+                        cols: pc_whole * w,
+                    };
+                    gemm_part(
+                        whole(nk),
                         mmut(pb, ld, pc * nk, ld),
                         false,
                         phi0,
@@ -535,7 +545,8 @@ impl Vv10 {
                         1.0,
                     );
                     let qb = sized(&mut wk.q, ld * pc * nao);
-                    gemm(
+                    gemm_part(
+                        whole(nao),
                         mmut(qb, ld, pc * nao, ld),
                         false,
                         phim,
@@ -622,17 +633,18 @@ impl Vv10 {
     }
 
     /// V[t_p] C_s for the weighted first-order potentials t (point-major [point][npp][4]) of
-    /// the first `np` perturbations, as fixed-point sums `[s][p]`; with `e_dt` (the total density)
-    /// also E[x][p] = sum_i u^x_i . t^p_i for every coordinate x ((3N x np), row-major).
+    /// the group's perturbations `perts`, as fixed-point sums `[s][p]`; with `e_dt` (the total
+    /// density) also E[x][p] = sum_i u^x_i . t^p_i for every coordinate x ((3N x np), row-major).
     fn contract(
         &self,
         g: &Vv10Ground,
         c_o: &[MatRef<'_, f64>],
         t: &[f64],
         npp: usize,
-        np: usize,
+        perts: &GroupPerts,
         e_dt: Option<&Mat<f64>>,
     ) -> (Vec<Vec<Mat<f64>>>, Vec<f64>) {
+        let np = perts.len();
         let eng = &self.eng;
         let nbf = eng.basis.nbf;
         let nch = c_o.len();
@@ -687,9 +699,9 @@ impl Vv10 {
                     1.0,
                 );
                 let per_p = ld * (nk + nao) + nao * nk;
-                let ps = ((1usize << 17) / per_p.max(1)).clamp(1, np);
-                for b0 in (0..np).step_by(ps) {
-                    let pc = ps.min(np - b0);
+                let ps = ((1usize << 17) / per_p.max(1)).clamp(1, perts.n_all);
+                for (lr, pc_whole) in perts.blocks(ps) {
+                    let (b0, pc) = (lr.start, lr.len());
                     let zb = sized(&mut wk.p, ld * pc * nk);
                     let gmb = sized(&mut wk.q, ld * pc * nao);
                     for pl in 0..pc {
@@ -714,6 +726,7 @@ impl Vv10 {
                     let x = VcoInputs {
                         nocc: nk,
                         pc,
+                        pc_whole,
                         gga: true,
                         mgga: false,
                         phi4: f4,
@@ -742,7 +755,13 @@ impl Vv10 {
                 wk.basis_motion(&ci, b, nat);
                 let nx = 3 * nat;
                 let el = sized(&mut wk.el, nx * np);
-                gemm(
+                // a part of the product for all perturbations (one group)
+                let whole = Whole {
+                    rows: nx,
+                    cols: perts.n_all,
+                };
+                gemm_part(
+                    whole,
                     mmut(el, nx, np, nx),
                     false,
                     mref(&wk.u, s4, nx, s4).transpose(),
@@ -868,7 +887,14 @@ impl Vv10 {
             let t2 = std::time::Instant::now();
             assemble(g, &mut inp, &outs, npp, gm.as_ref());
             drop(outs);
-            let (v, e) = self.contract(g, c_o, &inp, npp, np, Some(dt));
+            // the group's perturbations in the single group's order: [fixed 3N, grid 3N]
+            let mut runs = vec![(0, 3 * a0, nx)];
+            if grid_response {
+                runs.push((nx, n3 + 3 * a0, nx));
+            }
+            let n_all = if grid_response { 2 * n3 } else { n3 };
+            let perts = GroupPerts::new(runs, n_all);
+            let (v, e) = self.contract(g, c_o, &inp, npp, &perts, Some(dt));
             times.add(&Vv10Times {
                 potential_terms: 0.0,
                 grid: (t1 - t0).as_secs_f64() + t2.elapsed().as_secs_f64(),
@@ -892,6 +918,70 @@ impl Vv10 {
             }
         }
         done(vfix, vgrid, hess, times)
+    }
+}
+
+/// The perturbations of a group as a part of the single group (all perturbations in one group,
+/// the memory budget permitting): runs `(local, global, len)` of the group's perturbations, its
+/// `local..local + len` being the single group's `global..global + len`, of `n_all`. Blocks of
+/// perturbations are aligned as in the single group ([`GroupPerts::blocks`]) and every product of
+/// a block's part takes the whole block's kernel, so a group gives its perturbations the single
+/// group's bits however the memory budget or the thread count groups them.
+struct GroupPerts {
+    runs: Vec<(usize, usize, usize)>,
+    n_all: usize,
+}
+
+impl GroupPerts {
+    /// The group of these runs, adjacent ones merged (the single group is one run).
+    fn new(runs: Vec<(usize, usize, usize)>, n_all: usize) -> Self {
+        let mut merged: Vec<(usize, usize, usize)> = Vec::new();
+        for r in runs.into_iter().filter(|r| r.2 > 0) {
+            match merged.last_mut() {
+                Some(m) if m.0 + m.2 == r.0 && m.1 + m.2 == r.1 => m.2 += r.2,
+                _ => merged.push(r),
+            }
+        }
+        GroupPerts {
+            runs: merged,
+            n_all,
+        }
+    }
+
+    /// The perturbations `range` of `n_all`, in order.
+    fn contiguous(range: Range<usize>, n_all: usize) -> Self {
+        GroupPerts {
+            runs: vec![(0, range.start, range.len())],
+            n_all,
+        }
+    }
+
+    /// The group's number of perturbations.
+    fn len(&self) -> usize {
+        self.runs.iter().map(|r| r.2).sum()
+    }
+
+    /// The single group's index of the group's perturbation `p`.
+    fn global(&self, p: usize) -> usize {
+        let &(l0, g0, _) = self
+            .runs
+            .iter()
+            .find(|r| (r.0..r.0 + r.2).contains(&p))
+            .expect("a perturbation of the group");
+        g0 + p - l0
+    }
+
+    /// The group's parts of the single group's blocks of `ps` perturbations (at its multiples of
+    /// `ps`): the local range of each part and the size of its whole block.
+    fn blocks(&self, ps: usize) -> impl Iterator<Item = (Range<usize>, usize)> + '_ {
+        let n_all = self.n_all;
+        self.runs.iter().flat_map(move |&(l0, g0, len)| {
+            (g0 / ps..(g0 + len).div_ceil(ps)).filter_map(move |k| {
+                let (b0, b1) = (k * ps, ((k + 1) * ps).min(n_all));
+                let (a, b) = (b0.max(g0), b1.min(g0 + len));
+                (a < b).then(|| (l0 + a - g0..l0 + b - g0, b1 - b0))
+            })
+        })
     }
 }
 
@@ -1798,5 +1888,46 @@ mod tests {
             run(&xc, 4) == r,
             "VV10 response differs with the perturbation groups"
         );
+    }
+
+    /// Groups of any size give the single group's bits also where a group's products would take
+    /// another of faer's kernels than the single group's: a channel with one occupied orbital (a
+    /// group of one perturbation makes its products matrix-vector products) and small groups
+    /// of the Hessian's atoms (its E = u^T t has one column per perturbation of the group).
+    #[test]
+    fn groups_of_a_one_orbital_channel_keep_the_bits() {
+        let mut xc = integrator("b97m-v", &XYZ, &XYZ);
+        let dt = density(&xc);
+        let n = dt.nrows();
+        let (ca, cb) = (mat(n, 5, 0, 0.3), mat(n, 1, 2, 0.4));
+        let a: Vec<Vec<Mat<f64>>> = vec![
+            (0..7).map(|p| mat(n, 5, p + 1, 0.05)).collect(),
+            (0..7).map(|p| mat(n, 1, p + 11, 0.05)).collect(),
+        ];
+        type Out = (
+            Vec<Vec<Mat<f64>>>,
+            Vec<Vec<Mat<f64>>>,
+            Vec<Vec<Mat<f64>>>,
+            Vec<f64>,
+        );
+        let run = |xc: &XcIntegrator, t: usize| -> Out {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(t)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let nl = xc.vv10().unwrap();
+                    let g = nl.response_ground(&dt, true);
+                    let co = [ca.as_ref(), cb.as_ref()];
+                    let k = nl.kernel_contract_occ(&g, &co, &a).unwrap();
+                    let h = nl.hessian_terms(&g, &co, &dt, true, Par::Seq).unwrap();
+                    (k, h.terms.vfix, h.terms.vgrid, h.terms.hess)
+                })
+        };
+        let single = run(&xc, 3);
+        assert!(run(&xc, 8) == single, "8 threads");
+        // groups of one perturbation and of one atom
+        xc.vv10.as_mut().unwrap().eng.kernel_budget_mb = 0;
+        assert!(run(&xc, 3) == single, "groups of one perturbation");
     }
 }

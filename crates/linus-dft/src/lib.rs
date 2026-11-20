@@ -40,7 +40,7 @@ pub use hessian::XcHessianTerms;
 use crate::batch::{BatchCtx, BatchPlan};
 use faer::{Accum, Mat, MatMut, MatRef, Par};
 use linus_base::error::LinusError;
-use linus_base::linalg::matmul;
+use linus_base::linalg::{matmul, matmul_part, Whole};
 use linus_base::terms::{XcDensity, XcPotential};
 use linus_core::timing::Timers;
 use linus_grid::{GridSpec, MolecularGrid};
@@ -436,6 +436,28 @@ pub(crate) fn gemm(
     alpha: f64,
 ) {
     matmul(
+        c,
+        if accum { Accum::Add } else { Accum::Replace },
+        a,
+        b,
+        alpha,
+        Par::Seq,
+    );
+}
+
+/// [`gemm`] for a part of a whole product of `whole` rows and columns, with its kernel
+/// (`linus_base::linalg::matmul_part`): blocks of perturbations whose sizes follow a group.
+#[inline]
+pub(crate) fn gemm_part(
+    whole: Whole,
+    c: MatMut<'_, f64>,
+    accum: bool,
+    a: MatRef<'_, f64>,
+    b: MatRef<'_, f64>,
+    alpha: f64,
+) {
+    matmul_part(
+        whole,
         c,
         if accum { Accum::Add } else { Accum::Replace },
         a,

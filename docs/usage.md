@@ -443,7 +443,11 @@ input:
 - on AVX2 and AVX-512 CPUs alike: linus's kernels and faer's matrix products run AVX-512 code on
   AVX-512 CPUs and AVX2 code otherwise, with the same summation order per element, so the bits
   are the same (the reference suite on an emulated AVX2-only CPU, and with `LINUS_ISA=avx2`, is
-  identical to the AVX-512 runs).
+  identical to the AVX-512 runs);
+- for any number of the DF Hessian's exchange passes, of the response exchange's density groups
+  and of the VV10 kernel's perturbation groups, which `memory_gib` (and for VV10 the thread count)
+  sizes: a matrix product cut into such parts takes the kernel of the whole product (since 0.1.1;
+  in 0.1.0 these results could change in their last bits with the grouping).
 
 Four things can change the last bits, never more than round-off:
 

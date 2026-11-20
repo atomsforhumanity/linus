@@ -46,7 +46,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def _shared_dir(name: str) -> Path:
     """`name` (e.g. .refenv) in the repository, or in the main checkout when this is a
-    git worktree (.claude/worktrees/<agent>/ has no environments of its own)."""
+    git worktree (which has no environments of its own)."""
     for d in (REPO, *REPO.parents):
         if (d / name).exists():
             return d / name
