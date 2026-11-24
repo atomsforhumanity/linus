@@ -432,8 +432,8 @@ with error kind `backend` (`linus.BackendError`) rather than continuing on the C
 
 ## 10. Reproducibility
 
-On the CPU, one linus binary running with one C math library gives the same bits for the same
-input:
+On the CPU, one linus build (one wheel) on one C math library, the same glibc version built the
+same way, gives the same bits for the same input:
 
 - at any thread count (`threads`);
 - run to run and machine to machine, across CPU vendors: the validation matrix (234
@@ -451,23 +451,35 @@ input:
 
 Four things can change the last bits, never more than round-off:
 
-- **The C math library.** linus, and libxc inside it, take `erf`, `erfc`, `exp`, `pow` and the rest
-  from the system's C library (glibc's libm), so the same binary on another glibc can round
-  differently. glibc 2.36 (Debian 12, the linus container images) and 2.43 (Ubuntu 26.04) differ in
-  `erf` (2% of arguments, at most 1 ulp) and `erfc` (31%, at most 2 ulp); `exp`, `log`, `pow`,
-  `cbrt`, `expm1`, `atan`, `sin`, `cos` and `tanh` agree. That moves the results that call
-  them, range-separated functionals (ωB97X, ωB97X-D3BJ, CAM-B3LYP, ωB97M-V), implicit solvent and
-  D4: in the reference suite energies by up to 2e-12 Eh and gradients by 3e-13 Eh/bohr (39 atoms),
-  and, through the CPKS iterations, Hessians by up to 5e-7 Eh/bohr² and harmonic frequencies by
-  1e-3 cm⁻¹ (caffeine, ωB97X-D3BJ); small molecules move far less (~1e-13 Eh, ~1e-10 Eh/bohr²).
-  The others keep every bit. For bit-identical results on several machines, run the same
-  container image (or the same OS release) everywhere.
+- **The C math library.** linus, and libxc inside it, take `cbrt`, `erf`, `erfc`, `exp`, `pow`
+  and the rest from the system's C library (glibc's libm), so the same wheel on another glibc can
+  round differently, by glibc version and by how it was built:
+  - glibc 2.36 (Debian 12, the linus container images) and 2.39 (Ubuntu 24.04) differ from 2.43
+    (Ubuntu 26.04) in `erf` (3% of arguments, 1 ulp) and `erfc` (25%, up to 3 ulp); the other
+    functions linus calls agree. That moves the results that call them, range-separated
+    functionals (ωB97X, ωB97X-D3BJ, CAM-B3LYP, ωB97M-V), implicit solvent and D4: in the reference
+    suite energies by up to 2e-12 Eh and gradients by 3e-13 Eh/bohr (39 atoms), and, through the
+    CPKS iterations, Hessians by up to 5e-7 Eh/bohr² and harmonic frequencies by 1e-3 cm⁻¹
+    (caffeine, ωB97X-D3BJ); small molecules move far less (~1e-13 Eh, ~1e-10 Eh/bohr²). The
+    others keep every bit.
+  - Ubuntu 26.04 also builds glibc 2.43 for x86-64-v3 (its amd64v3 package variant, which GitHub's
+    ubuntu-26.04 runners have). That build's `cbrt` differs from the x86-64 build's (20% of
+    arguments, up to 4 ulp), and libxc calls `cbrt` in every density functional: the same wheel
+    moved energies by up to 2.5e-12 Eh and gradients by about 1e-14 Eh/bohr (water and the OH
+    radical with B3LYP, r²SCAN0, ωB97X-D3BJ and M06-2X in def2-SVP), and can take a different
+    number of SCF iterations (M06-2X on OH: 16 instead of 14) and, rarely, change whether a hard
+    SCF converges within `max_iter`.
+
+  For bit-identical results on several machines, run the same container image (or the same OS
+  release with the same package variant) everywhere.
 - **CPUs without AVX2 and FMA** (and non-x86 builds) run linus's generic kernels, which round
   differently: `LINUS_ISA=generic` on a Sapphire Rapids moved energies by up to 9e-13 Eh and
   gradients by 5e-13 Eh/bohr, and, through the CPKS iterations, Hessians by up to 1e-6 Eh/bohr²
   (frequencies 2e-3 cm⁻¹).
 - **Another build** (compiler version, build options) is another binary; compare results of one
-  build.
+  build. A build from source compiles libxc without floating-point contraction (since 0.1.2), so
+  a compiler whose default instruction set has FMA (Ubuntu 26.04's amd64v3 gcc) gives the
+  wheels' libxc results.
 - **The memory.** With `memory_gib` unset, a range-separated hybrid's DF tensors follow the
   machine's memory (and, on a full node, the free memory): B and B^ω, or the one-sided
   coefficients, which agree to f64 round-off (9e-13 Eh); set `memory_gib` (or `jk.df_long_range`)

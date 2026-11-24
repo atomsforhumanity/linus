@@ -12,7 +12,7 @@ authors:
   - given-names: Colton
     family-names: Hicks
     affiliation: "Atoms for Humanity (Astera)"
-version: 0.1.1
+version: 0.1.2
 license: MIT
 repository-code: "https://github.com/atomsforhumanity/linus"
 keywords:

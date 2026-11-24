@@ -239,6 +239,15 @@ fn a_hessian_steps_off_a_saddle_the_probe_misses() {
     }
     .into();
     o.grid.xc = Some(linus::GridChoice::Pyscf { level: 3 });
+    // 450 iterations, not 300: round-off decides which point the DIIS reaches first, and so on
+    // which side of the escalation point (2/3 of max_iter) the SCF lands. With an x86-64 glibc it
+    // is the C2 saddle (iteration 80): the probe steps off along B (-5.0e-3) and SOSCF converges
+    // at iteration 179. With Ubuntu 26.04's amd64v3 glibc (its cbrt rounds differently; GitHub's
+    // runner) it is a C2v point 2.9e-5 Eh higher (iteration 58, A2 mode -1.0e-4): after the probe's
+    // 1/16 step SOSCF oscillates (dE +-6e-5) past iteration 200, where the escalation's restart
+    // from the lowest-energy orbitals ran out of its 100 quasi-Newton iterations at dE 1.8e-3;
+    // with 450 SOSCF leaves the oscillation by itself and converges at iteration 325 (2026-11-20).
+    o.scf.max_iter = Some(450);
     let rep = Session::new(mol, o)
         .unwrap()
         .run(CalcType::Hessian)

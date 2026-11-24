@@ -4,7 +4,8 @@
 //! Where libxc comes from, in order:
 //! 1. `LIBXC_DIR=<prefix>`: a prebuilt install prefix (`<prefix>/include/xc.h`,
 //!    `<prefix>/lib{,64}/libxc.a` or `libxc.so`). Must be libxc 7.0.0 exactly.
-//! 2. A build cache keyed by (tarball sha256, cmake options, target, C compiler):
+//! 2. A build cache keyed by (tarball sha256, cmake options, C flags, target, C compiler and
+//!    the target macros it predefines, which tell apart compilers that default to another ISA):
 //!    `$LINUS_XC_CACHE_DIR`, else `$XDG_CACHE_HOME/linus-xc`, else
 //!    `$HOME/.cache/linus-xc`. Shared by all profiles, `cargo clean`, worktrees and
 //!    rust-analyzer, so libxc is compiled once per machine/compiler.
@@ -26,7 +27,15 @@ const LIBXC_URL: &str = "https://gitlab.com/libxc/libxc/-/archive/7.0.0/libxc-7.
 /// sha256 of the GitLab archive above (also recorded by Spack for libxc 7.0.0).
 const LIBXC_SHA256: &str = "8d4e343041c9cd869833822f57744872076ae709a613c118d70605539fb13a77";
 /// Bump when the recipe below changes, to invalidate existing caches.
-const RECIPE_REVISION: u32 = 1;
+const RECIPE_REVISION: u32 = 2;
+
+/// C flags for libxc on top of CMake's Release flags (-O3 -DNDEBUG). No floating-point
+/// contraction: a compiler whose default ISA has FMA would otherwise fuse a*b+c and change
+/// libxc's last bits by the build host. Ubuntu 26.04's amd64v3 package variant (GitHub's
+/// ubuntu-26.04 runner) ships a gcc that defaults to -march=x86-64-v3, and clang contracts by
+/// default on arm64. With it, libxc computes the same bits as an x86-64 baseline build
+/// (PySCF's libxc, the manylinux wheels) on any of them; baseline builds are unchanged.
+const LIBXC_CFLAGS: &[&str] = &["-ffp-contract=off"];
 
 /// CMake options for libxc. kxc/lxc off (Hessians only need fxc), no Fortran,
 /// no tests, no `-march=native` (results and binaries portable across x86-64).
@@ -171,6 +180,9 @@ fn cached_build() -> PathBuf {
     cfg.out_dir(&prefix)
         .profile("Release")
         .no_default_flags(true);
+    for flag in libxc_cflags() {
+        cfg.cflag(flag);
+    }
     for (k, v) in CMAKE_DEFINES {
         cfg.define(k, v);
     }
@@ -213,10 +225,48 @@ fn cache_root() -> Option<PathBuf> {
     fs::create_dir_all(&dir).ok().map(|_| dir)
 }
 
+/// [`LIBXC_CFLAGS`] for a GCC-style compiler driver (none for MSVC).
+fn libxc_cflags() -> &'static [&'static str] {
+    if cc::Build::new().get_compiler().is_like_msvc() {
+        &[]
+    } else {
+        LIBXC_CFLAGS
+    }
+}
+
 /// Hash of everything that changes the produced library.
 fn cache_key() -> String {
     let target = env::var("TARGET").unwrap();
     let compiler = cc::Build::new().get_compiler();
+    // The C flags CMake gets: ours, plus what cmake-rs adds from the environment (CFLAGS,
+    // CFLAGS_<target>, ...) through a cc::Build configured as its own (no default flags; the
+    // optimization level is CMake's), so the key does not depend on the cargo profile.
+    let cmake_c = cc::Build::new()
+        .opt_level(0)
+        .debug(false)
+        .warnings(false)
+        .no_default_flags(true)
+        .get_compiler();
+    let mut cflags: Vec<String> = libxc_cflags().iter().map(|f| f.to_string()).collect();
+    cflags.extend(
+        cmake_c
+            .args()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned()),
+    );
+    // Its predefined macros at those flags (__FMA__, __AVX2__, ... for a compiler whose default
+    // ISA is x86-64-v3): `cc --version` is the same for Ubuntu's amd64 and amd64v3 gcc.
+    let macros = if compiler.is_like_msvc() {
+        Vec::new()
+    } else {
+        Command::new(compiler.path())
+            .args(&cflags)
+            .args(["-dM", "-E", "-x", "c", "-"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map(|o| o.stdout)
+            .unwrap_or_default()
+    };
     let cc_version = Command::new(compiler.path())
         .arg("--version")
         .output()
@@ -237,6 +287,10 @@ fn cache_key() -> String {
     h.update(&target);
     h.update(compiler.path().to_string_lossy().as_bytes());
     h.update(&cc_version);
+    for f in &cflags {
+        h.update(format!("{f};"));
+    }
+    h.update(&macros);
     let hex = format!("{:x}", h.finalize());
     hex[..12].to_string()
 }

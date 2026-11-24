@@ -240,8 +240,18 @@ parameters are compared with PySCF's `hybrid_coeff`, `rsh_coeff` and `nlc_coeff`
   (`gen_reference.py --libxc-so`). The two libxc versions have the same
   `xc_func_type` layout, so PySCF's C interface works with either.
 * **Same libxc (7.0.0), all 24 points incl. edge cases:** every array of every
-  functional, both spins, orders 0–2, is **bit-identical** (max relative
-  difference 0; the test tolerance is 1e-13).
+  functional, both spins, orders 0–2, is **bit-identical** with Ubuntu 26.04's
+  glibc (max relative difference 0). The system's C math library moves the
+  last bits: glibc 2.36 and 2.39 round `erf` differently (ωB97X, ≤ 5.8e-15),
+  and Ubuntu 26.04's amd64v3 glibc (GitHub's ubuntu-26.04 runner) has a `cbrt`
+  1–4 ulp off the x86-64 build's on 20% of arguments, which a minority spin
+  channel amplifies (B97 u, ωB97 attenuation). So the test's tolerance goes by
+  point class, each at least 10× the drift measured in those four
+  environments: regular points 1e-11 (measured 7.2e-13), strongly polarized
+  points (min ρ_s < 1e-3 ρ) 5e-9 (4.4e-10), and degenerate points (some
+  ρ_s < 1e-6, σ_ss = 0 or τ_s = 0) 2e-2 (1.1e-3) with the same screened
+  points. A libxc compiled for x86-64-v3 gives the baseline bits: build.rs
+  turns floating-point contraction off.
 * **Stock PySCF (libxc 7.1.2):** this measures version drift. Libxc 7.1.0
   regenerated all functional code (SymPy backend, cancellation-free forms, no
   `pow()` for rational powers). The test checks bulk points (every ρ_s ≥ 1e-4,

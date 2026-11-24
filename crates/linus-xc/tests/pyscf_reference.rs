@@ -7,7 +7,11 @@
 //! absolutely. NaN must match NaN.
 //!
 //! * `pyscf_libxc700_reference.json`: PySCF 2.15 running libxc 7.0.0, the same
-//!   libxc as ours. Every point, tolerance 1e-13 (observed: bit-identical).
+//!   libxc as ours. Every point, with a tolerance per [`PointClass`]: the
+//!   outputs are bitwise PySCF's with Ubuntu 26.04's glibc, and the tolerances
+//!   cover other C math libraries (see [`PointClass`]). This checks
+//!   that linus-xc calls libxc correctly (layouts, spin, mixing, derivative
+//!   order, thresholds), which would show as O(1) errors.
 //! * `pyscf_reference.json`: stock PySCF 2.15, which bundles libxc 7.1.2. That
 //!   release regenerated all functional code (SymPy backend, cancellation-free
 //!   forms, no pow() for rational powers), so values differ by version drift,
@@ -55,6 +59,53 @@ fn load(file: &str) -> Fixture {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+/// How far the system's C math library can move libxc's outputs at a point.
+///
+/// At the fixture's points linus-xc gives PySCF's bits with Ubuntu 26.04's glibc
+/// 2.43 (x86-64 build), also with a libxc compiled for x86-64-v3 (build.rs turns
+/// floating-point contraction off); glibc 2.36 and 2.39 (Debian 12, Ubuntu 24.04)
+/// round `erf` differently and move ωB97X by up to 5.8e-15. Ubuntu 26.04's amd64v3
+/// glibc (GitHub's ubuntu-26.04 runner) has a `cbrt` that differs from the x86-64
+/// build's by 1-4 ulp on 20% of arguments: cbrt of a minority spin channel,
+/// amplified by the B97 u = γx²/(1+γx²) and the ωB97 attenuation, sets every
+/// class's maximum (element error, the four environments, 2026-11-20):
+///
+/// | class | points | max measured | tolerance |
+/// |---|---|---|---|
+/// | regular | the rest | 7.2e-13 (M06-2X unpolarized v2rho2, ρ = 6.6e-3) | 1e-11 |
+/// | polarized | min ρ_s < 1e-3 ρ | 4.4e-10 (ωB97X v2rho2, ρ = (40.9, 3.5e-4)) | 5e-9 |
+/// | degenerate | some ρ_s < 1e-6, σ_ss = 0 or τ_s = 0 | 1.1e-3 (ωB97M-V v2rho2, ρ = (0.49, 0)) | 2e-2, and the same screened (all-zero) points |
+///
+/// Each tolerance is at least 10 times its class's maximum.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PointClass {
+    Regular,
+    /// Strongly spin-polarized: the minority channel below 1e-3 of the density.
+    Polarized,
+    /// An empty, vanishing (< 1e-6) or threshold-clamped spin channel.
+    Degenerate,
+}
+
+impl PointClass {
+    const ALL: [PointClass; 3] = [Self::Regular, Self::Polarized, Self::Degenerate];
+
+    fn tolerance(self) -> f64 {
+        match self {
+            Self::Regular => 1e-11,
+            Self::Polarized => 5e-9,
+            Self::Degenerate => 2e-2,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Regular => "regular",
+            Self::Polarized => "polarized",
+            Self::Degenerate => "degenerate",
+        }
+    }
+}
+
 impl Inputs {
     fn input(&self) -> XcInput<'_> {
         XcInput {
@@ -64,39 +115,75 @@ impl Inputs {
             tau: Some(&self.tau),
         }
     }
+
+    /// (rho, sigma_ss, tau) of point `i`, per spin channel.
+    fn point(&self, i: usize, polarized: bool) -> (&[f64], Vec<f64>, &[f64]) {
+        let (nr, ns) = if polarized { (2, 3) } else { (1, 1) };
+        let sigma = &self.sigma[i * ns..(i + 1) * ns];
+        (
+            &self.rho[i * nr..(i + 1) * nr],
+            sigma.iter().step_by(2).copied().collect(),
+            &self.tau[i * nr..(i + 1) * nr],
+        )
+    }
+
     /// Bulk point: every spin density >= 1e-4 and every sigma_ss > 0.
     fn bulk(&self, polarized: bool) -> Vec<bool> {
-        let (nr, ns) = if polarized { (2, 3) } else { (1, 1) };
         (0..self.np)
             .map(|i| {
-                let r = &self.rho[i * nr..(i + 1) * nr];
-                let s = &self.sigma[i * ns..(i + 1) * ns];
-                r.iter().all(|&x| x >= 1e-4) && s.iter().step_by(2).all(|&x| x > 0.0)
+                let (r, s, _) = self.point(i, polarized);
+                r.iter().all(|&x| x >= 1e-4) && s.iter().all(|&x| x > 0.0)
             })
             .collect()
+    }
+
+    fn classes(&self, polarized: bool) -> Vec<PointClass> {
+        (0..self.np)
+            .map(|i| {
+                let (r, s, t) = self.point(i, polarized);
+                let total: f64 = r.iter().sum();
+                if r.iter().any(|&x| x < 1e-6) || s.contains(&0.0) || t.contains(&0.0) {
+                    PointClass::Degenerate
+                } else if r.iter().any(|&x| x < 1e-3 * total) {
+                    PointClass::Polarized
+                } else {
+                    PointClass::Regular
+                }
+            })
+            .collect()
+    }
+}
+
+/// The array's scale floor: `1e-10 * max|ref|` over the points where `keep` is true.
+fn floor(reference: &[Option<f64>], dim: usize, keep: &[bool]) -> f64 {
+    let scale = reference
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[i / dim])
+        .filter_map(|(_, b)| b.filter(|b| b.is_finite()))
+        .fold(0.0f64, |m, b| m.max(b.abs()));
+    (1e-10 * scale).max(f64::MIN_POSITIVE)
+}
+
+/// Element error (see module docs); `None` reference is NaN.
+fn element_err(a: f64, b: Option<f64>, floor: f64) -> f64 {
+    let b = b.unwrap_or(f64::NAN);
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => 0.0,
+        (false, false) => (a - b).abs() / b.abs().max(floor),
+        _ => f64::INFINITY,
     }
 }
 
 /// Max error over the points where `keep` is true (see module docs).
 fn max_rel_err(ours: &[f64], reference: &[Option<f64>], dim: usize, keep: &[bool]) -> f64 {
     assert_eq!(ours.len(), reference.len());
-    let pairs = || {
-        ours.iter()
-            .zip(reference)
-            .enumerate()
-            .filter(|(i, _)| keep[i / dim])
-            .map(|(_, (a, b))| (*a, b.unwrap_or(f64::NAN)))
-    };
-    let scale = pairs()
-        .filter(|(_, b)| b.is_finite())
-        .fold(0.0f64, |m, (_, b)| m.max(b.abs()));
-    let floor = (1e-10 * scale).max(f64::MIN_POSITIVE);
-    pairs()
-        .map(|(a, b)| match (a.is_nan(), b.is_nan()) {
-            (true, true) => 0.0,
-            (false, false) => (a - b).abs() / b.abs().max(floor),
-            _ => f64::INFINITY,
-        })
+    let floor = floor(reference, dim, keep);
+    ours.iter()
+        .zip(reference)
+        .enumerate()
+        .filter(|(i, _)| keep[i / dim])
+        .map(|(_, (a, b))| element_err(*a, *b, floor))
         .fold(0.0, f64::max)
 }
 
@@ -109,23 +196,12 @@ fn family_name(f: Family) -> &'static str {
     }
 }
 
-/// Run all cases; returns (markdown table, failures).
-fn run(fx: &Fixture, bulk_only: bool, tol: impl Fn(usize) -> f64) -> (String, Vec<String>) {
-    let mut rows = vec![format!(
-        "linus-xc (libxc 7.0.0) vs PySCF {} eval_xc with libxc {}; {}\n\n\
-         | functional | spin | family | order 0 | order 1 | order 2 | worst array |{}\n\
-         |---|---|---|---|---|---|---|{}",
-        fx.pyscf_version,
-        fx.libxc_version,
-        if bulk_only {
-            "bulk points (checked) and edge points (reported)"
-        } else {
-            "all points"
-        },
-        if bulk_only { " edge points |" } else { "" },
-        if bulk_only { "---|" } else { "" },
-    )];
-    let mut failures = Vec::new();
+/// Evaluate every case at orders 0, 1 and 2 and call `check(case, order, array,
+/// ours, reference, dim)` for every array an order produces.
+fn for_each_array(
+    fx: &Fixture,
+    mut check: impl FnMut(&Case, usize, Out, &[f64], &[Option<f64>], usize),
+) {
     for case in &fx.cases {
         let polarized = case.spin == "polarized";
         let inp = &fx.inputs[&case.spin];
@@ -139,14 +215,8 @@ fn run(fx: &Fixture, bulk_only: bool, tol: impl Fn(usize) -> f64) -> (String, Ve
         );
         check_hybrid(&f, case);
         assert_eq!(f.np(&inp.input()), inp.np);
-
-        let all = vec![true; inp.np];
-        let bulk = inp.bulk(polarized);
-        let edge: Vec<bool> = bulk.iter().map(|b| !b).collect();
-        let keep = if bulk_only { &bulk } else { &all };
-        let (mut per_order, mut worst, mut edge_err) = ([0.0f64; 3], (0.0f64, ""), 0.0f64);
         let mut out = XcOutput::new();
-        for (order, order_err) in per_order.iter_mut().enumerate() {
+        for order in 0..=2 {
             f.eval(order, &inp.input(), &mut out).unwrap();
             for o in Out::ALL.into_iter().filter(|o| o.order() <= order) {
                 let ours = out.get(o);
@@ -159,50 +229,19 @@ fn run(fx: &Fixture, bulk_only: bool, tol: impl Fn(usize) -> f64) -> (String, Ve
                     );
                     continue;
                 };
-                let dim = o.dim(polarized);
-                let e = max_rel_err(ours, r, dim, keep);
-                *order_err = order_err.max(e);
-                if e > worst.0 {
-                    worst = (e, o.name());
-                }
-                if bulk_only {
-                    edge_err = edge_err.max(max_rel_err(ours, r, dim, &edge));
-                }
-                if e > tol(order) {
-                    failures.push(format!(
-                        "{} {} order {order} {}: {e:.2e} > {:.0e}",
-                        case.name,
-                        case.spin,
-                        o.name(),
-                        tol(order)
-                    ));
-                }
+                assert_eq!(ours.len(), r.len(), "{} {}", case.name, o.name());
+                check(case, order, o, ours, r, o.dim(polarized));
             }
         }
-        let e = |x: f64| {
-            if x == 0.0 {
-                "0".to_string()
-            } else {
-                format!("{x:.1e}")
-            }
-        };
-        rows.push(format!(
-            "| {} | {} | {} | {} | {} | {} | {} |{}",
-            case.name,
-            case.spin,
-            case.xctype,
-            e(per_order[0]),
-            e(per_order[1]),
-            e(per_order[2]),
-            if worst.0 > 0.0 { worst.1 } else { "-" },
-            if bulk_only {
-                format!(" {} |", e(edge_err))
-            } else {
-                String::new()
-            },
-        ));
     }
-    (rows.join("\n"), failures)
+}
+
+fn e(x: f64) -> String {
+    if x == 0.0 {
+        "0".to_string()
+    } else {
+        format!("{x:.1e}")
+    }
 }
 
 fn report(name: &str, table: &str) {
@@ -212,12 +251,7 @@ fn report(name: &str, table: &str) {
     }
 }
 
-#[test]
-fn matches_pyscf_with_same_libxc_7_0_0() {
-    let fx = load("pyscf_libxc700_reference.json");
-    assert_eq!(fx.libxc_version, "7.0.0");
-    let (table, failures) = run(&fx, false, |_| 1e-13);
-    report("validation_libxc700", &table);
+fn assert_no_failures(failures: &[String]) {
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",
@@ -227,16 +261,156 @@ fn matches_pyscf_with_same_libxc_7_0_0() {
 }
 
 #[test]
+fn matches_pyscf_with_same_libxc_7_0_0() {
+    let fx = load("pyscf_libxc700_reference.json");
+    assert_eq!(fx.libxc_version, "7.0.0");
+    let classes: BTreeMap<&str, Vec<PointClass>> = fx
+        .inputs
+        .iter()
+        .map(|(spin, inp)| (spin.as_str(), inp.classes(spin == "polarized")))
+        .collect();
+    let mut rows = vec![format!(
+        "linus-xc (libxc 7.0.0) vs PySCF {} eval_xc with libxc {}; all points, max error \
+         per point class (tolerance)\n\n\
+         | functional | spin | family | regular ({:.0e}) | polarized ({:.0e}) | degenerate ({:.0e}) | worst array |\n\
+         |---|---|---|---|---|---|---|",
+        fx.pyscf_version,
+        fx.libxc_version,
+        PointClass::Regular.tolerance(),
+        PointClass::Polarized.tolerance(),
+        PointClass::Degenerate.tolerance(),
+    )];
+    let mut failures = Vec::new();
+    // per case: max error per class, and the worst array
+    type Row = (String, [f64; 3], (f64, &'static str));
+    let mut row: Option<Row> = None;
+    let mut flush = |row: &mut Option<Row>| {
+        if let Some((key, m, worst)) = row.take() {
+            rows.push(format!(
+                "| {key} | {} | {} | {} | {} |",
+                e(m[0]),
+                e(m[1]),
+                e(m[2]),
+                if worst.0 > 0.0 { worst.1 } else { "-" }
+            ));
+        }
+    };
+    for_each_array(&fx, |case, order, o, ours, r, dim| {
+        let key = format!("{} | {} | {}", case.name, case.spin, case.xctype);
+        if row.as_ref().is_none_or(|(k, _, _)| *k != key) {
+            flush(&mut row);
+            row = Some((key, [0.0; 3], (0.0, "")));
+        }
+        let (_, max, worst) = row.as_mut().unwrap();
+        let cls = &classes[case.spin.as_str()];
+        let floor = floor(r, dim, &vec![true; cls.len()]);
+        let mut class_err = [0.0f64; 3];
+        for (k, (&a, &b)) in ours.iter().zip(r).enumerate() {
+            let ci = cls[k / dim] as usize;
+            class_err[ci] = class_err[ci].max(element_err(a, b, floor));
+        }
+        // Degenerate points: libxc's screening (a point all zeros) must match exactly; NaN
+        // against a number is an infinite error above.
+        for (p, _) in cls
+            .iter()
+            .enumerate()
+            .filter(|(_, &c)| c == PointClass::Degenerate)
+        {
+            let ours_zero = ours[p * dim..(p + 1) * dim].iter().all(|&a| a == 0.0);
+            let ref_zero = r[p * dim..(p + 1) * dim].iter().all(|&b| b == Some(0.0));
+            if ours_zero != ref_zero {
+                failures.push(format!(
+                    "{} {} order {order} {} point {p}: screened in {} only",
+                    case.name,
+                    case.spin,
+                    o.name(),
+                    if ours_zero { "ours" } else { "the reference" }
+                ));
+            }
+        }
+        for c in PointClass::ALL {
+            let err = class_err[c as usize];
+            max[c as usize] = max[c as usize].max(err);
+            if err > worst.0 {
+                *worst = (err, o.name());
+            }
+            if err > c.tolerance() {
+                failures.push(format!(
+                    "{} {} order {order} {} {} points: {err:.2e} > {:.0e}",
+                    case.name,
+                    case.spin,
+                    o.name(),
+                    c.name(),
+                    c.tolerance()
+                ));
+            }
+        }
+    });
+    flush(&mut row);
+    report("validation_libxc700", &rows.join("\n"));
+    assert_no_failures(&failures);
+}
+
+#[test]
 fn drift_vs_stock_pyscf_libxc() {
     let fx = load("pyscf_reference.json");
-    let (table, failures) = run(&fx, true, |order| if order < 2 { 1e-9 } else { 1e-6 });
-    report("validation_stock_pyscf", &table);
-    assert!(
-        failures.is_empty(),
-        "{} failures:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+    let tol = |order: usize| if order < 2 { 1e-9 } else { 1e-6 };
+    let bulk: BTreeMap<&str, Vec<bool>> = fx
+        .inputs
+        .iter()
+        .map(|(spin, inp)| (spin.as_str(), inp.bulk(spin == "polarized")))
+        .collect();
+    let mut rows = vec![format!(
+        "linus-xc (libxc 7.0.0) vs PySCF {} eval_xc with libxc {}; bulk points (checked) and \
+         edge points (reported)\n\n\
+         | functional | spin | family | order 0 | order 1 | order 2 | worst array | edge points |\n\
+         |---|---|---|---|---|---|---|---|",
+        fx.pyscf_version, fx.libxc_version,
+    )];
+    let mut failures = Vec::new();
+    // per case: max error per order at bulk points, the worst array, max error at edge points
+    type Row = (String, [f64; 3], (f64, &'static str), f64);
+    let mut row: Option<Row> = None;
+    let mut flush = |row: &mut Option<Row>| {
+        if let Some((key, per_order, worst, edge)) = row.take() {
+            rows.push(format!(
+                "| {key} | {} | {} | {} | {} | {} |",
+                e(per_order[0]),
+                e(per_order[1]),
+                e(per_order[2]),
+                if worst.0 > 0.0 { worst.1 } else { "-" },
+                e(edge)
+            ));
+        }
+    };
+    for_each_array(&fx, |case, order, o, ours, r, dim| {
+        let key = format!("{} | {} | {}", case.name, case.spin, case.xctype);
+        if row.as_ref().is_none_or(|(k, ..)| *k != key) {
+            flush(&mut row);
+            row = Some((key, [0.0; 3], (0.0, ""), 0.0));
+        }
+        let (_, per_order, worst, edge_err) = row.as_mut().unwrap();
+        let bulk = &bulk[case.spin.as_str()];
+        let edge: Vec<bool> = bulk.iter().map(|b| !b).collect();
+        let err = max_rel_err(ours, r, dim, bulk);
+        per_order[order] = per_order[order].max(err);
+        if err > worst.0 {
+            *worst = (err, o.name());
+        }
+        *edge_err = edge_err.max(max_rel_err(ours, r, dim, &edge));
+        if err > tol(order) {
+            failures.push(format!(
+                "{} {} order {order} {}: {err:.2e} > {:.0e}",
+                case.name,
+                case.spin,
+                o.name(),
+                tol(order)
+            ));
+        }
+    });
+    flush(&mut row);
+    report("validation_stock_pyscf", &rows.join("\n"));
+    assert_no_failures(&failures);
 }
 
 fn check_hybrid(f: &Functional, case: &Case) {

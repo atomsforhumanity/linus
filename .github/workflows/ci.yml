@@ -3,7 +3,9 @@
 # use). CPU only: the GPU backend's tests need an NVIDIA GPU, and tests/python,
 # reference/validate.py and the benchmarks need the reference programs (CONTRIBUTING.md). The
 # slow tests are skipped. The jobs build against the checkout and leave LINUS_DIST unset.
-# Actions are pinned to full commit SHAs (the tag in the comment).
+# Actions are pinned to full commit SHAs (the tag in the comment), and the runner to an Ubuntu
+# release: GitHub's ubuntu-26.04 image installs Ubuntu's amd64v3 packages (its gcc defaults to
+# x86-64-v3, its glibc is built for it), which a release rehearsal reproduces in a container.
 name: CI
 
 on:
@@ -31,7 +33,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,7 +62,7 @@ jobs:
         run: python3 tools/check_layering.py
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,13 +76,14 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # every crate, linus-gpu with its gpu feature off (no device here; its kernel tests run
       # with --features gpu on a machine with a GPU, CONTRIBUTING.md)
+      # --no-fail-fast: every test binary runs, so one run shows every failure
       - name: cargo test (without the slow tests)
         run: >-
-          cargo test --release --workspace --exclude linus-py --
+          cargo test --release --workspace --exclude linus-py --no-fail-fast --
           --skip exhaustive_classes --skip saddle_point_is_left_for_the_minimum
 
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

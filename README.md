@@ -33,8 +33,8 @@ Across all of them:
 Also: DFT grids that reproduce PySCF (`pyscf:N`), Psi4 (`psi4`) and ORCA 6.0.0's DefGrids
 (`orca:N`) point for point, plus linus's own (`linus:N`); harmonic analysis, point groups and RRHO/quasi-RRHO
 thermochemistry for any program's Hessian (`linus.vib`); orbital reuse between geometries;
-deterministic results, bitwise identical at any thread count and across CPUs with the same C math
-library ([docs/usage.md](docs/usage.md#10-reproducibility)). Not available: ROHF, excited
+deterministic results, bitwise identical at any thread count and across CPUs for the same wheel on
+the same C math library, glibc's version and build ([docs/usage.md](docs/usage.md#10-reproducibility)). Not available: ROHF, excited
 states, post-HF methods, periodic systems ([Limitations](#limitations)).
 
 ## Limitations

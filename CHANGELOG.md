@@ -5,6 +5,33 @@ and result (`schema_version`) and the Python package; before 1.0 any minor relea
 them, and every change is listed here. The Rust crates are unstable and not published. Versions follow [Semantic Versioning](https://semver.org); the format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] - 2026-11-20
+
+### Fixed
+
+- **Builds from source on Ubuntu 26.04 with its x86-64-v3 packages** (the amd64v3 variant, whose
+  gcc generates FMA instructions by default) compiled libxc with fused multiply-adds, so every
+  density functional's results differed from the wheels' in their last bits, and at a few
+  near-empty spin channels by more. libxc is now compiled without floating-point contraction on
+  every compiler: such a build gives the wheels' numbers. The wheels themselves are unchanged
+  (the same extension module, byte for byte).
+- **The test suite on GitHub's ubuntu-26.04 runner** (Ubuntu's amd64v3 packages): the comparison
+  of linus's functionals with PySCF's, run with the same libxc, demanded agreement to 1e-13 at
+  every grid point, which only holds with the C math library it was made with. Its tolerances now
+  follow how far the C library's rounding can move each kind of point (measured on four Linux
+  systems): 1e-11 at ordinary points, 5e-9 where one spin channel is almost empty, and 2e-2 plus
+  the same screened points where a channel is empty or vanishing. The CI names its runner
+  (ubuntu-26.04) and runs every test binary even after a failure.
+
+### Changed
+
+- **The reproducibility statement** (README, [docs/usage.md](docs/usage.md#10-reproducibility))
+  now says what it covers: bitwise for the same wheel on the same glibc version built the same
+  way. Ubuntu 26.04's x86-64-v3 build of glibc rounds `cbrt` differently from its x86-64 build;
+  there the same wheel moved energies by up to 2.5e-12 Eh and gradients by about 1e-14 Eh/bohr,
+  and an SCF can take a different number of iterations (M06-2X on the OH radical: 16 instead of
+  14) and, rarely, change whether a hard SCF converges within `scf.max_iter`. The documented `erf`/`erfc` differences of glibc 2.36 and 2.39 are unchanged.
+
 ## [0.1.1] - 2026-11-20
 
 A bug-fix release: CPU results that could differ in their last bits with `memory_gib` or the
@@ -1465,5 +1492,6 @@ was the SCF's; the SCF stage is `timings.energy`, and `timings.calculation` is g
 `df_store_gib`, `df_bytes_per_elem`, `df_one_sided`, `mem_hwm_gb_*` and the block counts moved
 from `timings` to `resources`; the result gained `success`, `molecule` and `resolved`.
 
+[0.1.2]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.2
 [0.1.1]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.1
 [0.1.0]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.0
