@@ -33,6 +33,24 @@ pub(crate) struct HostFunctional {
     unpolarized: Functional,
     polarized: Functional,
     kind: XcKind,
+    /// Where order 1 is evaluated when no device function replaces it.
+    #[cfg(feature = "gpu")]
+    place: FunctionalPlace,
+    /// The functional compiled for the device, per spin treatment (unpolarized, polarized), on
+    /// first use; Err: why libxc on the host evaluates it.
+    #[cfg(feature = "gpu")]
+    device: [std::sync::OnceLock<Result<crate::xc::devfunc::DevFunc, String>>; 2],
+}
+
+/// Where the XC engines evaluate the functional's first derivatives (`crate::xc::devfunc`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FunctionalPlace {
+    /// libxc's code compiled for the device where linus-xc has it and it agrees with libxc at
+    /// the setup's check, else libxc on the host (the default).
+    #[default]
+    Device,
+    /// libxc on the host.
+    Host,
 }
 
 /// The order-1 derivatives of every point in libxc's layout: `zk` (one per point), `vrho` (one
@@ -58,7 +76,25 @@ impl HostFunctional {
             unpolarized,
             polarized,
             kind,
+            #[cfg(feature = "gpu")]
+            place: FunctionalPlace::default(),
+            #[cfg(feature = "gpu")]
+            device: Default::default(),
         })
+    }
+
+    /// Where order 1 is evaluated (the default: on the device where it can be).
+    #[cfg(feature = "gpu")]
+    pub(crate) fn with_place(mut self, place: FunctionalPlace) -> Self {
+        self.place = place;
+        self
+    }
+
+    /// The plan of a device evaluation for `nsp` spin channels (linus-xc's), or why there is
+    /// none.
+    #[cfg(feature = "gpu")]
+    pub(crate) fn device_plan(&self, nsp: usize) -> Result<crate::cpu::DevicePlan, String> {
+        self.libxc(nsp).device_plan()
     }
 
     /// The ingredients it is evaluated with.
@@ -278,6 +314,27 @@ mod device {
     }
 
     impl HostFunctional {
+        /// The functional compiled for the device for `nsp` spin channels (compiled and checked
+        /// on first use), or None: libxc on the host evaluates it ([`HostFunctional::device_status`]
+        /// says why).
+        pub(crate) fn device(&self, gpu: &Gpu, nsp: usize) -> Option<&crate::xc::devfunc::DevFunc> {
+            if self.place != FunctionalPlace::Device {
+                return None;
+            }
+            self.device[nsp - 1]
+                .get_or_init(|| crate::xc::devfunc::DevFunc::new(gpu, self, nsp))
+                .as_ref()
+                .ok()
+        }
+
+        /// Where order 1 was evaluated for `nsp` spin channels: Some(Ok) on the device, Some(Err)
+        /// on the host with the reason, None not yet (or on the host by the engine's choice).
+        pub(crate) fn device_status(&self, nsp: usize) -> Option<Result<(), String>> {
+            self.device[nsp - 1]
+                .get()
+                .map(|r| r.as_ref().map(|_| ()).map_err(|e| e.clone()))
+        }
+
         /// Order 1 on the device's grid arrays (`rho`, `sigma`, `tau` as for
         /// [`HostFunctional::first`]): synchronizes, downloads them, evaluates, and uploads zk,
         /// vrho, vsigma and vtau (a one-element placeholder for an ingredient the functional
@@ -324,6 +381,24 @@ mod device {
             func: Option<&mut PointFn<'_>>,
         ) -> Result<(PointOutputs, PointTimes), GpuError> {
             let Some(f) = func else {
+                let nsp = if inp.restricted { 1 } else { 2 };
+                if let Some(d) = self.device(gpu, nsp) {
+                    let m = gpu.mark()?;
+                    let [zk, vrho, vsigma, vtau] = d.eval(gpu, inp.npts, inp.rho, sigma, tau)?;
+                    let functional = m.seconds_until(&gpu.mark()?)?;
+                    let out = PointOutputs {
+                        zk,
+                        vrho,
+                        vsigma,
+                        vtau,
+                        point_force: None,
+                    };
+                    let t = PointTimes {
+                        functional,
+                        libxc: 0.0,
+                    };
+                    return Ok((out, t));
+                }
                 return self.first_device(gpu, inp.npts, inp.restricted, inp.rho, sigma, tau);
             };
             let m = gpu.mark()?;

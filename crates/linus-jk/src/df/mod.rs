@@ -878,7 +878,7 @@ pub enum DfLongRangeSource {
 /// What a density-fitting setup resolved to (`resolved.record.df` of the result): the plan, the
 /// long-range source, the bytes stored, the budget (bytes) and the auxiliary basis size.
 /// Serialized with the GiB keys of the report: storage, precision, long_range, store_gib,
-/// budget_gib, naux, and on a GPU integrals (and integrals_note).
+/// budget_gib, naux, and on a GPU integrals (and integrals_note) and k_kernel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedDf {
     pub plan: DfPlan,
@@ -901,6 +901,9 @@ pub struct ResolvedDf {
     /// A GPU setup's tensor allocation beyond the bytes granted at its decision (a plan
     /// violation, with a `plan_violation` warning).
     pub plan_violation: Option<String>,
+    /// A GPU setup's kernel of native K's first GEMM on the shell panels ("strided", "mma",
+    /// "mma_sm90a": `linus_gpu::df::PanelKernel`); None on the CPU backend or without panels.
+    pub k_kernel: Option<&'static str>,
 }
 
 impl serde::Serialize for ResolvedDf {
@@ -928,6 +931,9 @@ impl serde::Serialize for ResolvedDf {
         }
         if let Some(v) = &self.plan_violation {
             m.serialize_field("plan_violation", v)?;
+        }
+        if let Some(k) = self.k_kernel {
+            m.serialize_field("k_kernel", k)?;
         }
         m.end()
     }
@@ -995,12 +1001,10 @@ impl Layout {
         stats: &mut DfStats,
     ) -> Layout {
         let t = Instant::now();
-        let q = pairs.schwarz();
+        pairs.schwarz();
         stats.t_schwarz = t.elapsed().as_secs_f64();
         let t = Instant::now();
-        let kept: Vec<usize> = (0..pairs.len())
-            .filter(|&i| pairs.pair(i).nprim > 0 && q[i] * aux.qmax >= opts.thresholds.pair)
-            .collect();
+        let kept = linus_ints::eri3c::df_kept_pairs(pairs, aux.qmax, opts.thresholds.pair);
         let p3: Vec<Pair3c> = kept
             .par_iter()
             .map(|&i| Pair3c::from_shell_pair(pairs.pair(i)))
@@ -1257,6 +1261,7 @@ impl DfJk {
             k_block: None,
             rung: None,
             plan_violation: None,
+            k_kernel: None,
         }
     }
 

@@ -390,7 +390,9 @@ and whose orbital gradient is small but stuck, as for open-shell atoms in a PCM,
 its escalation comes due or at `max_iter`, with qcdata's shared warning `loosely_converged`, the residual in `resolved.record.scf.plateau`; under
 accuracy targets only when the error estimates of its final orbital gradient meet them),
 `escalate` (on: an SCF whose DIIS stagnates, its lowest energy not improved for
-`stagnation_window` iterations, or that has spent 2/3 of `max_iter`, restarts once from the
+`stagnation_window` iterations, or blows up, its energy more than 1 Eh above the lowest and
+max|F_ai| more than 10 times the smallest for `blowup_window` iterations, or that has spent 2/3
+of `max_iter`, restarts once from the
 orbitals of its lowest-energy iteration with quasi-Newton steps and no level shift, for the rest
 of `max_iter`, unless the plateau rule takes it there; `resolved.record.scf.escalation`
 says why it started, or why it did not run in an SCF that used its budget), and `jk.incremental`.

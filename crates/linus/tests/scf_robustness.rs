@@ -6,7 +6,8 @@
 //!   ~1e-8) is accepted at `max_iter` with its residual reported and the warning `loosely_converged`
 //!   (`scf.plateau_window`);
 //! - any other SCF whose DIIS stagnates (or that spends 2/3 of `max_iter`) restarts once from its
-//!   lowest-energy orbitals with quasi-Newton steps, within `max_iter` (`scf.escalate`);
+//!   lowest-energy orbitals with quasi-Newton steps, within `max_iter` (`scf.escalate`), and one
+//!   whose DIIS blows up (LiF at 7 A) restarts the same way at once (`scf.blowup_window`);
 //! - a stability analysis whose negative mode has its minimum closer than the first trial
 //!   rotation (HF+ r2SCAN, slightly bent: eigenvalue -8.9e-4) takes a shorter step instead of
 //!   none;
@@ -119,6 +120,57 @@ fn escalation_converges_a_cycling_scf() {
     assert_eq!(r.history[e.at - 1].step, "escalation");
     assert!(r.history[e.at..].iter().all(|h| h.step != "diis"));
     assert!((r.energy - -92.1287251978).abs() < 1e-8, "E {}", r.energy);
+}
+
+/// LiF at 7.0 A (the ionic and the neutral configurations nearly degenerate), B3LYP: DIIS reaches
+/// its lowest energy at iteration 6, then leaves it by 1-12 Eh with max |F_ai| up to 15x its
+/// smallest. The blow-up trigger restarts from iteration 6 four iterations into the blow-up; the
+/// stagnation window (`blowup_window: 0`, main before it) restarts from the same orbitals 64
+/// iterations after them, and the escalation's course is the same, to the same bits.
+#[test]
+fn a_blowup_escalates_at_once() {
+    let lif = || {
+        Structure::new(
+            vec![3, 9],
+            vec![[0.0; 3], [0.0, 0.0, 7.0 / linus_core::units::BOHR_ANGSTROM]],
+            0,
+            1,
+        )
+        .unwrap()
+    };
+    let r = run(lif(), "b3lyp", |_| {}).expect("converges after escalating");
+    let e = *r.escalation.expect("a record").ran().expect("escalated");
+    assert_eq!(e.trigger, "blowup", "{e:?}");
+    let window = linus_scf::ScfAlgorithm::BLOWUP_WINDOW;
+    assert!(
+        e.at >= e.from_iter + window && e.at < e.from_iter + 20,
+        "{e:?}"
+    );
+    assert!(e.converged, "{e:?}");
+    assert_eq!(r.history[e.at - 1].step, "escalation");
+    // the window's iterations: more than 1 Eh above the lowest, max |F_ai| more than 10x its smallest
+    let gmin = r.history[1..e.at]
+        .iter()
+        .map(|h| h.gmax)
+        .fold(f64::INFINITY, f64::min);
+    for h in &r.history[e.at - window..e.at] {
+        assert!(
+            h.energy - e.from_energy > linus_scf::control::BLOWUP_ENERGY,
+            "{h:?}"
+        );
+        assert!(h.gmax > linus_scf::control::BLOWUP_GRADIENT * gmin, "{h:?}");
+    }
+    let off = run(lif(), "b3lyp", |o| o.scf.blowup_window = Some(0)).expect("converges");
+    let s = *off.escalation.expect("a record").ran().expect("escalated");
+    assert_eq!(s.trigger, "stagnation", "{s:?}");
+    assert_eq!(
+        (s.from_iter, s.from_energy.to_bits()),
+        (e.from_iter, e.from_energy.to_bits())
+    );
+    assert_eq!(s.iterations, e.iterations);
+    assert_eq!(off.energy.to_bits(), r.energy.to_bits());
+    assert_eq!(off.iterations - r.iterations, s.at - e.at);
+    assert!(s.at - e.at > 40, "{} vs {}", s.at, e.at);
 }
 
 /// `max_iter` is the whole budget: with 2 iterations the SCF runs 2, and the escalation, which

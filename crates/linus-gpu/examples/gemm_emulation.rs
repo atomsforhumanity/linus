@@ -16,7 +16,7 @@
 //!       --data bench/scratch/gpu-spike/dfk-u1an39 --shapes ts113 --block 512 --json out.json
 
 mod common;
-use common::device_ms;
+use common::{device_ms, median};
 use linus_gpu::blas::{Blas, Fp64Mode, GemmDims, Mantissa, MatMut, MatRef, Op, Strategy};
 use linus_gpu::harness::{self, compare};
 use linus_gpu::{DeviceBuf, Gpu, GpuError};
@@ -24,11 +24,6 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 type R<T> = Result<T, GpuError>;
-
-fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    v[v.len() / 2]
-}
 
 fn modes() -> Vec<(String, Fp64Mode)> {
     let mut v = vec![("native".to_string(), Fp64Mode::Native)];

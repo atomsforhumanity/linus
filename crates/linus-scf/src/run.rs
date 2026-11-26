@@ -23,9 +23,9 @@ use super::result::Finished;
 use super::stability::Starts;
 use super::state::OrbitalState;
 use super::{
-    all_finite, density, diagonalize, gate_gap, trace, try_diagonalize, ClosedShellProbe,
-    ModeCheck, PlateauRefusal, ScfConfig, ScfInput, ScfIteration, ScfResult, ScfResume,
-    StabilityCheck,
+    all_finite, density, diagonalize, gate_gap, trace, try_diagonalize, try_semicanonical,
+    ClosedShellProbe, ModeCheck, PlateauRefusal, ScfConfig, ScfInput, ScfIteration, ScfResult,
+    ScfResume, StabilityCheck,
 };
 use faer::{Mat, MatRef, Par};
 use linus_base::error::LinusError;
@@ -494,15 +494,16 @@ pub(super) fn run(
         converged,
         !non_finite && controls.escalation.exhausted(iters),
     );
-    // final orbitals: diagonalize the converged Fock matrices (without extrapolation)
+    // final orbitals: the canonical orbitals of the SCF's occupied space in the converged Fock
+    // matrices (without extrapolation)
     let fin_a = (!non_finite)
-        .then(|| try_diagonalize(fa.as_ref(), x.as_ref(), par))
+        .then(|| final_orbitals(&state, 0, &fa, x.as_ref(), s, par))
         .flatten();
     let fin_b = if restricted {
         fin_a.clone()
     } else {
         (!non_finite)
-            .then(|| try_diagonalize(fb.as_ref(), x.as_ref(), par))
+            .then(|| final_orbitals(&state, 1, &fb, x.as_ref(), s, par))
             .flatten()
     };
     let (eps_a, c_a, eps_b, c_b) = match (fin_a, fin_b) {
@@ -613,6 +614,28 @@ pub(super) fn run(
     Ok(ScfResult::finished(fin, opts))
 }
 
+/// The final orbitals and orbital energies of spin channel `ch` (0 alpha, 1 beta) of the SCF at
+/// `state` with its last Fock matrix `f`: the canonical orbitals of the occupied space of the
+/// density `f` was built from, occupied first. Where that occupied set came from a diagonalization
+/// (`OrbitalState::aufbau`) these are the eigenvectors of `f` with aufbau occupations; after
+/// rotations they are its semicanonical orbitals ([`try_semicanonical`]), which keep the density
+/// whether or not its occupied set is the aufbau set of `f` (docs/internal/deggrad.md: the
+/// eigenvectors' aufbau set was a different determinant after the escalation, and the
+/// derivatives used it). None when `f` has non-finite elements.
+fn final_orbitals(
+    state: &OrbitalState,
+    ch: usize,
+    f: &Mat<f64>,
+    x: MatRef<'_, f64>,
+    s: MatRef<'_, f64>,
+    par: Par,
+) -> Option<(Vec<f64>, Mat<f64>)> {
+    match &state.occ {
+        Some(occ) if !state.aufbau => try_semicanonical(&occ[ch], f, x, s, par),
+        _ => try_diagonalize(f.as_ref(), x, par),
+    }
+}
+
 /// The state the SCF starts from: the resumed iteration's orbitals, the guess densities of `inp`,
 /// or the core Hamiltonian's orbitals (whose densities alone it keeps, as the start always did).
 fn start(
@@ -627,12 +650,15 @@ fn start(
     let nocc = [na, nb];
     match (resume, &inp.guess_density) {
         (Some(r), _) => {
-            // the orbitals of the resumed iteration's density
+            // the orbitals of the resumed iteration's density: a device iteration's
+            // diagonalization (the device loop takes no quasi-Newton or stability steps; it hands
+            // those over), occupied by aufbau
             let (ca, cb) = (&r.c[0], &r.c[r.c.len() - 1]);
             let (da, db) = (density(ca.as_ref(), na, par), density(cb.as_ref(), nb, par));
             let mut st = OrbitalState::new(restricted, nocc, nbf, da, db);
             st.occ = Some(st.occupied_of(ca, cb));
             (st.c_a, st.c_b) = (ca.clone(), cb.clone());
+            st.aufbau = true;
             st
         }
         (None, Some((a, b))) => OrbitalState::new(restricted, nocc, nbf, a.clone(), b.clone()),
@@ -642,6 +668,7 @@ fn start(
             let (da, db) = (density(c.as_ref(), na, par), density(c.as_ref(), nb, par));
             let mut st = OrbitalState::new(restricted, nocc, nbf, da, db);
             st.occ = Some(st.occupied_of(&c, &c));
+            st.aufbau = true;
             st
         }
     }

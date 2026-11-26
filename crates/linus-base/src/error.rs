@@ -298,8 +298,28 @@ impl std::fmt::Display for Stopped {
     }
 }
 
-/// A CPHF/CPKS solve that stopped above its tolerance: what it was for, where it stopped and
-/// the tolerance it missed.
+/// How a CPHF/CPKS solve ended (the shared-subspace solver's statistics, and a
+/// [`ResponseFailure`]'s cause).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseEnd {
+    /// Every right-hand side at or below the tolerance.
+    Converged,
+    /// At the iteration limit.
+    Iterations,
+    /// Every new direction lay in the subspace already: it holds all the solver can add, and the
+    /// residual stayed above the tolerance, so the operator is singular or too ill-conditioned for
+    /// the equations to have a solution there.
+    Exhausted,
+    /// The last projected operator was not positive definite (to round-off): the orbital Hessian
+    /// has an eigenvalue at or below zero, and the residual stayed above the tolerance.
+    Indefinite,
+    /// The residual is not finite (NaN: a failed product).
+    NonFinite,
+}
+
+/// A CPHF/CPKS solve that stopped above its tolerance: what it was for, where and why it stopped
+/// and the tolerance it missed.
 #[derive(Clone, Debug)]
 pub struct ResponseFailure {
     /// "analytic Hessian" or "polarizability".
@@ -309,22 +329,48 @@ pub struct ResponseFailure {
     pub max_residual: f64,
     /// The tolerance on it (`response.tol`, `response.field_tol`).
     pub tol: f64,
+    /// How the solve ended.
+    pub end: ResponseEnd,
 }
 
 impl std::fmt::Display for ResponseFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "the CPHF/CPKS of the {} did not converge in {} iterations: max residual {:.2e} (tolerance {:.0e}). \
-             Remedies: precision.response = \"fp64\" and response.iteration_aux = \"none\" (single-precision response \
-             J/K stall near a max residual of {:.0e}), a looser tolerance (the Hessian error is quadratic in the \
-             residual), or a tighter SCF convergence",
-            self.what,
-            self.iterations,
-            self.max_residual,
-            self.tol,
-            crate::terms::SINGLE_FLOOR
-        )
+        let (what, it, r, tol) = (self.what, self.iterations, self.max_residual, self.tol);
+        // a singular or indefinite operator: no setting of the solve gives it a solution
+        let singular = "the SCF state has an orbital rotation of zero or negative curvature (a saddle \
+             point, or a broken-symmetry state that rotates freely, as a linear molecule's about its \
+             axis), and the response to this perturbation has no finite value there. No tolerance or \
+             precision setting changes that; a stable SCF state (scf.stability) can";
+        match self.end {
+            ResponseEnd::Indefinite => write!(
+                f,
+                "the CPHF/CPKS of the {what} has no solution at this SCF state: its operator, the \
+                 orbital Hessian, is not positive definite (an eigenvalue at or below zero; max \
+                 residual {r:.2e} after {it} iterations, tolerance {tol:.0e}): {singular}"
+            ),
+            ResponseEnd::Exhausted => write!(
+                f,
+                "the CPHF/CPKS of the {what} stopped after {it} iterations with no direction left to \
+                 add (max residual {r:.2e}, tolerance {tol:.0e}): its operator, the orbital Hessian, \
+                 is singular or nearly so at this SCF state: {singular}"
+            ),
+            ResponseEnd::NonFinite => write!(
+                f,
+                "the CPHF/CPKS of the {what} failed after {it} iterations: its residual is not \
+                 finite ({r:.2e}; a failed product)"
+            ),
+            ResponseEnd::Converged | ResponseEnd::Iterations => write!(
+                f,
+                "the CPHF/CPKS of the {what} did not converge in {it} iterations: max residual {r:.2e} \
+                 (tolerance {tol:.0e}). Remedies: precision.response = \"fp64\" and \
+                 response.iteration_aux = \"none\" (single-precision response J/K stall near a max \
+                 residual of {:.0e}), a looser tolerance (the Hessian error is quadratic in the \
+                 residual), or a tighter SCF convergence. A residual that hovers above the tolerance \
+                 can also mean an orbital rotation of near-zero curvature at this SCF state (a \
+                 broken-symmetry state that rotates freely), where the response has no finite value",
+                crate::terms::SINGLE_FLOOR
+            ),
+        }
     }
 }
 
@@ -369,6 +415,11 @@ impl From<linus_grid::GridError> for LinusError {
             linus_grid::GridError::UnsupportedElement { .. } => {
                 LinusError::Unsupported(format!("grid: {e}"))
             }
+            // a device partition's failure is the calculation's error as its backend made it
+            linus_grid::GridError::Device(e) => match e.downcast::<LinusError>() {
+                Ok(e) => *e,
+                Err(e) => LinusError::Internal(format!("grid: device partition: {e}")),
+            },
             e => LinusError::Input(format!("grid: {e}")),
         }
     }

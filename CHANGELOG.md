@@ -5,6 +5,226 @@ and result (`schema_version`) and the Python package; before 1.0 any minor relea
 them, and every change is listed here. The Rust crates are unstable and not published. Versions follow [Semantic Versioning](https://semver.org); the format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] - 2026-11-26
+
+A bug-fix release. Update if you compute gradients, Hessians or IR spectra. Results can differ
+from 0.1.2's where an entry below says so (numerics epoch 13).
+
+**Wrong derivatives after some hard SCFs (0.1.0 to 0.1.2).** An SCF can converge through
+quasi-Newton steps: the escalation after DIIS stagnates or blows up, the two-cycle rule, or a
+stability step. Such an SCF can end in a state that leaves an orbital empty below an occupied one.
+Earlier releases then gave the derivatives the wrong determinant: the gradient, the Hessian, the
+polarizability (and with it the IR intensities) and the closed-shell stability probe were computed
+for a different state than the one whose energy they reported. The energy was always correct. In
+most such cases a gradient was off by 0.01 to 0.13 Eh/bohr, occasionally more. In a C2 singlet
+(PBE/def2-SVP), dE/dz was -0.1667 instead of -0.0383 Eh/bohr. The probe reported eigenvalues of -18
+to -142 Eh. Closed and open shells are affected, mostly stretched bonds and transition-metal
+complexes. In our SCF robustness sweep of 49,847 calculations, 1,768 gradient and Hessian jobs
+escalated, and 162 of them (on 37 molecules) ended in such a state. SCFs that took no quasi-Newton
+steps are unaffected. linus now gives the derivatives the orbitals of the state the SCF converged
+to. It reports such a state with the warning `non_aufbau` and `resolved.record.scf.non_aufbau`.
+**With an earlier release:** a gradient, Hessian or IR result is suspect if its `scf.history` has a
+step `soscf`, `stability` or `escalation` (for example, `resolved.record.scf.escalation.ran` is
+true). Rerun it with 0.1.3. If the rerun warns `non_aufbau`, the earlier derivatives were wrong.
+
+**IR runs and the coupled-perturbed solver.** The CPHF/CPKS solver treats several right-hand
+sides at once. It stopped once each one had been below its tolerance at some iteration. But the
+directions added for one right-hand side change all the solutions, so one that had converged could
+rise above the tolerance again. IR runs then failed just above `response.field_tol`. The solver now
+stops only when all of them are below the tolerance at the same time. IR runs that failed this way
+now succeed, after zero to two more iterations. Other results move only where a solve needed that
+extra step, and they stay within the tolerance. Sometimes the electric-field response has no
+finite solution at the SCF's state: at a saddle point, or at a broken-symmetry state that rotates
+freely, such as a linear radical's about its axis. An IR run then keeps its Hessian, frequencies
+and thermochemistry, leaves out only the IR intensities, dipole derivatives and polarizability, and
+warns `ir_declined`. Until now the whole run failed.
+
+**Also since 0.1.2** (details in the entries below):
+
+- **Faster on GPUs, above all the H100 and H200** (Changed): the XC functional is evaluated on the
+  device. Density-fitted exchange runs on FP64 tensor cores, more than twice as fast for a 113-atom
+  ωB97X-D3BJ/def2-TZVP molecule on an H200 and in less device memory. The Coulomb gradient of
+  functionals without exact exchange is computed in Hermite space (113 atoms at def2-TZVP: 0.077 s
+  instead of 1.8 s). Less host time is spent around the kernels.
+- **Large molecules on a GPU** (Added, Changed): when the three-index tensor would not fit on the
+  device, the density-fitted J of pure functionals and of `rij_cgk` is computed without it, chosen
+  by the new expert setting `backend.df_j` (`auto`, `stored` or `direct`). The nuclear attraction of
+  large molecules is computed on the device (`backend.nuclear_attraction`).
+- **The SCF escalation also starts when DIIS blows up** (Changed; `scf.blowup_window`, default 4).
+  Such SCFs converge sooner: for example, a nearly gapless 304-atom protein (PBE/def2-SVP) in 65
+  iterations instead of 125.
+- **GPU Hessians on H100 and H200 with f and g functions** were off by up to about 5e-4
+  Eh/bohr^2, because the CUDA compiler built four integral kernels wrongly (Fixed).
+- **`jk: "rij_cgk"`**: density-fitted J with compensated grid-based exchange, opt-in (Added).
+
+### Added
+
+- **The warning `non_aufbau` and `resolved.record.scf.non_aufbau`:** a converged SCF state that
+  leaves an orbital empty below an occupied one is reported with its holes, particles and the size
+  of the inversion (`homo_lumo_gap` is then negative). The result is that state's; a lower aufbau
+  solution may exist.
+- **`jk: "rij_cgk"`: density-fitted J with compensated grid-based exchange** (Hohenstein,
+  Alkan, Wu and Parrish, 2026), opt-in; the default stays `df`. The exchange of the SAD
+  reference density is exact (four-center integrals, once per geometry); the rest goes through a
+  seminumerical exchange on one COSX grid (`jk.k_grid`: `gridx:N`, default `gridx:2`) with a
+  symmetric overlap fit. Energies and analytic gradients, closed and open shells, Hartree-Fock,
+  global and range-separated hybrids, on the CPU and the GPU (the SCF on the device; gradients
+  on the CPU). Hessians and a `k_grid` with different levels per stage are input errors. Its
+  absolute exchange energies are several times more accurate than density-fitted exchange; its
+  relative energies and gradients are not, and it is slower than `df`.
+- **Density-fitted J for large molecules on the GPU without the stored three-index tensor.**
+  When the tensor would not fit the device beside the other engines, the SCF's J of pure
+  functionals (`jk: "df"`, e.g. PBE, r2SCAN) and of `rij_cgk` is computed in every build without
+  it, instead of streaming the tensor from host memory or running on the CPU: on data-center
+  GPUs (H100, H200, A100) by Hermite J-engine contractions (several times faster), elsewhere by
+  recomputed three-center integrals. The new expert setting `backend.df_j` (`auto`, `stored` or
+  `direct`; [docs/cli.md](docs/cli.md)) chooses; `auto` takes `direct` only when the tensor would
+  not fit. The result records it as `resolved.record.backend.j`
+  (`{"engine": "direct", "reason", "kernels", "kernels_reason"}`; absent otherwise). Hybrids
+  with `df` and calculations with an implicit solvent keep the stored tensor.
+
+### Fixed
+
+- **IR runs that failed with the polarizability's CPHF/CPKS just above `response.field_tol`.**
+  The response solver (all right-hand sides in one shared subspace) stopped once each right-hand
+  side had been below the tolerance at some iteration, but the directions it added for the others
+  change every solution, so one that converged early could rise above the tolerance again: the
+  solve then ended at up to 1.3 times the tolerance after a dozen iterations, and an IR
+  frequency run failed as unconverged. The solver now gives every right-hand side above the
+  tolerance new directions after each iteration, a converged one too, and stops only when all
+  of them are below it. Results change only where a right-hand side rose above the tolerance
+  after it had converged (a Hessian's or a polarizability's solve then takes another direction
+  or iteration, within its tolerance).
+- **Analytic gradients, Hessians, polarizabilities and the closed-shell probe after the SCF
+  escalation.** When DIIS stagnated or blew up, the escalation's quasi-Newton steps could converge
+  to a state whose occupied orbitals are not the lowest ones of its Fock matrix (an empty orbital
+  below an occupied one; stretched bonds and transition-metal complexes with PBE, closed and open
+  shells). The energy was that state's, but the orbitals handed to the derivatives were the lowest
+  eigenvectors, another determinant: in most such cases gradients were off by 0.01 to 0.13 Eh/bohr,
+  occasionally more (C2 singlet PBE/def2-SVP: dE/dz -0.1667 instead of -0.0383), and the
+  closed-shell probe reported eigenvalues of -18 to -142 Eh. The SCF now hands on the orbitals of
+  the occupied space it converged (the same after the two-cycle rule's steps and a stability step).
+  Releases 0.1.0 to 0.1.2 are affected; SCFs that did not take quasi-Newton steps are unchanged.
+- **GPU Hessians on H100/H200 with f and g shells.** ptxas (CUDA 13.0 and 13.1) at its default
+  optimization level built four classes of the three-center second-derivative kernels wrongly for
+  these cards ((ff|g), (gg|d), (gd|g), (gf|f)): def2-TZVP Hessians of molecules with bonded
+  heavy atoms (f shells) and def2-universal-jkfit (g functions) were off by up to about 5e-4
+  Eh/bohr^2 (0.2 cm^-1 in the frequencies of a 39-atom anion). Those kernels are now built with
+  ptxas -O1 on compute capability 9.x; other cards and kernels are unchanged.
+
+### Changed
+
+- **Numerics epoch 13** (0.1.2 was 10). Results of the same input can differ from 0.1.2's where an
+  entry below says so: the SCF escalation's blow-up trigger (CPU and GPU, only in SCFs where it
+  fires), the coupled-perturbed solver's per-iteration convergence rule (only response solves where
+  a column rose back above its tolerance, at round-off within it), derivatives after an SCF that
+  ends in a non-aufbau state (now correct; SCFs reached by orbital rotations that end aufbau move at
+  convergence level), and the GPU changes listed here that move results at round-off on a device
+  (within [docs/gpu.md](docs/gpu.md)'s tolerances). Within epoch 13 a result is again bitwise the
+  same at any thread count and per device.
+- **An IR run keeps its Hessian and frequencies when the electric-field response fails.** The
+  Hessian and the frequencies do not depend on the polarizability's CPHF/CPKS. When that solve
+  stops above `response.field_tol`, the result has the Hessian, the frequencies and the
+  thermochemistry without the IR intensities, dipole derivatives and polarizability. It carries
+  the warning `ir_declined` with the reason, and the solve in `resolved.record.response.ir_declined`.
+  Until now the whole calculation failed. A broken-symmetry state that rotates freely, such as a
+  linear radical's about its axis, has no finite polarizability.
+- **A CPHF/CPKS failure says how the solve ended.** The failure's `response` record has `end`:
+  `iterations` (at the limit), `exhausted` (no direction left to add) or `indefinite` (an
+  orbital-Hessian eigenvalue at or below zero), or `non_finite`. With `exhausted` or `indefinite`
+  the response has no finite value at that SCF state (a saddle point, or a broken-symmetry state
+  that rotates freely, such as a linear radical's about its axis), and the message says so
+  instead of suggesting a looser tolerance or another precision.
+- **The SCF escalation also starts when DIIS blows up** (`scf.blowup_window`, new expert setting,
+  default 4; 0: off). Until now the restart from the lowest-energy orbitals with quasi-Newton steps
+  (`scf.escalate`) started only once the lowest energy had not improved for 64 iterations, or at 2/3 of
+  `max_iter`. It now also starts after 4 iterations in a row whose energy is more than 1 Eh above the
+  lowest visited while max |F_ai| is more than 10 times the smallest visited; the record's
+  `scf.escalation.trigger` is then `blowup`. The restart is the same, only earlier: a nearly gapless
+  Trp-cage (PBE/def2-SVP, 304 atoms) converges in 65 iterations instead of 125, LiF at 7 Å in 33
+  instead of 88, to the same bits. Results change only for SCFs whose DIIS blows up. On the robustness
+  sets every SCF that converged without escalating is unchanged; in the cases where the trigger
+  fires, Fock builds fall from a median of 133 to 39 and two more SCFs converge.
+- **GPU backend: the nuclear attraction of large molecules on the GPU.** Beside the device's
+  density-fitting setup, the SCF's nuclear attraction V of molecules with at least 2e8 kept shell
+  pairs x point charges (ubiquitin, 1231 atoms; not the validation's molecules) is computed by the
+  device PCM engine's pair x point integrals instead of on the host (ubiquitin/def2-SVP: 15.7 s on
+  16 cores; the device's values within 1e-15 of the CPU's, relative to the largest element; bitwise
+  run to run); `resolved.record.backend.nuclear_attraction` says where it ran and why, and the
+  new expert setting `backend.nuclear_attraction` (`auto`, `gpu` or `cpu`) chooses. The overlap,
+  kinetic energy and ECPs stay on the host, and so does V on any device failure.
+- **GPU backend: the exchange-correlation functional is evaluated on the GPU.** libxc's own
+  functional code (its Maple-generated derivatives, MPL-2.0) is compiled for the device at run
+  time for B3LYP, PBE, PBE0, r2SCAN, SCAN, TPSS, ωB97X-V/-D3BJ, ωB97M-V, B97M-V, SVWN and the
+  other functionals built from the same libxc components; it is checked against libxc when the
+  calculation starts and agrees with it to the last few bits (energies within about 1e-14 Eh at a
+  fixed density). Functionals without device code, or that fail the check, are evaluated by
+  libxc on the host as before; `resolved.record.backend.functional` says where each XC part ran
+  and why. GPU builds (the `afh-linus-cuda13` wheel, the GPU image) embed that libxc source;
+  THIRD_PARTY_NOTICES.md lists it.
+- **GPU backend: faster XC.** The collocation goes straight into each grid batch's compressed
+  values, and the Becke partition of PySCF's grids is computed on the device, per point only for
+  the atoms whose cell function can matter (the others, each below 2^-100 of the sum by a
+  rigorous bound, are left out; the weights equal the CPU's in every test). On an H200 a V_xc
+  build of the 39-atom anion with B3LYP/def2-TZVP takes 30 ms instead of 94, of the 113-atom
+  ts113 170 instead of 323, and ts113's grid 0.19 s instead of 1.44; the grid of a 376-atom urea
+  cluster (def2-SVP) takes 0.74 s instead of 70 s on the CPU, and of a 1231-atom protein 7.3 s
+  (the partition in tiles of points that share their atoms' cell functions). The XC setup of
+  those two takes 0.20 and 0.56 s instead of 0.55 and 1.4 (the screening of each grid batch's
+  functions on the device), and the XC gradient's grid response above about 110 atoms runs on a
+  faster kernel (ts113: 193 ms instead of 229). A guess density (no orbitals) goes to the device
+  XC as it is, where the host SCF loop factorized it on the CPU (99 s of a 1231-atom protein's
+  first XC call on a build whose J/K had fallen back). GPU energies change only in their last
+  bits (within 4e-12 Eh, the same iterations). The `grid` timer has the parts `grid_partition`
+  and `grid_batches` on the GPU.
+- **GPU backend: VV10's pair sums in FP64 on FP64-rich cards** (H100, H200, A100) with
+  `precision.fp32: "auto"`, where they were double-float on every card: 3.2x faster there and at
+  least as accurate. Results are now bitwise identical between cards of one class (as the
+  exchange's already were), not across classes; docs/gpu.md's Reproducibility section says
+  which. `precision.fp32: "off"` and `"on"` are unchanged.
+- **Faster density-fitted exchange on the GPU, in less device memory.** The exchange now
+  multiplies only the shell pairs the screening keeps (the dense blocks it multiplied before were
+  47-60 % zeros at def2-TZVP). On NVIDIA H100/H200 an FP64 tensor-core kernel reads them
+  straight from the stored tensor, so the resident dense planes (20 GiB for a 39-atom molecule
+  at def2-TZVP) are gone. On an H200, per exchange build: 39 atoms, B3LYP/def2-TZVP, 28 to 21 ms;
+  113 atoms, ωB97X-D3BJ/def2-TZVP, 1.39 to 0.75 s. GPU results move at round-off, within
+  [docs/gpu.md](docs/gpu.md)'s tolerances. On H100/H200 the kernel then got a dedicated copy
+  stage (its own warps copy the operands ahead while the others multiply): 113 atoms,
+  ωB97X-D3BJ/def2-TZVP, 0.76 to 0.61 s per J/K build, B3LYP 0.40 to 0.32 s; 39 atoms, B3LYP,
+  21.6 to 18.3 ms. Results are bitwise unchanged. `resolved.record.df` of GPU runs records the
+  exchange kernel as `k_kernel` (`"mma_sm90a"` on H100/H200, `"mma"` or `"strided"` elsewhere).
+- **Much faster density-fitted gradients without exact exchange on the GPU** (PBE, r2SCAN,
+  B97M-V and other functionals without exact exchange): the Coulomb part of the gradient is now
+  contracted in Hermite space instead of through the general derivative integrals. On an H200,
+  the two-electron gradient at def2-TZVP: 39 atoms 0.25 to 0.033 s, 113 atoms 1.8 to 0.077 s.
+  GPU results move at round-off, within [docs/gpu.md](docs/gpu.md)'s tolerances.
+- **Faster density-fitted gradients on FP64-rich GPUs** (H100/H200): the two-electron gradient
+  stores its derivative integrals and contracts them instead of contracting inside the
+  integral kernels, whose fixed-point atomics bound them on these cards, and batches its MO
+  products. 1.3-1.4x on the two-electron gradient (113 atoms, B3LYP/def2-TZVP: 4.0 to 2.8 s).
+- **Less host time around the GPU's kernels** (no number changes on the CPU; on the GPU,
+  energies and gradients bitwise as before, Hessians within round-off):
+  - the host's SCF setup (one-electron matrices, the molecular grid, the SAD guess) runs beside
+    the device's density-fitting setup; the SAD guess computes its elements' atomic densities
+    side by side (the same densities);
+  - a GPU Hessian's CPHF/CPKS solver runs its own algebra (the subspace projections, the
+    orthonormalization, the residuals) on the device when its subspace fits beside the response's
+    engines; `resolved.record.backend.response[].solver` says where it ran (`gpu`, or `cpu` with
+    `solver_note`);
+  - a GPU Hessian's one-electron explicit terms run on the host while its two-electron and XC
+    terms run on the device;
+  - the device PCM's setup reuses the SCF's shell pairs; the dipole integrals are built while the
+    device iterates, and the dipole's sum and the Hessian's assembly no longer read their matrices
+    element by element (the same results);
+  - a GPU Hessian's assembly GEMMs run on the device;
+  - the command line no longer tears its session down before it exits.
+  - the shell pairs (with their Schwarz factors) and SAD's atomic densities are built while the
+    GPU opens, and the device's density-fitting setup screens those pairs instead of building
+    its own (the same layout, bit for bit); the host's setup beside it takes half the threads;
+  - a GPU calculation whose density-fitting tensors fit neither the device nor the host memory
+    is refused before any setup (it was refused after both the device's and the CPU's setup:
+    ubiquitin/def2-SVP on an H200 in 3 s instead of 295 s).
+
 ## [0.1.2] - 2026-11-20
 
 ### Fixed
@@ -1492,6 +1712,7 @@ was the SCF's; the SCF stage is `timings.energy`, and `timings.calculation` is g
 `df_store_gib`, `df_bytes_per_elem`, `df_one_sided`, `mem_hwm_gb_*` and the block counts moved
 from `timings` to `resources`; the result gained `success`, `molecule` and `resolved`.
 
+[0.1.3]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.3
 [0.1.2]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.2
 [0.1.1]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.1
 [0.1.0]: https://github.com/atomsforhumanity/linus/releases/tag/v0.1.0

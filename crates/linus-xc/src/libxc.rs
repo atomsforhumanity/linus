@@ -118,6 +118,12 @@ impl LibxcFunctional {
         Self::new(id, polarized)
     }
 
+    /// The initialized libxc struct (read-only use; valid as long as `self`).
+    #[cfg(feature = "device-sources")]
+    pub(crate) fn raw(&self) -> *const ffi::xc_func_type {
+        self.ptr.as_ptr()
+    }
+
     /// libxc id.
     pub fn id(&self) -> i32 {
         self.id
@@ -388,6 +394,10 @@ impl XcKernel for LibxcFunctional {
         let mut c = LibxcFunctional::new(self.id, self.polarized)?;
         c.set_dens_threshold(self.dens_threshold());
         Ok(Box::new(c))
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 }
 

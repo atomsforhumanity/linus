@@ -223,8 +223,8 @@ def test_progress_events(water):
 
 
 def test_version_is_the_distributions():
-    """linus.__version__ and the program's version are the distribution's PEP 440 version (0.1.2
-    for Cargo's 0.1.2), the one qccompute records in provenance. The distribution is afh-linus,
+    """linus.__version__ and the program's version are the distribution's PEP 440 version (0.1.3
+    for Cargo's 0.1.3), the one qccompute records in provenance. The distribution is afh-linus,
     or afh-linus-cuda13 for the GPU build (`linus.GPU_BUILD`), with the same version."""
     import importlib.metadata
 

@@ -196,7 +196,8 @@ pub(crate) enum DeviceRun {
 }
 
 /// The Fock terms of the device loop: J/K and XC on the device engines
-/// ([`dev::DeviceTerms`]), an environment term on the device ([`DeviceEnvironment`], the GPU's
+/// ([`dev::DeviceTerms`]: J on the DF engine or the memory-lean one, K on the DF engine or
+/// compensated grid-K), an environment term on the device ([`DeviceEnvironment`], the GPU's
 /// PCM) or on the CPU ([`HostEnvironment`] through [`dev::OnHost`]: the densities down and its
 /// Fock matrix up once per iteration), and a Coulomb hook (the `predicted` PCM mode) fed with
 /// the fit coefficients of every J build.
@@ -287,8 +288,8 @@ impl dev::FockTerms for DeviceFock<'_> {
         k: Option<&mut DeviceBuf<f64>>,
     ) -> Result<(), GpuError> {
         self.dev.coulomb_exchange(gpu, st, j, k)?;
-        if let Some((fit, hook)) = self.hook.as_mut() {
-            fit.feed(gpu, &self.dev.jk, hook.as_mut())?;
+        if let (Some((fit, hook)), Some(jk)) = (self.hook.as_mut(), self.dev.j.df()) {
+            fit.feed(gpu, jk, hook.as_mut())?;
         }
         Ok(())
     }
@@ -334,6 +335,11 @@ impl dev::FockTerms for DeviceFock<'_> {
             Some(DeviceEnv::Device(t)) => t.reset_incremental(),
             None => {}
         }
+    }
+
+    /// rij_cgk's E_K (its K is affine in D); None for the DF engine's K.
+    fn exchange_energy(&self) -> Option<f64> {
+        self.dev.exchange_energy()
     }
 }
 

@@ -8,7 +8,7 @@
 //! ```
 
 mod common;
-use common::device_ms;
+use common::{device_ms, median};
 use linus_gpu::solver::{EighMethod, Solver};
 use linus_gpu::Gpu;
 
@@ -42,11 +42,6 @@ fn fock_like(n: usize, seed: u64, coupling: f64) -> Vec<f64> {
         }
     }
     a
-}
-
-fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|a, b| a.total_cmp(b));
-    v[v.len() / 2]
 }
 
 fn main() {

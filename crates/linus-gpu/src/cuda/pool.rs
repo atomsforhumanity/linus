@@ -490,6 +490,11 @@ impl<T> DeviceBuf<T> {
         self.buf.len() == 0
     }
 
+    /// The device bytes the buffer holds (its elements' size).
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
     /// The device address of the first element.
     pub fn ptr(&self) -> DevPtr<T> {
         DevPtr {

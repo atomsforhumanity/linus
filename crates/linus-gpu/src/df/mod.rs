@@ -9,11 +9,18 @@
 //!   triangles ([`DfLayout`]).
 //! - J\[D\] = B (B^T w), with w the density rows (D_mn + D_nm off the diagonal shell blocks):
 //!   two passes over the tensor, bandwidth-bound.
-//! - K\[D\] for D = C C^T, per auxiliary block Q: the block's rows are unpacked into a dense
-//!   A_Q\[q\]\[m\]\[n\] (both triangles; the zero pattern of the dropped pairs is written once
-//!   per build), then the half-transformed occupied block X_Q = A_Q^T C ((nq nbf) x nocc)
-//!   and K += X_Q X_Q^T (nbf x nbf, inner dimension nq nocc; its lower triangle as DGEMMs
-//!   over column blocks, mirrored at the end): large GEMMs per block.
+//! - K\[D\] for D = C C^T, per auxiliary block Q: the half-transformed occupied block
+//!   X_Q\[q\]\[m\]\[i\] = sum_n B_Q\[q\]\[m\]\[n\] C_ni and K += X_Q X_Q^T (nbf x nbf, inner
+//!   dimension nq nocc; its lower triangle as DGEMMs over column blocks, mirrored at the end).
+//!   Native K in FP64 forms X on the shell panels ([`PanelPlan`]): per shell its functions
+//!   against its kept partner shells only (the dense planes are 47-60 % zeros at def2-TZVP), X
+//!   auxiliary-major (\[q + nq (i + nocc m)\]) so the K update is a transposed DGEMM over
+//!   contiguous columns. The panels' GEMM ([`GpuDfJkOptions::k_panel_kernel`], linus's device
+//!   policy: the tensor cores on H100/H200) either reads the panels' rows straight from the
+//!   stored tensor on FP64 tensor cores ([`PanelKernel::MmaSm90a`], an optional NVIDIA-only
+//!   variant: mma.sync f64), or gathers the panels per block and multiplies them by cuBLAS
+//!   ([`PanelKernel::Strided`], portable). Emulated K unpacks each block into the dense
+//!   A_Q\[q\]\[m\]\[n\] (both triangles) and runs X_Q = A_Q^T C as one GEMM.
 //! - Range-separated exchange (`GpuDfJk::set_exchange_operator`, the operator
 //!   a/r + b erf(omega r)/r of a range-separated hybrid): the CPU `DfJk`'s wK scheme (Psi4's),
 //!   with B^omega = (mn|erf(omega r)/r|P) L^-T, the Coulomb metric, on the same rows, so that
@@ -112,11 +119,11 @@ pub enum KMath {
     /// Native FP64.
     Native,
     /// cuBLAS's fixed-point FP64 emulation with a fixed mantissa of `bits` bits (55: FP64
-    /// quality on DF data; see docs/internal/gpu-spike.md).
+    /// quality on DF data; docs/gpu.md, "Precision").
     Emulated { bits: i32 },
     /// The Ozaki scheme of [`crate::emu`] on INT8 tensor cores with `slices` digits per value
     /// (8 slices - 1 bits; 7: FP64 quality on DF data), the stored tensor's scales computed
-    /// once (module docs; docs/internal/gpu-spike.md, section KPS).
+    /// once (module docs; docs/gpu.md, "Precision").
     Ozaki { slices: usize },
 }
 
@@ -134,6 +141,34 @@ impl KMath {
     }
 }
 
+/// The kernel of the shell panels' first GEMM ([`GpuDfJkOptions::k_panel_kernel`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelKernel {
+    /// cuBLAS: per shell one strided-batched GEMM over its functions, on the panels gathered
+    /// per block from the stored rows. Portable.
+    Strided,
+    /// The FP64 tensor-core kernel (`device/df/panel_mma.cu`: mma.sync f64, a warp-specialized
+    /// producer, bulk copies), the panels' rows read straight from the stored rows, compiled
+    /// for the device's own architecture: NVIDIA compute capability 9.0 and later, without
+    /// sm_90a's register hand-over (tests and benchmarks on other cards).
+    Mma,
+    /// The same kernel compiled for sm_90a (H100/H200, compute capability 9.0 alone): the
+    /// producer warpgroup's registers handed to the consumers (setmaxnreg). The same products
+    /// in the same order as [`PanelKernel::Mma`].
+    MmaSm90a,
+}
+
+impl PanelKernel {
+    /// The name in reports: "strided", "mma", "mma_sm90a".
+    pub fn name(self) -> &'static str {
+        match self {
+            PanelKernel::Strided => "strided",
+            PanelKernel::Mma => "mma",
+            PanelKernel::MmaSm90a => "mma_sm90a",
+        }
+    }
+}
+
 /// Settings of a `GpuDfJk` setup.
 #[derive(Clone, Debug)]
 pub struct GpuDfJkOptions {
@@ -141,30 +176,29 @@ pub struct GpuDfJkOptions {
     /// primitive pairs and auxiliary batches.
     pub thresholds: DfThresholds,
     pub storage: DfStorage,
-    /// Device bytes the engine may hold (tensor and workspaces); None: the device pool's limit
-    /// minus what is in use at setup.
+    /// Device bytes the engine may hold (tensors and workspaces; linus passes its memory plan's);
+    /// None: the device pool's limit minus what is in use at setup (an engine used on its own).
     pub device_budget: Option<usize>,
-    /// Auxiliary functions per exchange block (0: from `k_workspace`).
+    /// Page-locked host bytes a streamed tensor may take (None: no limit; zero: the device only):
+    /// the storage ladder's host rungs (`plan::plan`).
+    pub host_budget: Option<usize>,
+    /// The factor columns of the builds the plan sizes (the panel path's X and its block; builds
+    /// with more run in passes of these): Some(0) plans J alone (no exchange workspace); None:
+    /// nbf / 2.
+    pub k_columns: Option<usize>,
+    /// Auxiliary functions per exchange block (0: automatic, `plan::plan`: the panel path's
+    /// on the device, else A_Q within `k_workspace`; shrunk on the ladder's shrunk rungs). The
+    /// block sets the order of the exchange's sums over the auxiliary functions, so K changes
+    /// at round-off with it.
     pub k_block: usize,
-    /// Bytes of the dense block A_Q that set the automatic block size.
+    /// Bytes of the dense block A_Q that set the automatic block of the unpacked and Ozaki
+    /// exchange (and of streamed storage).
     pub k_workspace: usize,
-    /// With the automatic block size: the largest block (a multiple of 8, at least
-    /// [`K_BLOCK_MIN`]) with which the storage and a build's workspace fit the allowance beside
-    /// `others_reserve` (the engines set up after this one). The block sets the order of the
-    /// exchange's sums over the auxiliary functions, so K changes at round-off with it. Off: the
-    /// automatic block, within the allowance, or an error.
-    pub k_block_fit: bool,
     pub k_math: KMath,
     /// The exchange arithmetic the caller sets after the setup (`GpuDfJk::set_k_math`; with
     /// `k_math` native): its per-build workspace counts in the storage plan (the Ozaki scheme
     /// slices a gathered block, X and W where native K unpacks A_Q).
     pub k_planned: KMath,
-    /// Native K: the K update as one SYRK instead of DGEMMs over column blocks of the lower
-    /// triangle. Off by default: cuBLAS 13.2's DSYRK is less accurate than its DGEMM (E_K
-    /// about 1e-13 relative off the CPU result, always with the same sign, where the DGEMM
-    /// paths agree to round-off; docs/internal/gpu-spike.md 8.2). Emulated K always uses the
-    /// GEMMs (cuBLAS emulates GEMMs only).
-    pub k_syrk: bool,
     /// Columns of K per DGEMM of the native K update (0: 256; at most 8 blocks).
     pub k_update_block: usize,
     /// Range separation to prepare at setup (a range-separated hybrid's omega): B^omega is
@@ -180,19 +214,29 @@ pub struct GpuDfJkOptions {
     /// build's workspace and a reserve for the other engines; else every build gathers and
     /// slices each auxiliary block from the stored rows.
     pub k_presliced: bool,
-    /// Native K: keep the unpacked GEMM1 operand (the dense planes a\[q\]\[m\]\[n\], 8 nbf^2
-    /// bytes per auxiliary function, of B and of B^omega) on the device between builds, for as
-    /// many whole auxiliary blocks as fit the budget beside a build's workspace and the reserve
-    /// for the other engines, so that builds skip their unpack; built at the first native K
-    /// build. linus's device policy turns it on for FP64-rich devices, where the unpack is a
-    /// large part of K (H200: 23-44 %), and off elsewhere (FP64 GEMMs dominate there, and the
-    /// planes would take memory from the other engines for a few percent). Off by default.
-    pub k_dense: bool,
-    /// Device bytes the engine's optional storage (the Ozaki exchange's pre-sliced planes,
-    /// native K's dense planes) leaves free for the other engines of the calculation. linus
+    /// The kernel of native K's panel GEMM (linus passes its device policy's choice; the
+    /// tensor-core kernels need NVIDIA compute capability 9.0 and later, sm_90a 9.0 itself: an
+    /// error at setup elsewhere). Default: cuBLAS, portable.
+    pub k_panel_kernel: PanelKernel,
+    /// Bytes of the gathered panels of one shell group (0: 2 GiB): cuBLAS's panel blocks
+    /// ([`PanelKernel::Strided`]) are gathered and multiplied in groups of shells within it.
+    pub k_panel_workspace: usize,
+    /// The tensor-core kernel's tile: auxiliary functions and orbitals per block (the largest;
+    /// a call takes the fewest tiles over its orbitals), consumer warps along each, k-steps in
+    /// flight (zeros: the default's, 128, 128, 4, 2, 4; the stages capped to the card's shared
+    /// memory). [`PanelKernel::MmaSm90a`] needs whole warpgroups of consumers whose register
+    /// count the hand-over raises.
+    pub k_panel_mma_tile: [usize; 5],
+    /// Device bytes the engine's optional storage (the Ozaki exchange's pre-sliced planes) and,
+    /// unless `shrink_reserve` says otherwise, the storage ladder's shrunk rungs leave free for
+    /// the other engines of the calculation. linus
     /// passes its memory plan's rule for the device's limit (`driver::memory`); 8 GiB for an
     /// engine used on its own.
     pub others_reserve: usize,
+    /// Device bytes the storage ladder's shrunk rungs leave of `device_budget` (None:
+    /// `others_reserve`; zero when the budget is already net of the other engines' reserve, as
+    /// linus's SCF passes it).
+    pub shrink_reserve: Option<usize>,
     /// Where the three-center integrals are computed (B and B^omega).
     pub integrals: DfIntegrals,
     /// The fit's arithmetic (B and B^omega).
@@ -209,18 +253,21 @@ impl Default for GpuDfJkOptions {
             thresholds: DfThresholds::default(),
             storage: DfStorage::Auto,
             device_budget: None,
+            host_budget: None,
+            k_columns: None,
             k_block: 0,
             k_workspace: 4 << 30,
-            k_block_fit: false,
             k_math: KMath::Native,
             k_planned: KMath::Native,
-            k_syrk: false,
             k_update_block: 0,
             omega: None,
             lr_storage: DfStorage::Auto,
             k_presliced: true,
-            k_dense: false,
+            k_panel_kernel: PanelKernel::Strided,
+            k_panel_workspace: 0,
+            k_panel_mma_tile: [0; 5],
             others_reserve: 8 << 30,
+            shrink_reserve: None,
             integrals: DfIntegrals::Auto,
             fit: DfFit::Native,
             fit_block: 0,
@@ -259,11 +306,29 @@ pub struct DfLayout {
 impl DfLayout {
     /// The shell pairs of `basis` kept against the auxiliary basis `aux` at `pair_thresh`.
     pub fn new(basis: &BasisSet, aux: &Aux3c, pair_thresh: f64) -> DfLayout {
-        let pl = PairSet::build(basis, PairOptions::default());
-        let q = pl.schwarz();
-        let kept: Vec<usize> = (0..pl.len())
-            .filter(|&i| pl.pair(i).nprim > 0 && q[i] * aux.qmax >= pair_thresh)
-            .collect();
+        Self::with_pairs(basis, None, aux, pair_thresh)
+    }
+
+    /// [`DfLayout::new`] screening `pairs` when given (the index-ordered orbital pairs of
+    /// `basis` at the default primitive cut, of any derivative order: their pairs, order and
+    /// Schwarz factors are those of `PairSet::build(basis, PairOptions::default())`, so the
+    /// layout is the same, bit for bit) instead of building them; a set of another kind, size or
+    /// primitive cut is not used.
+    pub fn with_pairs(
+        basis: &BasisSet,
+        pairs: Option<&PairSet>,
+        aux: &Aux3c,
+        pair_thresh: f64,
+    ) -> DfLayout {
+        let built;
+        let pl = match pairs.filter(|p| p.is_default_set_of(basis)) {
+            Some(p) => p,
+            None => {
+                built = PairSet::build(basis, PairOptions::default());
+                &built
+            }
+        };
+        let kept = linus_ints::eri3c::df_kept_pairs(pl, aux.qmax, pair_thresh);
         let pairs: Vec<Pair3c> = kept
             .par_iter()
             .map(|&i| Pair3c::from_shell_pair(pl.pair(i)))
@@ -310,6 +375,14 @@ impl DfLayout {
     }
 
     /// Bytes of the fitted tensor in f64.
+    /// The layout's sizes (stored rows, shell panels) over the shells of `basis`.
+    pub fn rows(&self, basis: &BasisSet) -> linus_ints::eri3c::DfRows {
+        linus_ints::eri3c::DfRows::of(
+            |s| basis.shells[s].nfunc(),
+            self.pairs.iter().map(|p| (p.sa, p.sb)),
+        )
+    }
+
     pub fn tensor_bytes(&self) -> usize {
         self.nx * self.naux * 8
     }
@@ -377,6 +450,92 @@ impl DfLayout {
     }
 }
 
+/// One shell's panel in a [`PanelPlan`]: its functions f0..f0 + d against the w functions of
+/// its kept partner shells (both triangles), its panel rows r0..r0 + d w (row ia + d k: function
+/// ia of the shell, partner function k) and its gathered-orbital columns c0..c0 + w.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanelShell {
+    pub f0: usize,
+    pub d: usize,
+    pub w: usize,
+    pub r0: usize,
+    pub c0: usize,
+}
+
+/// The shell panels of a [`DfLayout`]: the stored rows rearranged per shell so that the exchange's
+/// first GEMM, X\[q\]\[m\]\[i\] = sum_n B\[q\]\[m\]\[n\] C\[n\]\[i\], multiplies only the kept pairs
+/// (the dense planes are 47-60 % zeros at def2-TZVP), one dense product per shell: for shell s
+/// with functions m = f0 + ia and partner functions n_k (its kept partner shells' functions in
+/// ascending order, k < w), panel row r0 + ia + d k holds the stored row of the pair (m, n_k).
+/// `src[r]` is that row, `cn[c]` the partner function n_k of gathered-orbital column c = c0 + k.
+/// Every element of B's dense planes outside the panels is zero, so the panels' products are
+/// the dense planes' exactly (summed in another order).
+pub struct PanelPlan {
+    pub shells: Vec<PanelShell>,
+    pub src: Vec<i32>,
+    pub cn: Vec<i32>,
+}
+
+impl PanelPlan {
+    /// The panels of `lay` (the kept pairs of `basis`).
+    pub fn new(basis: &BasisSet, lay: &DfLayout) -> PanelPlan {
+        let ns = basis.shells.len();
+        let dim = |s: usize| basis.shells[s].nfunc();
+        // per shell its partners (partner shell, first stored row, whether the shell is the
+        // pair's first one), in ascending partner order
+        let mut partners: Vec<Vec<(usize, usize, bool)>> = vec![Vec::new(); ns];
+        for (p, &x0) in lay.pairs.iter().zip(&lay.x0) {
+            partners[p.sa].push((p.sb, x0, true));
+            if p.sa != p.sb {
+                partners[p.sb].push((p.sa, x0, false));
+            }
+        }
+        let (mut shells, mut src, mut cn) = (Vec::with_capacity(ns), Vec::new(), Vec::new());
+        let (mut r0, mut c0) = (0, 0);
+        for (s, ps) in partners.iter_mut().enumerate() {
+            ps.sort_unstable_by_key(|e| e.0);
+            let (f0, d) = (basis.shells[s].ao_start, dim(s));
+            let w: usize = ps.iter().map(|e| dim(e.0)).sum();
+            for &(t, x0, first) in ps.iter() {
+                let dt = dim(t);
+                let t0 = basis.shells[t].ao_start;
+                for kb in 0..dt {
+                    cn.push((t0 + kb) as i32);
+                    for ia in 0..d {
+                        // (m, n) = (f0 + ia, t0 + kb): the pair (s, t) stores rows ia-major,
+                        // the pair (t, s) rows kb-major (diagonal blocks: both triangles)
+                        let x = if first {
+                            x0 + ia * dt + kb
+                        } else {
+                            x0 + kb * d + ia
+                        };
+                        src.push(x as i32);
+                    }
+                }
+            }
+            shells.push(PanelShell { f0, d, w, r0, c0 });
+            r0 += d * w;
+            c0 += w;
+        }
+        PanelPlan { shells, src, cn }
+    }
+
+    /// Panel rows (the elements of a panel block per auxiliary function).
+    pub fn np(&self) -> usize {
+        self.src.len()
+    }
+
+    /// Gathered-orbital columns.
+    /// The widest shell's partner columns (the tensor-core kernel's row table).
+    pub fn wmax(&self) -> usize {
+        self.shells.iter().map(|s| s.w).max().unwrap_or(0)
+    }
+
+    pub fn ncg(&self) -> usize {
+        self.cn.len()
+    }
+}
+
 /// The host data of one density-fitting problem (a basis set and an auxiliary basis set at one
 /// geometry) that the device engines share: the SCF's J/K (`GpuDfJk::with_shared`), the
 /// gradient (`crate::grad::df::GpuDfGrad::with_shared`), the Hessian's terms
@@ -396,8 +555,13 @@ pub struct DfShared {
     /// The device integrals' packed data of the layout's pairs, or why the generated kernels do
     /// not cover the basis sets.
     pub ints: Result<Arc<Eri3cHost>, String>,
-    /// The Coulomb metric (P|Q), naux x naux.
-    pub metric: Arc<Vec<f64>>,
+    /// The Coulomb metric (P|Q), naux x naux, formed on the CPU on first use
+    /// ([`DfShared::metric`]; the memory-lean J forms its own on the device).
+    metric: std::sync::OnceLock<Arc<Vec<f64>>>,
+    /// The auxiliary basis's shells and Schwarz factors (the metric's input).
+    aux3: Aux3c,
+    /// Seconds of the build on the host.
+    pub build_seconds: DfBuildSeconds,
     /// Derivative records of the layout's pairs, per kind and primitive threshold, once an
     /// engine (or a caller ahead of it, [`DfShared::derivatives`]) built them.
     derivs: Mutex<Vec<(Eri3cKind, f64, Arc<Eri3cHost>)>>,
@@ -406,6 +570,15 @@ pub struct DfShared {
     /// `thresholds.prim`), the metric.
     #[cfg(feature = "gpu")]
     staged: Mutex<Staged>,
+}
+
+/// Seconds of a [`DfShared`]'s build on the host.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DfBuildSeconds {
+    /// The layout (the kept pairs and their rows).
+    pub layout: f64,
+    /// The integrals' packing (the device builder's records).
+    pub pack: f64,
 }
 
 /// [`DfShared`]'s page-locked copies.
@@ -424,8 +597,21 @@ impl DfShared {
         aux: &BasisSet,
         thresholds: &DfThresholds,
     ) -> Result<DfShared, GpuError> {
+        Self::with_pairs(basis, aux, thresholds, None)
+    }
+
+    /// [`DfShared::new`] with its layout screening `pairs` when given ([`DfLayout::with_pairs`]:
+    /// the caller's index-ordered pairs of `basis`, the same layout).
+    pub fn with_pairs(
+        basis: &BasisSet,
+        aux: &BasisSet,
+        thresholds: &DfThresholds,
+        pairs: Option<&PairSet>,
+    ) -> Result<DfShared, GpuError> {
+        let t0 = std::time::Instant::now();
         let aux3 = Aux3c::new(aux);
-        let layout = DfLayout::new(basis, &aux3, thresholds.pair);
+        let layout = DfLayout::with_pairs(basis, pairs, &aux3, thresholds.pair);
+        let t1 = std::time::Instant::now();
         let prim = thresholds.prim;
         let ints = match Eri3cHost::from_pair3c(basis, aux, &layout.pairs, &layout.x0, prim) {
             Ok(h) => Ok(Arc::new(h)),
@@ -433,17 +619,29 @@ impl DfShared {
             Err(GpuError::Contract(why)) => Err(why),
             Err(e) => return Err(e),
         };
-        let metric = crate::cpu::metric(&aux3, 0.0, &Operator::Coulomb);
+        let t2 = std::time::Instant::now();
         Ok(DfShared {
+            build_seconds: DfBuildSeconds {
+                layout: (t1 - t0).as_secs_f64(),
+                pack: (t2 - t1).as_secs_f64(),
+            },
             key: Self::fingerprint(basis, aux),
             thresholds: *thresholds,
             layout: Arc::new(layout),
             ints,
-            metric: Arc::new(metric),
+            metric: std::sync::OnceLock::new(),
+            aux3,
             derivs: Mutex::new(Vec::new()),
             #[cfg(feature = "gpu")]
             staged: Mutex::new(Staged::default()),
         })
+    }
+
+    /// The Coulomb metric (P|Q), naux x naux (row-major = column-major): formed on the CPU on
+    /// first use (the current rayon pool), the same numbers whenever it is formed.
+    pub fn metric(&self) -> &Arc<Vec<f64>> {
+        self.metric
+            .get_or_init(|| Arc::new(crate::cpu::metric(&self.aux3, 0.0, &Operator::Coulomb)))
     }
 
     /// A fingerprint of two basis sets: every shell's angular momentum, form, centre, first
@@ -539,8 +737,9 @@ impl DfShared {
             }
         }
         if self.staged_lock().metric.is_none() {
-            let mut hb = gpu.alloc_host::<f64>(self.metric.len())?;
-            hb.as_mut_slice()?.copy_from_slice(&self.metric);
+            let metric = self.metric();
+            let mut hb = gpu.alloc_host::<f64>(metric.len())?;
+            hb.as_mut_slice()?.copy_from_slice(metric);
             self.staged_lock().metric = Some(Arc::new(hb));
         }
         Ok(())
@@ -575,13 +774,14 @@ impl DfShared {
     /// The metric on the device: from its page-locked copy (DMA) when staged.
     #[cfg(feature = "gpu")]
     pub fn upload_metric(&self, gpu: &crate::Gpu) -> Result<crate::DeviceBuf<f64>, GpuError> {
+        let n2 = self.layout.naux * self.layout.naux;
         match self.staged_metric() {
-            Some(h) if h.len() == self.metric.len() => {
+            Some(h) if h.len() == n2 => {
                 let mut d = gpu.alloc_zeros::<f64>(h.len())?;
                 gpu.upload_from_host(&h, 0, &mut d, 0, h.len())?;
                 Ok(d)
             }
-            _ => gpu.upload(&self.metric),
+            _ => gpu.upload(self.metric()),
         }
     }
 
@@ -611,7 +811,7 @@ impl DfShared {
             + pairs
             + self.ints.as_ref().map_or(0, |h| packed(h))
             + derivs
-            + 8 * self.metric.len()
+            + 8 * self.layout.naux * self.layout.naux
     }
 }
 
@@ -623,7 +823,7 @@ pub fn aux_blocks(naux: usize, nq: usize) -> Vec<(usize, usize)> {
         .collect()
 }
 
-/// The smallest exchange block [`GpuDfJkOptions::k_block_fit`] fits.
+/// The smallest exchange block the storage plan shrinks the automatic one to (`plan::plan`).
 pub const K_BLOCK_MIN: usize = 32;
 
 /// The automatic exchange block size: A_Q (nq nbf^2 doubles) within `workspace` bytes, 16 to
@@ -636,6 +836,8 @@ pub fn auto_k_block(nbf: usize, naux: usize, workspace: usize) -> usize {
 
 #[cfg(feature = "gpu")]
 pub use device::*;
+#[cfg(feature = "gpu")]
+pub mod plan;
 
 #[cfg(feature = "gpu")]
 mod device {
@@ -652,6 +854,10 @@ mod device {
     use crate::{Arg, Copies, DeviceBuf, Gpu, Kernel, Launch, StreamedStore};
     use std::borrow::Cow;
     use std::time::Instant;
+
+    mod panels;
+    use panels::*;
+    pub use panels::{panel_mma_source, MmaCopy, MMA_TILE};
 
     /// Columns per block of the native-FP64 K update (K += X X^T as DGEMMs over column blocks of
     /// K, lower triangle only, then mirrored), and the most blocks: (nb + 1) / (2 nb) of the full
@@ -741,22 +947,24 @@ mod device {
     }
 
     /// `slot` holding a sliced operand of these sizes (reused when it matches).
-    fn sliced_slot(
+    fn sliced_slot<'a>(
         gpu: &Gpu,
-        slot: &mut Option<Sliced>,
+        slot: &'a mut Option<Sliced>,
         rows: usize,
         k: usize,
         slices: usize,
         order: Order,
-    ) -> Result<(), GpuError> {
+    ) -> Result<&'a mut Sliced, GpuError> {
         if slot
             .as_ref()
             .is_none_or(|s| s.rows != rows || s.k != k || s.slices != slices || s.order != order)
         {
+            // the old slices freed before the new ones
             *slot = None;
             *slot = Some(Sliced::new(gpu, rows, k, slices, order)?);
         }
-        Ok(())
+        slot.as_mut()
+            .ok_or_else(|| GpuError::Contract("DF-J/K: an empty slice slot".into()))
     }
 
     /// The scale exponents of the GEMM1 vectors (q, m) of a stored tensor (naux x nbf).
@@ -816,7 +1024,10 @@ mod device {
     /// One auxiliary block's sliced GEMM1 operand from its stored rows (`src`: buffer,
     /// offset of the block's first function, leading dimension) into `a`, vectors
     /// r0..r0 + nqb nbf.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the device, the gather's tables, and the block's source and destination"
+    )]
     fn oz_gather(
         gpu: &Gpu,
         kern: &OzKernels,
@@ -873,7 +1084,10 @@ mod device {
 
     /// All of a stored tensor's GEMM1 vectors in slices (`a`: naux nbf vectors and more for
     /// the padding of the last block's view), block by block.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the device, the gather's tables, the tensor and its blocks, and the planes"
+    )]
     fn oz_planes(
         gpu: &Gpu,
         kern: &OzKernels,
@@ -961,28 +1175,6 @@ mod device {
         pub k: Vec<Vec<f64>>,
     }
 
-    /// Native K's resident dense GEMM1 operand of a tensor ([`GpuDfJkOptions::k_dense`]): the
-    /// unpacked planes a\[q\]\[m\]\[n\] (plane q at q nbf^2) of its first `nq` auxiliary
-    /// functions (whole blocks; 0: none fit).
-    struct Dense {
-        buf: Option<DeviceBuf<f64>>,
-        nq: usize,
-    }
-
-    impl Dense {
-        fn bytes(&self) -> usize {
-            self.buf.as_ref().map_or(0, |b| 8 * b.len())
-        }
-
-        /// The block q0..q0 + nqb as (buffer, offset) when the planes hold it.
-        fn block(&self, q0: usize, nqb: usize, n2: usize) -> Option<(&DeviceBuf<f64>, usize)> {
-            match &self.buf {
-                Some(b) if q0 + nqb <= self.nq => Some((b, q0 * n2)),
-                _ => None,
-            }
-        }
-    }
-
     /// The long-range tensor of a range-separated exchange: B^omega and where it is.
     struct LongRange {
         omega: f64,
@@ -1001,8 +1193,12 @@ mod device {
         pub nshell_pairs_kept: usize,
         /// Bytes of the fitted tensor (f64).
         pub tensor_bytes: usize,
-        /// Auxiliary functions per exchange block.
+        /// Auxiliary functions per exchange block: the block that orders K's sums (the shell
+        /// panels' on device storage with native K) and the streamed blocks.
         pub k_block: usize,
+        /// The storage plan the setup took ([`plan::plan`]): its rung of the ladder, the
+        /// automatic block and the rung's costs per build.
+        pub plan: plan::DfPlan,
         pub k_math: KMath,
         /// Device bytes held between builds, and the budget the plan was made against.
         pub device_bytes: usize,
@@ -1024,14 +1220,8 @@ mod device {
         /// Ozaki exchange: why a tensor's planes are not held (each build gathers its blocks'
         /// digits from the stored rows instead), if so.
         pub k_planes_note: Option<String>,
-        /// Native K ([`GpuDfJkOptions::k_dense`]): device bytes of the resident dense GEMM1
-        /// planes of B and B^omega (in `device_bytes`), and the auxiliary functions they
-        /// cover of each (whole blocks from the first; builds unpack the others). Zero until
-        /// the first native K build.
-        pub k_dense_bytes: usize,
-        pub k_dense_naux: (usize, usize),
-        /// Native K: why the dense planes do not cover a tensor (or are off), if so.
-        pub k_dense_note: Option<String>,
+        /// Native K on the shell panels: the first GEMM's kernel.
+        pub k_panel_kernel: PanelKernel,
         /// Where the three-center integrals were computed: [`DfIntegrals::Device`] or
         /// [`DfIntegrals::Cpu`].
         pub integrals: DfIntegrals,
@@ -1067,9 +1257,6 @@ mod device {
         /// [`GpuDfJk::set_k_math`]): the row map, the stored tensors' scale exponents and the
         /// pre-sliced planes, waited for.
         pub ozaki: f64,
-        /// Native K's resident dense planes ([`GpuDfJkOptions::k_dense`]), built at the first
-        /// native K build (device time, waited for).
-        pub k_dense: f64,
         /// The parts of B's build.
         pub b: TensorTimes,
         /// The parts of B^omega's build.
@@ -1110,7 +1297,8 @@ mod device {
         pub j: f64,
         /// Host storage: tensor blocks to the device.
         pub stream: f64,
-        /// Unpacking the blocks (B and, range-separated, B^omega).
+        /// Unpacking the blocks (emulated K) or gathering the shell panels (the strided cuBLAS
+        /// panels) of B and, range-separated, B^omega.
         pub k_unpack: f64,
         /// X = A^T C (and Xw for B^omega).
         pub k_gemm1: f64,
@@ -1126,6 +1314,8 @@ mod device {
         unpack: Kernel,
         mirror: Kernel,
         symmetrize: Kernel,
+        panel_gather: Kernel,
+        panel_cg: Kernel,
         blas1: Blas1,
     }
 
@@ -1142,7 +1332,6 @@ mod device {
         gemm: Gemm,
         kernels: Kernels,
         resolved: GpuDfJkResolved,
-        k_syrk: bool,
         k_update_block: usize,
         /// The setup's screening thresholds, for tensors of other operators on the same rows
         /// (B^omega, the response engine's range-separated exchange).
@@ -1158,13 +1347,28 @@ mod device {
         lr_storage: DfStorage,
         /// [`GpuDfJkOptions::k_presliced`].
         k_presliced: bool,
-        /// [`GpuDfJkOptions::k_dense`].
-        k_dense: bool,
         /// [`GpuDfJkOptions::others_reserve`].
         others_reserve: usize,
-        /// Native K's resident dense planes of B and of B^omega (None: not built yet).
-        dense: Option<Dense>,
-        lr_dense: Option<Dense>,
+        /// [`GpuDfJkOptions::k_panel_kernel`], and the tensor-core kernel's tile and its
+        /// variants (compiled at their first use).
+        k_panel_kernel: PanelKernel,
+        mma: Option<PanelMma>,
+        /// The shell panels (host) and their tables on the device (uploaded at the first panel
+        /// build).
+        panels: PanelPlan,
+        ptabs: Option<PanelTables>,
+        /// The panel path's blocks (None: not planned yet) and [`GpuDfJkOptions::k_panel_workspace`].
+        pblocks: Option<PanelBlocks>,
+        k_panel_workspace: usize,
+        /// Whether the caller set the K block ([`GpuDfJkOptions::k_block`]): only an automatic
+        /// one is fitted before the first panel build ([`GpuDfJk::shrink_panel_block`]).
+        k_block_set: bool,
+        /// The plan's sizes, the exchange it sized the builds for, its factor columns and a
+        /// build's workspace (bytes) at its block.
+        sizes: plan::DfSizes,
+        planned: plan::DfExchange,
+        k_columns: usize,
+        planned_work: usize,
         /// The Ozaki fit's diagonal block and columns per GEMM (a later B^omega's fit).
         fit_shape: (usize, usize),
         lr: Option<LongRange>,
@@ -1273,6 +1477,22 @@ mod device {
         ],
     );
 
+    /// Native K's shell panels ([`PanelPlan`]): the row gather and the gathered orbitals.
+    pub(crate) const PANEL_MODULE: KernelModule = KernelModule::new(
+        "dfjk_panels",
+        || Cow::Borrowed(include_str!("../../device/df/panels.cu")),
+        &["df_panel_gather", "df_panel_cg"],
+    );
+
+    /// Native K's shell panels on FP64 tensor cores ([`PanelKernel::Mma`],
+    /// [`PanelKernel::MmaSm90a`]; NVIDIA-only), here with the default tile and bulk copies
+    /// ([`panel_mma_source`] gives every variant).
+    pub(crate) const PANEL_MMA_MODULE: KernelModule = KernelModule::new(
+        "dfjk_panel_mma",
+        || Cow::Owned(panel_mma_source(MMA_TILE, MmaCopy::Bulk)),
+        &["df_panel_mma"],
+    );
+
     /// The Ozaki fit's module.
     pub(crate) const FIT_MODULE: KernelModule = KernelModule::new(
         "dfjk_fit",
@@ -1296,28 +1516,80 @@ mod device {
             unpack: k("df_unpack")?,
             mirror: k("df_mirror_lower")?,
             symmetrize: k("df_symmetrize")?,
+            panel_gather: gpu.kernel(
+                PANEL_MODULE.name,
+                &PANEL_MODULE.source(),
+                "df_panel_gather",
+            )?,
+            panel_cg: gpu.kernel(PANEL_MODULE.name, &PANEL_MODULE.source(), "df_panel_cg")?,
             blas1: Blas1::new(gpu)?,
         })
     }
 
-    /// The Ozaki exchange's per-build device bytes with blocks of `nq` functions, for `ntot`
-    /// factor columns with GEMM1's columns in chunks of at most `cols`: the block's sliced
-    /// operand, X's slices and W's (or X's again in descending digit order: two slots either
-    /// way), the INT32 partial sums, C's slices.
-    fn oz_build_bytes_for(nbf: usize, nq: usize, slices: usize, ntot: usize, cols: usize) -> usize {
-        let jj = (nq * ntot.max(1)).min(OZ_J_CHUNK);
-        Sliced::bytes_for(nq * nbf, nbf, slices)
-            + 2 * Sliced::bytes_for(nbf, jj, slices)
-            + Sliced::bytes_for(ntot, nbf, slices)
-            + 4 * slices * (nq * nbf).next_multiple_of(crate::emu::ROW_ALIGN) * cols.min(ntot)
-            + 4 * (slices + 2) * nbf.next_multiple_of(crate::emu::ROW_ALIGN) * nbf
+    use super::plan::{
+        ozaki_build_bytes as oz_build_bytes_for, unpacked_build_bytes as per_build_bytes,
+    };
+
+    /// The exchange the plan sizes for the arithmetic `k_math`: native K on the shell panels
+    /// (`kernel`, cuBLAS's panels gathered in groups of at most `workspace` bytes), emulated K
+    /// on the unpacked block, or the Ozaki scheme.
+    fn exchange_of(k_math: KMath, kernel: PanelKernel, workspace: usize) -> plan::DfExchange {
+        match k_math {
+            KMath::Native => plan::DfExchange::Panels { kernel, workspace },
+            KMath::Emulated { .. } => plan::DfExchange::Unpacked,
+            KMath::Ozaki { slices } => plan::DfExchange::Ozaki { slices },
+        }
     }
 
-    /// Bytes of the per-build buffers: A_Q, X_Q (and Xw_Q range-separated; nocc <= nbf / 2
-    /// assumed), densities, J/K, the J vectors.
-    fn per_build_bytes(nbf: usize, nx: usize, nq: usize, lr: bool) -> usize {
-        let x = nq * nbf * nbf.div_ceil(2);
-        8 * (nq * nbf * nbf + x * if lr { 2 } else { 1 } + 6 * nbf * nbf) + 8 * 4 * nx
+    /// The storage plan's request of a setup with `opts` for `sizes` within `budget` device
+    /// bytes, its setup holding `setup_extra` bytes beside the tensors
+    /// ([`plan::setup_bytes`], and the device integrals' builder where it packs one): what the
+    /// setup plans, and what a caller planning ahead of it asks ([`plan::plan`]).
+    pub fn plan_request(
+        opts: &GpuDfJkOptions,
+        sizes: plan::DfSizes,
+        budget: usize,
+        setup_extra: usize,
+    ) -> plan::DfPlanRequest {
+        plan::DfPlanRequest {
+            sizes,
+            lr: opts.omega.is_some(),
+            exchange: if opts.k_columns == Some(0) {
+                plan::DfExchange::None
+            } else {
+                exchange_of(
+                    match opts.k_math {
+                        KMath::Native => opts.k_planned,
+                        k => k,
+                    },
+                    opts.k_panel_kernel,
+                    k_panel_workspace(opts),
+                )
+            },
+            k_columns: k_columns(opts, sizes.nbf),
+            budget,
+            reserve: opts.shrink_reserve.unwrap_or(opts.others_reserve),
+            host_budget: opts.host_budget,
+            storage: opts.storage,
+            lr_storage: opts.lr_storage,
+            k_block: opts.k_block,
+            k_workspace: opts.k_workspace,
+            setup_extra,
+        }
+    }
+
+    /// [`GpuDfJkOptions::k_panel_workspace`] (0: [`plan::PANEL_WORKSPACE`]).
+    fn k_panel_workspace(opts: &GpuDfJkOptions) -> usize {
+        if opts.k_panel_workspace > 0 {
+            opts.k_panel_workspace
+        } else {
+            plan::PANEL_WORKSPACE
+        }
+    }
+
+    /// [`GpuDfJkOptions::k_columns`] (None: nbf / 2).
+    fn k_columns(opts: &GpuDfJkOptions, nbf: usize) -> usize {
+        opts.k_columns.unwrap_or_else(|| nbf.div_ceil(2))
     }
 
     /// The range-separation parameter of an operator with an erf part, checked.
@@ -1557,7 +1829,10 @@ mod device {
         }
 
         /// Slices `cn` columns of `k` values (column c's at off + c ld of `buf`) into `cols`.
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "the slicer, its workspace, and the columns' buffer and layout"
+        )]
         fn slice_cols(
             ozaki: &Ozaki,
             gpu: &Gpu,
@@ -1707,7 +1982,10 @@ mod device {
     /// `blocks` (with a staging buffer of `nq` functions for the builds). Batches are queued
     /// on the stream, the CPU's integrals of a batch overlapping the device's fit of the
     /// previous one; the device is waited for at the end. `times` gets the parts.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the device, the fit and the integrals' source, the layout and the storage plan"
+    )]
     fn build_tensor(
         gpu: &Gpu,
         gemm: &Gemm,
@@ -1870,29 +2148,40 @@ mod device {
                 ));
             }
             let rows = RowTables::upload(gpu, lay)?;
+            // the shell panels on the host; their tables go to the device at the first panel
+            // build (native K), not for engines that never run one
+            let panels = PanelPlan::new(basis, lay);
+            // the tensor-core kernel: the device and the tile checked now, its variants compiled
+            // at their first use
+            let mma = match opts.k_panel_kernel {
+                PanelKernel::Strided => None,
+                kind => Some(PanelMma::new(
+                    gpu,
+                    kind,
+                    opts.k_panel_mma_tile,
+                    panels.wmax(),
+                )?),
+            };
             times.layout = t.elapsed().as_secs_f64();
 
-            // the plan: tensor on the device if it and the K workspace fit the engine's
-            // allowance: the caller's `device_budget` bytes, else the device's free memory
+            // the engine's allowance: the caller's `device_budget` bytes, else the device's free
+            // memory
             let allowance = match opts.device_budget {
                 Some(b) => linus_core::Budget::new(b, 0),
                 None => gpu.budget(),
             };
             let budget = allowance.free();
-            let nq = if opts.k_block > 0 {
-                opts.k_block.min(naux)
-            } else {
-                auto_k_block(nbf, naux, opts.k_workspace)
+            let sizes = plan::DfSizes {
+                nbf,
+                naux,
+                rows: lay.rows(basis),
             };
-            // per build: A_Q, X_Q (and Xw_Q), densities, J/K and the J vectors; at setup: the
-            // metric and one batch of rows
-            let batch_rows = ((1usize << 30) / (8 * naux))
-                .max(lay.pairs.iter().map(|p| p.nab()).max().unwrap_or(1));
+            // a setup batch's rows (about 1 GiB)
+            let batch_rows = plan::batch_rows(naux, sizes.rows.max_pair_rows);
             let omega = match opts.omega {
                 Some(w) => Some(lr_omega(&Operator::LongRange { omega: w })?),
                 None => None,
             };
-            let lr = omega.is_some();
             // the device integrals' packed pairs, unless the CPU computes them
             let t = Instant::now();
             let (eri_host, integrals_note) = match opts.integrals {
@@ -1916,83 +2205,35 @@ mod device {
             // at setup: the metric, one batch of rows (host storage's staging) and the device
             // integrals' builder
             let setup_extra =
-                8 * (naux * naux + batch_rows * naux) + eri_host.as_deref().map_or(0, eri3c_bytes);
+                plan::setup_bytes(&sizes) + eri_host.as_deref().map_or(0, eri3c_bytes);
             let tensor = lay.tensor_bytes();
-            // a build's workspace with blocks of `q` functions, in the exchange's arithmetic (the
-            // Ozaki scheme slices a gathered block, X and W where native K unpacks A_Q)
-            let k_arith = match opts.k_math {
-                KMath::Native => opts.k_planned,
-                k => k,
-            };
-            let work_at = |q: usize| -> usize {
-                let pb = per_build_bytes(nbf, nx, q, lr);
-                let pb = match k_arith {
-                    // as a build counts it (`build_bytes`), for up to nbf factor columns (two
-                    // spins' occupied orbitals)
-                    KMath::Ozaki { slices } => {
-                        pb - 8 * q * nbf * nbf
-                            + Sliced::bytes_for(nbf, nbf, slices)
-                            + oz_build_bytes_for(nbf, q, slices, nbf, 16.min(nbf))
-                            + (256 << 20)
-                    }
-                    _ => pb,
-                };
-                pb.max(setup_extra)
-            };
-            // the tensors (host storage: blocks of q functions streamed through a q x nx staging
-            // buffer, one per streamed tensor) and a build's workspace
-            let need_at = |b: DfStorage, w: Option<DfStorage>, q: usize| -> usize {
-                let t = |s: DfStorage| {
-                    if s == DfStorage::Device {
-                        tensor
-                    } else {
-                        8 * q * nx
-                    }
-                };
-                t(b) + w.map(t).unwrap_or(0) + work_at(q)
-            };
-            let need = |b: DfStorage, w: Option<DfStorage>| need_at(b, w, nq);
-            // B^omega: on the device when B is and both fit (Auto), or as requested
-            let lr_for = |b: DfStorage| -> Option<DfStorage> {
-                omega.map(|_| match opts.lr_storage {
-                    DfStorage::Auto
-                        if b == DfStorage::Device
-                            && need(DfStorage::Device, Some(DfStorage::Device)) <= budget =>
-                    {
-                        DfStorage::Device
-                    }
-                    DfStorage::Auto => DfStorage::Host,
-                    s => s,
-                })
-            };
-            let storage = match opts.storage {
-                DfStorage::Auto if need(DfStorage::Device, lr_for(DfStorage::Device)) <= budget => {
-                    DfStorage::Device
+            // the storage, the exchange block and a build's workspace: the plan of the sizes and
+            // the allowance, for the exchange arithmetic planned (the Ozaki scheme slices a
+            // gathered block, X and W where emulated K unpacks A_Q and native K multiplies the
+            // shell panels)
+            let request = plan_request(opts, sizes, budget, setup_extra);
+            let dfplan = plan::plan(&request).map_err(|r| {
+                if r.host_limited {
+                    GpuError::NotCovered(r.reason)
+                } else {
+                    GpuError::from(linus_core::Budget::new(r.budget, 0).over(
+                        "DF-J/K: the tensor and a build's workspace (on any rung of the storage ladder)",
+                        r.need,
+                    ))
                 }
-                DfStorage::Auto => DfStorage::Host,
-                s => s,
-            };
-            let lr_storage = lr_for(storage);
-            // the automatic block shrunk to fit the allowance beside the other engines' reserve,
-            // when asked for (a rung the automatic block does not fit: the engines set up after
-            // this one need their room)
-            let auto_nq = nq;
-            let mut nq = nq;
-            let reserve = if opts.k_block == 0 && opts.k_block_fit {
-                let fits =
-                    |q: usize| need_at(storage, lr_storage, q) + opts.others_reserve <= budget;
-                while nq > K_BLOCK_MIN && !fits(nq) {
-                    nq = ((nq - 1) / 8 * 8).max(K_BLOCK_MIN.min(auto_nq));
+            })?;
+            let (storage, lr_storage, nq) = (dfplan.storage, dfplan.lr_storage, dfplan.k_block);
+            let work = dfplan.device_bytes
+                - if storage == DfStorage::Device {
+                    tensor
+                } else {
+                    8 * nq * nx
                 }
-                opts.others_reserve
-            } else {
-                0
-            };
-            let work = work_at(nq);
-            allowance.check(
-                "DF-J/K: the tensor and a build's workspace",
-                need_at(storage, lr_storage, nq) + reserve,
-            )?;
+                - match lr_storage {
+                    Some(DfStorage::Device) => tensor,
+                    Some(_) => 8 * nq * nx,
+                    None => 0,
+                };
             let blocks = aux_blocks(naux, nq);
             // the fit: the Ozaki scheme, when asked for, within the budget the setup leaves, with
             // fewer columns per GEMM if need be; else the triangular solve
@@ -2016,7 +2257,7 @@ mod device {
                         } else {
                             0
                         };
-                    let stored = need_at(storage, lr_storage, nq) - work;
+                    let stored = dfplan.device_bytes - work;
                     let room = budget.saturating_sub(stored + held);
                     let nb = if opts.fit_block > 0 {
                         opts.fit_block
@@ -2135,6 +2376,7 @@ mod device {
                     nshell_pairs_kept: lay.pairs.len(),
                     tensor_bytes: tensor,
                     k_block: nq,
+                    plan: dfplan,
                     k_math: opts.k_math,
                     device_bytes: device_bytes + 12 * nx,
                     device_budget: budget,
@@ -2145,9 +2387,7 @@ mod device {
                     k_planes_bytes: 0,
                     tensor_violations,
                     k_planes_note: None,
-                    k_dense_bytes: 0,
-                    k_dense_naux: (0, 0),
-                    k_dense_note: None,
+                    k_panel_kernel: PanelKernel::Strided,
                     integrals: if eri.is_some() {
                         DfIntegrals::Device
                     } else {
@@ -2157,7 +2397,6 @@ mod device {
                     fit,
                     fit_note,
                 },
-                k_syrk: opts.k_syrk,
                 k_update_block: if opts.k_update_block > 0 {
                     opts.k_update_block
                 } else {
@@ -2170,10 +2409,18 @@ mod device {
                 batch_rows,
                 lr_storage: opts.lr_storage,
                 k_presliced: opts.k_presliced,
-                k_dense: opts.k_dense,
                 others_reserve: opts.others_reserve,
-                dense: None,
-                lr_dense: None,
+                k_panel_kernel: opts.k_panel_kernel,
+                mma,
+                panels,
+                ptabs: None,
+                pblocks: None,
+                k_panel_workspace: k_panel_workspace(opts),
+                k_block_set: opts.k_block > 0,
+                sizes,
+                planned: request.exchange,
+                k_columns: request.k_columns,
+                planned_work: work,
                 fit_shape,
                 lr: None,
                 xop: None,
@@ -2184,6 +2431,7 @@ mod device {
                 setup_times: times,
                 last: GpuDfJkCallTimes::default(),
             };
+            eng.resolved.k_panel_kernel = opts.k_panel_kernel;
             if let (Some(w), Some(st)) = (omega, lr_storage) {
                 let erf = Operator::LongRange { omega: w };
                 let src = match eri.as_mut() {
@@ -2259,7 +2507,10 @@ mod device {
 
         /// B^omega on the setup's rows `lay` with its fit and integrals' source (ready for
         /// erf(omega r)/r), stored as `storage`; `t`: when its build started.
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "the operator, its storage, the setup's layout, fit and integrals' source"
+        )]
         fn store_long_range(
             &mut self,
             gpu: &Gpu,
@@ -2320,8 +2571,9 @@ mod device {
         pub fn set_exchange_operator(&mut self, gpu: &Gpu, op: Operator) -> Result<(), GpuError> {
             let omega = lr_omega(&op)?;
             if self.lr.as_ref().is_none_or(|l| l.omega != omega) {
-                // a B^omega of another omega is freed first (with its dense planes)
-                self.drop_dense(true);
+                // a B^omega of another omega is freed first; the panel blocks are planned again
+                // (for its Xwt)
+                self.pblocks = None;
                 if let Some(old) = self.lr.take() {
                     let (d, h) = store_bytes(&old.store);
                     self.resolved.device_bytes -= d;
@@ -2374,26 +2626,14 @@ mod device {
             self.xop
         }
 
-        /// Changes the arithmetic of the exchange GEMMs (and, native, SYRK or GEMM for the K
-        /// update) for the following builds.
-        pub fn set_k_math(
-            &mut self,
-            gpu: &Gpu,
-            k_math: KMath,
-            k_syrk: bool,
-        ) -> Result<(), GpuError> {
-            if k_math != KMath::Native {
-                // the dense planes serve native K only: their memory goes back
-                self.drop_dense(false);
-                self.drop_dense(true);
-            }
+        /// Changes the arithmetic of the exchange GEMMs for the following builds.
+        pub fn set_k_math(&mut self, gpu: &Gpu, k_math: KMath) -> Result<(), GpuError> {
             match k_math {
                 KMath::Ozaki { slices } => self.prepare_ozaki(gpu, slices)?,
                 _ => self.drop_ozaki(),
             }
             self.gemm.prepare(gpu, k_math.cublas())?;
             self.resolved.k_math = k_math;
-            self.k_syrk = k_syrk;
             Ok(())
         }
 
@@ -2543,10 +2783,11 @@ mod device {
                 return Ok(());
             }
             let mut planes = Sliced::new(gpu, rows, nbf, s, Order::Ascending)?;
-            let oz = self.oz.as_mut().unwrap();
+            let missing = || GpuError::Contract("DF-J/K: Ozaki planes without their tensor".into());
+            let oz = self.oz.as_mut().ok_or_else(missing)?;
             let (store, exps) = if lr {
-                let e = &oz.lr_exps.as_ref().unwrap().1;
-                (&mut self.lr.as_mut().unwrap().store, e)
+                let e = &oz.lr_exps.as_ref().ok_or_else(missing)?.1;
+                (&mut self.lr.as_mut().ok_or_else(missing)?.store, e)
             } else {
                 (&mut self.store, &oz.exps)
             };
@@ -2660,130 +2901,6 @@ mod device {
             linus_core::Budget::new(self.budget, self.resolved.device_bytes)
         }
 
-        /// Frees native K's dense planes of B (`lr`: of B^omega); the next native K build
-        /// plans them again.
-        fn drop_dense(&mut self, lr: bool) {
-            let d = if lr {
-                self.lr_dense.take()
-            } else {
-                self.dense.take()
-            };
-            if let Some(d) = d {
-                self.resolved.device_bytes -= d.bytes();
-                self.resolved.k_dense_bytes -= d.bytes();
-                if lr {
-                    self.resolved.k_dense_naux.1 = 0;
-                } else {
-                    self.resolved.k_dense_naux.0 = 0;
-                }
-                self.resolved.k_dense_note = None;
-            }
-        }
-
-        /// Native K's dense planes of B (`lr`: of B^omega), when [`GpuDfJkOptions::k_dense`]
-        /// is on and not yet planned: as many whole auxiliary blocks from the first as fit
-        /// within the setup's budget beside what the engine holds and a build's workspace
-        /// (`work` bytes), leaving [`other_engines_reserve`] of the free memory to the other
-        /// engines; unpacked once from the stored tensor (device storage only: streamed
-        /// blocks are unpacked as they arrive). B's planes come first; B^omega's only when B's
-        /// cover the whole tensor. Timed (waited for) as `setup_times.k_dense`.
-        fn native_dense(&mut self, gpu: &Gpu, lr: bool, work: usize) -> Result<(), GpuError> {
-            let planned = if lr {
-                self.lr_dense.is_some()
-            } else {
-                self.dense.is_some()
-            };
-            if !self.k_dense || planned || (lr && self.lr.is_none()) {
-                return Ok(());
-            }
-            let t = Instant::now();
-            let (nbf, naux) = (self.nbf, self.naux);
-            let n2 = nbf * nbf;
-            let gib = |b: usize| b as f64 / 1073741824.0;
-            let device = match if lr {
-                &self.lr.as_ref().unwrap().store
-            } else {
-                &self.store
-            } {
-                Store::Device(_) => true,
-                Store::Host(_) => false,
-            };
-            let free = gpu.budget().free();
-            let room = self
-                .held()
-                .free()
-                .saturating_sub(work)
-                .min(free.saturating_sub(work + self.others_reserve));
-            // whole blocks from the first while they fit
-            let mut nq = 0;
-            if device && !(lr && self.dense.as_ref().is_some_and(|d| d.nq < naux)) {
-                for &(q0, nqb) in &self.blocks {
-                    if 8 * (q0 + nqb) * n2 > room {
-                        break;
-                    }
-                    nq = q0 + nqb;
-                }
-            }
-            let what = if lr { "B^omega" } else { "the tensor" };
-            if nq < naux {
-                let why = if !device {
-                    format!("{what} is streamed from host memory")
-                } else if lr && self.dense.as_ref().is_some_and(|d| d.nq < naux) {
-                    "B^omega's dense planes wait for the tensor's to cover it".to_string()
-                } else {
-                    format!(
-                        "{:.1} of the {:.1} GiB of {what}'s dense planes fit beside the engine's {:.1} GiB, a build's \
-                         workspace and the reserve for the other engines ({:.1} GiB free)",
-                        gib(8 * nq * n2),
-                        gib(8 * naux * n2),
-                        gib(self.resolved.device_bytes),
-                        gib(free)
-                    )
-                };
-                self.resolved.k_dense_note = Some(match self.resolved.k_dense_note.take() {
-                    Some(n) => format!("{n}; {why}"),
-                    None => why,
-                });
-            }
-            let buf = if nq > 0 {
-                let mut buf = gpu.alloc_zeros::<f64>(nq * n2)?;
-                let src = if lr {
-                    &self.lr.as_ref().unwrap().store
-                } else {
-                    &self.store
-                };
-                if let Store::Device(b) = src {
-                    let up = self.unpacker();
-                    for &(q0, nqb) in self.blocks.iter().take_while(|b| b.0 + b.1 <= nq) {
-                        let blk = TensorBlock {
-                            q0,
-                            nq: nqb,
-                            buf: b,
-                            off: q0,
-                            ld: naux,
-                        };
-                        up.unpack_at(gpu, &blk, 0, nqb, (&mut buf, q0 * n2))?;
-                    }
-                }
-                gpu.synchronize()?;
-                Some(buf)
-            } else {
-                None
-            };
-            let d = Dense { buf, nq };
-            self.resolved.device_bytes += d.bytes();
-            self.resolved.k_dense_bytes += d.bytes();
-            if lr {
-                self.resolved.k_dense_naux.1 = nq;
-                self.lr_dense = Some(d);
-            } else {
-                self.resolved.k_dense_naux.0 = nq;
-                self.dense = Some(d);
-            }
-            self.setup_times.k_dense += t.elapsed().as_secs_f64();
-            Ok(())
-        }
-
         pub fn resolved(&self) -> &GpuDfJkResolved {
             &self.resolved
         }
@@ -2870,49 +2987,33 @@ mod device {
         }
 
         /// The least device memory one build ([`Self::compute_device`]) of `nd` densities and
-        /// the factors of `ncols` columns allocates beyond what the engine holds: the J vectors,
-        /// K's block buffers and, with the Ozaki exchange, the factors' slices and its workspace
-        /// at the fewest columns per GEMM (with the margin the build keeps free); with `host`,
-        /// also [`Self::compute`]'s device copies of the inputs and results. A caller compares
-        /// it with the free memory before a series of builds (an SCF) instead of meeting an
-        /// out-of-memory in one of them. Not counted: native K's dense planes (sized at the
-        /// first build to what is free) and cuBLAS's own workspaces.
+        /// the factors of `ncols` columns allocates beyond what the engine holds
+        /// ([`plan::build_bytes`] at the builds' block): the J vectors and the exchange's
+        /// workspace of the arithmetic now (the shell panels' X, gathered orbitals and gathered
+        /// panels; the unpacked block; the Ozaki scheme's slices and its workspace at the fewest
+        /// columns per GEMM, with the margin the build keeps free); with `host`, also
+        /// [`Self::compute`]'s device copies of the inputs and results. A caller compares it with
+        /// the free memory before a series of builds (an SCF) instead of meeting an
+        /// out-of-memory in one of them. Not counted: cuBLAS's own workspaces.
         pub fn build_bytes(&self, nd: usize, ncols: &[usize], host: bool) -> usize {
-            let (nbf, nx, naux, nq) = (self.nbf, self.nx, self.naux, self.resolved.k_block);
-            let n2 = nbf * nbf;
-            let ntot: usize = ncols.iter().sum();
             let host_mode = matches!(self.store, Store::Host(_));
             let lr = self.xop.is_some() && self.lr.is_some();
-            // the J vectors (w and the J rows), alive through the build; device storage's
-            // fitted gamma, freed before K
-            let jv = if nd > 0 { 8 * 2 * nx * nd } else { 0 };
-            let jg = if nd > 0 && !host_mode {
-                8 * naux * nd
-            } else {
-                0
+            let ntot: usize = ncols.iter().sum();
+            let exchange = self.exchange();
+            let shape = match exchange {
+                plan::DfExchange::Panels { .. } => self.panel_shape(ntot, self.lr.is_some()),
+                _ => (self.resolved.k_block, ntot),
             };
-            let mut kb = 0;
-            if ntot > 0 {
-                // A_Q (unless the Ozaki scheme slices the blocks itself), X_Q (and Xw_Q)
-                if self.oz.is_none() {
-                    kb += 8 * nq * n2;
-                }
-                kb += 8 * nq * nbf * ntot * if lr { 2 } else { 1 };
-                if let Some(oz) = &self.oz {
-                    kb += Sliced::bytes_for(ntot, nbf, oz.slices)
-                        + self.oz_build_bytes(oz.slices, ntot, 16.min(ntot))
-                        + (256 << 20);
-                }
-            }
-            if host_mode && nd > 0 {
-                kb += 8 * nq * nd;
-            }
-            let io = if host {
-                8 * (2 * nd * n2 + ncols.len() * n2 + nbf * ntot)
-            } else {
-                0
-            };
-            io + jv + jg.max(kb)
+            plan::build_bytes(&self.sizes, exchange, shape, nd, ncols, lr, host_mode, host)
+        }
+
+        /// The exchange of the builds' arithmetic now ([`GpuDfJk::set_k_math`]).
+        fn exchange(&self) -> plan::DfExchange {
+            exchange_of(
+                self.resolved.k_math,
+                self.k_panel_kernel,
+                self.k_panel_workspace,
+            )
         }
 
         /// Crate-internal (the response engine): the screening thresholds of the setup.
@@ -3223,7 +3324,10 @@ mod device {
             )?;
             if self.keep_fit {
                 self.coulomb_fit_buf(gpu, nd)?;
-                let fit = self.coulomb_fit.as_mut().unwrap();
+                let fit = self
+                    .coulomb_fit
+                    .as_mut()
+                    .ok_or_else(|| GpuError::Contract("DF-J/K: no Coulomb fit buffer".into()))?;
                 gpu.copy_range(&g, 0, fit, 0, naux * nd)?;
                 self.coulomb_fit_nd = nd;
             }
@@ -3233,7 +3337,8 @@ mod device {
 
         /// The pass over the auxiliary blocks, when host storage streams the tensor for J or
         /// K is asked for: per block its rows (streamed from host storage), its part of J (host
-        /// storage) and its exchange (in Ozaki slices, [`oz_block`], or native, [`NativeK`]).
+        /// storage) and its exchange (in Ozaki slices, [`oz_block`], or on the unpacked block in
+        /// cuBLAS's emulation, [`UnpackedK`]; native K takes the shell panels, [`GpuDfJk::panel_pass`]).
         /// The device is waited for at the end (the pass's times).
         fn block_pass(
             &mut self,
@@ -3245,10 +3350,13 @@ mod device {
             if !((host_mode && c.nd > 0) || c.ntot > 0) {
                 return Ok(());
             }
+            if let (true, Some(k)) = (self.panel_path(c), kmat.as_deref_mut()) {
+                return self.panel_pass(c, jx, k);
+            }
             let (nbf, nx, nq) = (c.nbf, c.nx, self.resolved.k_block);
             let mut w = self.block_work(c, host_mode)?;
             let arith = self.resolved.k_math.cublas();
-            let nk = NativeK {
+            let nk = UnpackedK {
                 gemm: &self.gemm,
                 up: Unpacker {
                     nx,
@@ -3258,15 +3366,6 @@ mod device {
                 },
                 blas1: &self.kernels.blas1,
                 arith,
-                syrk: self.k_syrk && arith == Arith::Fp64,
-                // emulated: one full GEMM (cuBLAS slices both operands per call, so splitting
-                // would repeat that work)
-                nkb: match arith {
-                    Arith::Fp64 => nbf
-                        .div_ceil(self.k_update_block)
-                        .clamp(1, K_UPDATE_BLOCKS_MAX),
-                    _ => 1,
-                },
             };
             for bi in 0..self.blocks.len() {
                 let (q0, nqb) = self.blocks[bi];
@@ -3319,14 +3418,17 @@ mod device {
                     continue;
                 }
                 if let (Some(x), Some(cm), Some(k)) = (w.x.as_mut(), c.cmat, kmat.as_deref_mut()) {
-                    let s2 = nk.gemm1(c, &src, self.dense.as_ref(), w.a.as_mut(), cm, x)?;
+                    let s2 = nk.gemm1(c, &src, w.a.as_mut(), cm, x)?;
                     if let (Some(coefs), Some(xw)) = (c.lr_coefs, w.xw.as_mut()) {
                         // the block of B^omega: Xw = Aw_Q^T C, W = (a X + b Xw) / 2,
                         // K_d (+)= X_d W_d^T (full), K = M + M^T at the end
-                        let lr = self.lr.as_mut().unwrap();
+                        let lr = self.lr.as_mut().ok_or_else(|| {
+                            GpuError::Contract(
+                                "DF-J/K: long-range coefficients without B^omega".into(),
+                            )
+                        })?;
                         let wsrc = lr.store.block(c, q0, nqb)?;
-                        let lr_dense = self.lr_dense.as_ref();
-                        let s2 = nk.gemm1(c, &wsrc, lr_dense, w.a.as_mut(), cm, xw)?;
+                        let s2 = nk.gemm1(c, &wsrc, w.a.as_mut(), cm, xw)?;
                         nk.update_lr(c, (nqb, beta), coefs, (x, xw), k)?;
                         c.tl.close(|t| &mut t.k_gemm2, s2)?;
                         continue;
@@ -3345,26 +3447,15 @@ mod device {
             c.flush()
         }
 
-        /// The block pass's workspace: native K's resident dense planes (planned at the first
-        /// build), the blocks' buffers, the kept fit's buffer, and for the Ozaki exchange C in
-        /// slices (timed as GEMM1) and GEMM1's columns per chunk within the free memory.
+        /// The block pass's workspace: the blocks' buffers, the kept fit's buffer, and for the
+        /// Ozaki exchange C in slices (timed as GEMM1) and GEMM1's columns per chunk within the
+        /// free memory.
         fn block_work(&mut self, c: &mut JkCall, host_mode: bool) -> Result<BlockWork, GpuError> {
             let (gpu, nbf, nd, ntot) = (c.gpu, c.nbf, c.nd, c.ntot);
             let n2 = nbf * nbf;
             let nq = self.resolved.k_block;
             let ozaki = self.oz.is_some();
-            // native K: the resident dense planes, planned at the first build
-            if ntot > 0 && self.resolved.k_math == KMath::Native {
-                let work = per_build_bytes(nbf, c.nx, nq, c.lr_coefs.is_some());
-                self.native_dense(gpu, false, work)?;
-                if c.lr_coefs.is_some() {
-                    self.native_dense(gpu, true, work)?;
-                }
-            }
-            let covered = |d: &Option<Dense>| d.as_ref().is_some_and(|d| d.nq >= self.naux);
-            let all_dense =
-                covered(&self.dense) && (c.lr_coefs.is_none() || covered(&self.lr_dense));
-            let a = if ntot > 0 && !ozaki && !all_dense {
+            let a = if ntot > 0 && !ozaki {
                 Some(gpu.alloc_zeros::<f64>(nq * n2)?)
             } else {
                 None
@@ -3566,8 +3657,7 @@ mod device {
 
     /// The workspace of a pass over the auxiliary blocks ([`GpuDfJk::block_pass`]).
     struct BlockWork {
-        /// Native K: A_Q, a block unpacked (none when the resident dense planes hold every
-        /// block).
+        /// Emulated K: A_Q, a block unpacked.
         a: Option<DeviceBuf<f64>>,
         /// K: X_Q ((nq nbf) x ntot) and, range-separated, Xw_Q of B^omega.
         x: Option<DeviceBuf<f64>>,
@@ -3580,51 +3670,38 @@ mod device {
         oz_cols: usize,
     }
 
-    /// Native K's work on one block: the engine's GEMMs, unpacker and kernels, borrowed beside
-    /// the stored tensors the block pass streams.
-    struct NativeK<'e> {
+    /// The exchange on one unpacked block (emulated K, cuBLAS's emulation): the engine's GEMMs,
+    /// unpacker and kernels, borrowed beside the stored tensors the block pass streams.
+    struct UnpackedK<'e> {
         gemm: &'e Gemm,
         up: Unpacker<'e>,
         blas1: &'e Blas1,
         /// The exchange GEMMs' arithmetic ([`KMath::cublas`]).
         arith: Arith,
-        /// K += X X^T as one SYRK ([`GpuDfJkOptions::k_syrk`] in native FP64), else as GEMMs
-        /// over `nkb` column blocks of K's lower triangle.
-        syrk: bool,
-        nkb: usize,
     }
 
-    impl NativeK<'_> {
-        /// X = A_Q^T C ((nqb nbf) x ntot) of the block `src`, A_Q the resident dense planes
-        /// `dense` when they hold the block, else the block unpacked into `a`; timed as the
+    impl UnpackedK<'_> {
+        /// X = A_Q^T C ((nqb nbf) x ntot) of the block `src`, unpacked into `a`; timed as the
         /// unpack and GEMM1. The mark after GEMM1.
         fn gemm1(
             &self,
             c: &mut JkCall,
             src: &TensorBlock<'_>,
-            dense: Option<&Dense>,
             a: Option<&mut DeviceBuf<f64>>,
             cm: &DeviceBuf<f64>,
             x: &mut DeviceBuf<f64>,
         ) -> Result<usize, GpuError> {
             let (gpu, nbf, ntot) = (c.gpu, c.nbf, c.ntot);
-            let (q0, nqb) = (src.q0, src.nq);
+            let nqb = src.nq;
             let s = c.tl.mark()?;
-            let (ab, ao) = match dense.and_then(|d| d.block(q0, nqb, nbf * nbf)) {
-                Some(p) => p,
-                None => {
-                    let a =
-                        a.ok_or_else(|| GpuError::Contract("DF-J/K: no unpack workspace".into()))?;
-                    self.up.unpack(gpu, src, 0, nqb, a)?;
-                    (&*a, 0)
-                }
-            };
+            let a = a.ok_or_else(|| GpuError::Contract("DF-J/K: no unpack workspace".into()))?;
+            self.up.unpack(gpu, src, 0, nqb, a)?;
             let s1 = c.tl.mark()?;
             self.gemm.gemm(
                 self.arith,
                 GemmDims::new(Op::T, Op::N, nqb * nbf, ntot, nbf),
                 (1.0, 0.0),
-                MatRef::new(ab, ao, nbf),
+                MatRef::new(&*a, 0, nbf),
                 MatRef::new(cm, 0, nbf),
                 MatMut::new(x, 0, nqb * nbf),
             )?;
@@ -3635,8 +3712,8 @@ mod device {
         }
 
         /// K_d (+)= X_d X_d^T for each factor d, X_d = nbf x (nqb ncol_d) at column c0_d
-        /// (`beta` 0 at the first block): the lower triangle only, as one SYRK or as GEMMs over
-        /// column blocks (mirrored at the end).
+        /// (`beta` 0 at the first block): one full GEMM per factor (cuBLAS's emulation slices
+        /// both operands per call, so column blocks would repeat that work), mirrored at the end.
         fn update(
             &self,
             c: &JkCall,
@@ -3646,45 +3723,17 @@ mod device {
         ) -> Result<(), GpuError> {
             let nbf = c.nbf;
             let n2 = nbf * nbf;
-            let nkb = self.nkb;
             let mut c0 = 0;
             for (d, &nc) in c.ncols.iter().enumerate() {
                 if nc > 0 {
-                    let xo = c0 * nqb * nbf;
-                    if self.syrk {
-                        self.gemm.syrk_lower(
-                            (nbf, nqb * nc),
-                            (1.0, beta),
-                            MatRef::new(x, xo, nbf),
-                            MatMut::new(&mut *k, d * n2, nbf),
-                        )?;
-                    } else {
-                        // column blocks starting at multiples of K_UPDATE_ALIGN functions: the
-                        // operands and K's block then start 16-byte aligned (an odd start made
-                        // cuBLAS take a slow path: u1an39 on an H200, 61.8 ms against 15 ms)
-                        let edge = |b: usize| {
-                            if b >= nkb {
-                                nbf
-                            } else {
-                                b * nbf / nkb / K_UPDATE_ALIGN * K_UPDATE_ALIGN
-                            }
-                        };
-                        for b in 0..nkb {
-                            let (j0, j1) = (edge(b), edge(b + 1));
-                            if j1 <= j0 {
-                                continue;
-                            }
-                            // K[j0.., j0..j1] (+)= X[j0.., :] X[j0..j1, :]^T
-                            self.gemm.gemm(
-                                self.arith,
-                                GemmDims::new(Op::N, Op::T, nbf - j0, j1 - j0, nqb * nc),
-                                (1.0, beta),
-                                MatRef::new(x, xo + j0, nbf),
-                                MatRef::new(x, xo + j0, nbf),
-                                MatMut::new(&mut *k, d * n2 + j0 * nbf + j0, nbf),
-                            )?;
-                        }
-                    }
+                    let op = KOperand {
+                        x,
+                        w: None,
+                        off: c0 * nqb * nbf,
+                        l: nqb * nc,
+                        trans: false,
+                    };
+                    k_update(self.gemm, self.arith, op, (&mut *k, d * n2), nbf, beta, 1)?;
                 }
                 c0 += nc;
             }
@@ -3704,32 +3753,108 @@ mod device {
         ) -> Result<(), GpuError> {
             let (gpu, nbf, ntot) = (c.gpu, c.nbf, c.ntot);
             let n2 = nbf * nbf;
-            let len = nqb * nbf * ntot;
             // Xw = fma(a/2, X, b/2 Xw)
             self.blas1.axpby(
                 gpu,
-                len,
+                nqb * nbf * ntot,
                 &[(0.5 * fb, Operand::Out), (0.5 * fa, Operand::Buf(x))],
                 xw,
             )?;
             let mut c0 = 0;
             for (d, &nc) in c.ncols.iter().enumerate() {
                 if nc > 0 {
-                    let xo = c0 * nqb * nbf;
-                    // M_d (+)= X_d W_d^T, nbf x nbf, inner dimension nqb nc
-                    self.gemm.gemm(
-                        self.arith,
-                        GemmDims::new(Op::N, Op::T, nbf, nbf, nqb * nc),
-                        (1.0, beta),
-                        MatRef::new(x, xo, nbf),
-                        MatRef::new(&*xw, xo, nbf),
-                        MatMut::new(&mut *k, d * n2, nbf),
-                    )?;
+                    let op = KOperand {
+                        x,
+                        w: Some(&*xw),
+                        off: c0 * nqb * nbf,
+                        l: nqb * nc,
+                        trans: false,
+                    };
+                    k_update(self.gemm, self.arith, op, (&mut *k, d * n2), nbf, beta, 1)?;
                 }
                 c0 += nc;
             }
             Ok(())
         }
+    }
+
+    /// One factor's operands of a K update: X_d and, range-separated, W_d (in place of Xw_d) at
+    /// offset `off` of `x` and `w`, nbf x l column-major (ld nbf: the unpacked block's X) or, with
+    /// `trans`, transposed, l x nbf (ld l: the shell panels' auxiliary-major X), l = the
+    /// factor's columns times the block's auxiliary functions.
+    #[derive(Clone, Copy)]
+    struct KOperand<'a> {
+        x: &'a DeviceBuf<f64>,
+        w: Option<&'a DeviceBuf<f64>>,
+        off: usize,
+        l: usize,
+        trans: bool,
+    }
+
+    /// The K update of one factor in `nkb` column blocks of K (starts at multiples of
+    /// [`K_UPDATE_ALIGN`] functions: the operands and K's block then start 16-byte aligned; an
+    /// odd start made cuBLAS take a slow path, u1an39 on an H200 61.8 ms against 15 ms): K_d
+    /// (+)= X_d X_d^T over the lower triangle (mirrored at the end), or with W_d, M_d (+)= X_d
+    /// W_d^T in full (K = M + M^T at the end). K_d is the nbf x nbf matrix at `k_off` of `k`;
+    /// `beta` 0 overwrites it.
+    fn k_update(
+        gemm: &Gemm,
+        arith: Arith,
+        op: KOperand<'_>,
+        (k, k_off): (&mut DeviceBuf<f64>, usize),
+        nbf: usize,
+        beta: f64,
+        nkb: usize,
+    ) -> Result<(), GpuError> {
+        let KOperand {
+            x,
+            w,
+            off,
+            l,
+            trans,
+        } = op;
+        let edge = |b: usize| {
+            if b >= nkb {
+                nbf
+            } else {
+                b * nbf / nkb / K_UPDATE_ALIGN * K_UPDATE_ALIGN
+            }
+        };
+        // the rows (or, transposed, the columns) of X from function j
+        let at = |j: usize| if trans { off + l * j } else { off + j };
+        let ld = if trans { l } else { nbf };
+        let (oa, ob) = if trans {
+            (Op::T, Op::N)
+        } else {
+            (Op::N, Op::T)
+        };
+        for b in 0..nkb {
+            let (j0, j1) = (edge(b), edge(b + 1));
+            if j1 <= j0 {
+                continue;
+            }
+            match w {
+                // K[j0.., j0..j1] (+)= X[j0.., :] X[j0..j1, :]^T
+                None => gemm.gemm(
+                    arith,
+                    GemmDims::new(oa, ob, nbf - j0, j1 - j0, l),
+                    (1.0, beta),
+                    MatRef::new(x, at(j0), ld),
+                    MatRef::new(x, at(j0), ld),
+                    MatMut::new(&mut *k, k_off + j0 * nbf + j0, nbf),
+                )?,
+                // M[:, j0..j1] (+)= X W[j0..j1, :]^T
+                Some(w) => gemm.gemm(
+                    arith,
+                    GemmDims::new(oa, ob, nbf, j1 - j0, l),
+                    (1.0, beta),
+                    MatRef::new(x, off, ld),
+                    MatRef::new(w, at(j0), ld),
+                    MatMut::new(&mut *k, k_off + j0 * nbf, nbf),
+                )?,
+            }
+        }
+        Ok(())
     }
 
     impl Store {
@@ -3788,11 +3913,14 @@ mod device {
 
     /// Columns j = (i, q) of X per sliced chunk of the K update (half the INT32 bound, so a
     /// diagonal's products are summed in at most a few groups).
-    const OZ_J_CHUNK: usize = INT32_TERMS / 2;
+    pub(super) const OZ_J_CHUNK: usize = INT32_TERMS / 2;
 
     /// GEMM1 of one block in Ozaki slices: out = A^T C in column chunks, the block's
     /// operand `av` (pre-sliced planes, or gathered for this build).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the slicer and its workspace, the block, its operands and the output"
+    )]
     fn oz_gemm1(
         gpu: &Gpu,
         ozaki: &Ozaki,
@@ -3825,7 +3953,10 @@ mod device {
 
     /// The block's GEMM1 operand: a view of the pre-sliced planes, or gathered from the
     /// stored rows `src` into `a` (timed as the unpack).
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the gather's kernels and tables, the planes or their buffer, the block's source"
+    )]
     fn oz_operand<'s>(
         gpu: &Gpu,
         (kernels, map, exps): (&OzKernels, &DeviceBuf<i32>, &DeviceBuf<i32>),
@@ -3863,7 +3994,10 @@ mod device {
     /// Aw^T C from B^omega's block, W = (a X + b Xw) / 2) by [`oz_gemm1`], then per factor
     /// K_d (+)= X_d X_d^T (lower triangle) or X_d W_d^T, the inner dimension j = (i, q) in
     /// chunks the INT32 sums hold. Timed as the unpack (the gather), GEMM1 and the K update.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the block's operands, the long-range block, the factors and K"
+    )]
     fn oz_block(
         gpu: &Gpu,
         oz: &mut OzState,
@@ -3948,8 +4082,7 @@ mod device {
             while j0 < jj {
                 let jl = OZ_J_CHUNK.min(jj - j0);
                 let beta = if b.first && j0 == 0 { 0.0 } else { 1.0 };
-                sliced_slot(gpu, xs, nbf, jl, s, Order::Ascending)?;
-                let sx = xs.as_mut().unwrap();
+                let sx = sliced_slot(gpu, xs, nbf, jl, s, Order::Ascending)?;
                 let xsrc = Vectors {
                     buf: x,
                     off: xo + j0 * nbf,
@@ -3961,8 +4094,7 @@ mod device {
                     None => {
                         // X again in descending digit order: each diagonal one GEMM per
                         // column block
-                        sliced_slot(gpu, ws, nbf, jl, s, Order::Descending)?;
-                        let sd = ws.as_mut().unwrap();
+                        let sd = sliced_slot(gpu, ws, nbf, jl, s, Order::Descending)?;
                         ozaki.slice(gpu, xsrc, sd, work)?;
                         ozaki.syrk_lower(
                             gpu,
@@ -3976,8 +4108,7 @@ mod device {
                         )?
                     }
                     Some(w) => {
-                        sliced_slot(gpu, ws, nbf, jl, s, Order::Descending)?;
-                        let sw = ws.as_mut().unwrap();
+                        let sw = sliced_slot(gpu, ws, nbf, jl, s, Order::Descending)?;
                         let wsrc = Vectors {
                             buf: w,
                             off: xo + j0 * nbf,
@@ -4002,5 +4133,102 @@ mod device {
         }
         tl.close(|t| &mut t.k_gemm2, t0)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use crate::harness;
+    use linus_ints::DerivOrder;
+
+    fn bits(v: &[f64]) -> Vec<u64> {
+        v.iter().map(|x| x.to_bits()).collect()
+    }
+
+    /// The two layouts, field by field and bit for bit.
+    fn assert_same(a: &DfLayout, b: &DfLayout, what: &str) {
+        assert_eq!((a.nbf, a.naux, a.nx), (b.nbf, b.naux, b.nx), "{what}");
+        assert_eq!(a.nshell_pairs, b.nshell_pairs, "{what}");
+        assert_eq!(a.x0, b.x0, "{what}");
+        assert_eq!(
+            (&a.row_m, &a.row_n, &a.row_kind),
+            (&b.row_m, &b.row_n, &b.row_kind),
+            "{what}"
+        );
+        assert_eq!(a.pairs.len(), b.pairs.len(), "{what}");
+        let flat = |v: &[[f64; 3]]| bits(&v.iter().flatten().copied().collect::<Vec<_>>());
+        for (p, q) in a.pairs.iter().zip(&b.pairs) {
+            assert_eq!(
+                (p.sa, p.sb, p.na, p.nb, p.lab),
+                (q.sa, q.sb, q.na, q.nb, q.lab),
+                "{what}"
+            );
+            assert_eq!(bits(&p.p), bits(&q.p), "{what}");
+            assert_eq!(bits(&p.et), bits(&q.et), "{what}");
+            assert_eq!(bits(&p.qprim), bits(&q.qprim), "{what}");
+            assert_eq!(flat(&p.pc), flat(&q.pc), "{what}");
+        }
+    }
+
+    /// A caller's shell pairs (the integral context's: index-ordered at the default primitive
+    /// cut, of derivative order zero or higher, their Schwarz factors computed before or not)
+    /// give the layout DfLayout::new builds from pairs of its own, bit for bit: the same kept
+    /// pairs at DfShared's Schwarz cut, in the same order, the same stored rows and pair records,
+    /// so the panel plan and the packed integrals follow unchanged. def2-TZVP and def2-QZVP; the
+    /// range-separated case (wB97X's long-range tensor W) is stored on the same layout (the
+    /// layout has no operator input), here at the response engine's cut as well as the SCF's.
+    #[test]
+    fn a_callers_pairs_give_the_same_layout() {
+        let cuts = [DfThresholds::default().pair, 1e-14];
+        for (name, basis_name) in [("u1an39", "def2-tzvp"), ("la18", "def2-qzvp")] {
+            let mol = harness::structure(name).unwrap();
+            let basis = harness::basis(&mol, basis_name).unwrap();
+            let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
+            let aux3 = Aux3c::new(&aux);
+            let zero = PairSet::build(&basis, PairOptions::with_order(DerivOrder::Zero));
+            let _ = zero.schwarz();
+            let one = PairSet::build(&basis, PairOptions::with_order(DerivOrder::One));
+            for &cut in &cuts {
+                let own = DfLayout::new(&basis, &aux3, cut);
+                for (set, which) in [(&zero, "order 0, Schwarz cached"), (&one, "order 1")] {
+                    let given = DfLayout::with_pairs(&basis, Some(set), &aux3, cut);
+                    assert_same(
+                        &own,
+                        &given,
+                        &format!("{name}/{basis_name} {which} cut {cut:e}"),
+                    );
+                }
+            }
+        }
+    }
+
+    /// The layout's sizes the storage plan reads ([`DfLayout::rows`], linus-ints' `DfRows`, the
+    /// rule the memory needs apply ahead of a layout) are the layout's and its shell panels':
+    /// the stored rows, the panel rows and gathered-orbital columns of [`PanelPlan`], from the
+    /// screening's kept pairs (`df_kept_pairs`) as from the layout's.
+    #[test]
+    fn the_planned_sizes_are_the_layouts() {
+        let mol = harness::structure("u1an39").unwrap();
+        let basis = harness::basis(&mol, "def2-tzvp").unwrap();
+        let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
+        let aux3 = Aux3c::new(&aux);
+        let cut = DfThresholds::default().pair;
+        let lay = DfLayout::new(&basis, &aux3, cut);
+        let rows = lay.rows(&basis);
+        let panels = PanelPlan::new(&basis, &lay);
+        assert_eq!(
+            (rows.nx, rows.np, rows.ncg),
+            (lay.nx, panels.np(), panels.ncg())
+        );
+        let max_panel = panels.shells.iter().map(|s| s.d * s.w).max().unwrap_or(0);
+        assert_eq!(rows.max_panel_rows, max_panel);
+        assert_eq!(
+            rows.max_pair_rows,
+            lay.pairs.iter().map(|p| p.nab()).max().unwrap_or(0)
+        );
+        let pairs = PairSet::build(&basis, PairOptions::default());
+        let kept = linus_ints::eri3c::df_kept_pairs(&pairs, aux3.qmax, cut);
+        assert_eq!(linus_ints::eri3c::DfRows::new(&basis, &pairs, &kept), rows);
     }
 }

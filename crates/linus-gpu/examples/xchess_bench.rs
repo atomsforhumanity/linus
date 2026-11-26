@@ -10,55 +10,13 @@
 //! With `--fp32` each call also runs the FP32 potential products and reports the largest
 //! differences from the FP64 call.
 
+mod common;
+use common::{arg, density, orbitals};
 use linus_gpu::cpu::GridSpec;
 use linus_gpu::harness;
 use linus_gpu::hess::xc::{GpuXcHess, GpuXcHessOptions};
 use linus_gpu::{Gpu, GpuError};
 use std::time::Instant;
-
-fn arg(args: &[String], name: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1).cloned())
-}
-
-/// n x o column-major orbitals: a deterministic pseudo-random matrix, columns made orthonormal
-/// (Gram-Schmidt) so the magnitudes are those of a molecule's orbitals.
-fn orbitals(n: usize, o: usize, seed: u64) -> Vec<f64> {
-    let mut s = seed;
-    let mut c: Vec<f64> = (0..n * o)
-        .map(|_| {
-            s = s
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            ((s >> 11) as f64 / (1u64 << 53) as f64) - 0.5
-        })
-        .collect();
-    for j in 0..o {
-        for k in 0..j {
-            let d: f64 = (0..n).map(|i| c[i + j * n] * c[i + k * n]).sum();
-            for i in 0..n {
-                c[i + j * n] -= d * c[i + k * n];
-            }
-        }
-        let nrm = (0..n).map(|i| c[i + j * n].powi(2)).sum::<f64>().sqrt();
-        for i in 0..n {
-            c[i + j * n] /= nrm;
-        }
-    }
-    c
-}
-
-/// f C C^T (n x n, column-major).
-fn density(c: &[f64], n: usize, o: usize, f: f64) -> Vec<f64> {
-    let mut d = vec![0.0; n * n];
-    for j in 0..n {
-        for i in 0..n {
-            d[i + j * n] = f * (0..o).map(|k| c[i + k * n] * c[j + k * n]).sum::<f64>();
-        }
-    }
-    d
-}
 
 fn main() -> Result<(), GpuError> {
     let args: Vec<String> = std::env::args().collect();
@@ -149,6 +107,44 @@ fn main() -> Result<(), GpuError> {
     } else {
         None
     };
+    // --compare-mib M: a second engine with M MiB of per-batch workspace (its own chunks)
+    if let Some(mib) = arg(&args, "--compare-mib") {
+        let mut e2 = GpuXcHess::new(
+            &gpu,
+            &basis,
+            &grid,
+            &method,
+            nsp,
+            grid_terms,
+            &GpuXcHessOptions {
+                v_bytes: v_gib << 30,
+                workspace: mib.parse::<usize>().unwrap() << 20,
+                ..GpuXcHessOptions::default()
+            },
+        )?;
+        let r = eng.compute(&gpu, &drefs, &occ)?;
+        let r2 = e2.compute(&gpu, &drefs, &occ)?;
+        let md = |a: &[f64], b: &[f64]| {
+            a.iter()
+                .zip(b)
+                .map(|(x, y)| (x - y).abs())
+                .fold(0.0f64, f64::max)
+        };
+        let mx = |v: &[Vec<f64>], w: &[Vec<f64>]| {
+            v.iter().zip(w).map(|(a, b)| md(a, b)).fold(0.0, f64::max)
+        };
+        println!(
+            "chunks {} vs {}: max |dHfix| {:.2e} |dHgrid| {:.2e} |dV^x C| {:.2e} |d dV^y C| {:.2e}; \
+             max |Hfix| {:.2e}",
+            eng.stats().nchunks,
+            e2.stats().nchunks,
+            md(&r.hfix, &r2.hfix),
+            md(&r.hgrid, &r2.hgrid),
+            mx(&r.vfix_c, &r2.vfix_c),
+            mx(&r.vgrid_c, &r2.vgrid_c),
+            r.hfix.iter().fold(0.0f64, |m, v| m.max(v.abs()))
+        );
+    }
     for rep in 0..reps {
         let r = eng.compute(&gpu, &drefs, &occ)?;
         let l = &eng.last;

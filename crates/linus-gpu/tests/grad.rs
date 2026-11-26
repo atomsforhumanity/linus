@@ -13,7 +13,7 @@ use linus_gpu::cpu::{
     eval_ao, BasisSet, DfThresholds, Functional, GridSpec, MolecularGrid, Operator, XcInput,
     XcOutput,
 };
-use linus_gpu::grad::df::{GpuDfGrad, GpuDfGradOptions};
+use linus_gpu::grad::df::{DerivPlanes, GpuDfGrad, GpuDfGradOptions};
 use linus_gpu::grad::xc::{GpuXcGrad, GpuXcGradOptions};
 use linus_gpu::grad::{add_atoms, bitwise_equal, max_abs_diff};
 use linus_gpu::harness::{self, Structure};
@@ -266,23 +266,32 @@ fn check_df(mol: &Structure, basis_name: &str, restricted: bool, a_x: f64, small
         omega: 0.0,
     };
     // the derivative integrals contracted inside the kernels (fused), and stored then
-    // contracted (the first implementation)
+    // contracted (the first implementation); without exchange also in Hermite space
     let mut both = vec![];
-    for fused in [true, false] {
+    let mut variants = vec![(true, false), (false, false)];
+    if a_x == 0.0 {
+        variants.push((true, true));
+    }
+    for (fused, hermite_j) in variants {
         let opts = GpuDfGradOptions {
             split_terms: true,
             // several blocks and sub-blocks even for water
             block_bytes: if small_blocks { 1 << 15 } else { 2 << 30 },
             deriv_bytes: if small_blocks { 1 << 16 } else { 2 << 30 },
             thresholds: DfThresholds::none(),
-            fused,
+            planes: if fused {
+                DerivPlanes::Fused
+            } else {
+                DerivPlanes::Stored
+            },
+            hermite_j,
         };
         let mut eng = GpuDfGrad::new(&gpu, &basis, &aux, &opts).unwrap();
         let r = eng.compute(&gpu, &occ_ref, restricted, xop).unwrap();
         let r2 = eng.compute(&gpu, &occ_ref, restricted, xop).unwrap();
         assert!(bitwise_equal(&r.gradient, &r2.gradient), "not reproducible");
         let tag = format!(
-            "{} {basis_name} {} a_x {a_x} fused {fused} ({} blocks, {} chunks)",
+            "{} {basis_name} {} a_x {a_x} fused {fused} hermite {hermite_j} ({} blocks, {} chunks)",
             harness::formula(mol),
             if restricted { "R" } else { "U" },
             eng.plan().blocks.len(),
@@ -302,6 +311,11 @@ fn check_df(mol: &Structure, basis_name: &str, restricted: bool, a_x: f64, small
     let d = max_abs_diff(&both[0], &both[1]);
     eprintln!("fused vs stored planes: {d:.2e}");
     assert!(d < 1e-13 * scale.max(1.0));
+    if let Some(h) = both.get(2) {
+        let d = max_abs_diff(&both[0], h);
+        eprintln!("fused vs Hermite (J only): {d:.2e}");
+        assert!(d < 1e-12 * scale.max(1.0));
+    }
 }
 
 #[test]
@@ -316,9 +330,65 @@ fn df_water_unrestricted_and_j_only() {
     check_df(&water(), "def2-svp", false, 0.0, false);
 }
 
+/// The stored derivative planes give way to the fused kernels when their workspace does not fit
+/// (`DerivPlanes::StoredOrFused`, the default on FP64-rich cards): the call reports the fused
+/// kernels and why, and its gradient is the fused engine's, bit for bit. The device is filled
+/// with a grant up to between the two workspaces.
+#[test]
+fn df_planes_give_way_to_fused_when_short_of_memory() {
+    let Some(gpu) = common::gpu() else { return };
+    let mol = fragment(4);
+    let basis = harness::basis(&mol, "def2-svp").unwrap();
+    let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
+    let occ = orbitals(basis.nbf, 6, 5);
+    let occ_ref: Vec<(&[f64], usize)> = vec![(occ.as_slice(), 6)];
+    let xop = Operator::Attenuated {
+        coulomb: 0.25,
+        long_range: 0.0,
+        omega: 0.0,
+    };
+    let opts = |planes| GpuDfGradOptions {
+        // several sub-blocks, so that the planes' workspace is well above the fused one's
+        deriv_bytes: 1 << 20,
+        planes,
+        ..GpuDfGradOptions::default()
+    };
+    let mut fused = GpuDfGrad::new(&gpu, &basis, &aux, &opts(DerivPlanes::Fused)).unwrap();
+    let mut eng = GpuDfGrad::new(&gpu, &basis, &aux, &opts(DerivPlanes::StoredOrFused)).unwrap();
+    let (w1, w6) = (
+        fused.workspace_bytes(&[6], &xop),
+        eng.workspace_bytes(&[6], &xop),
+    );
+    assert!(w6 > w1 + (1 << 18), "planes {w6} B, fused {w1} B");
+    // with room for the fused workspace only, the planes give way
+    let room = gpu.budget().free();
+    let blocker = gpu
+        .grant(room - (w1 + w6) / 2, "the test's filler")
+        .unwrap();
+    eng.grant_workspace(&gpu, &[6], &xop).unwrap();
+    let k = eng.kernels(&[6], &xop);
+    assert_eq!(k.kernels, "fused");
+    let why = k.declined.unwrap_or_default();
+    assert!(why.contains("does not fit"), "{why}");
+    let r = eng.compute(&gpu, &occ_ref, true, xop).unwrap();
+    drop(blocker);
+    fused.grant_workspace(&gpu, &[6], &xop).unwrap();
+    let rf = fused.compute(&gpu, &occ_ref, true, xop).unwrap();
+    assert!(
+        bitwise_equal(&r.gradient, &rf.gradient),
+        "against the fused engine"
+    );
+    // with room, the planes are kept
+    let mut kept = GpuDfGrad::new(&gpu, &basis, &aux, &opts(DerivPlanes::StoredOrFused)).unwrap();
+    kept.grant_workspace(&gpu, &[6], &xop).unwrap();
+    assert_eq!(kept.kernels(&[6], &xop).kernels, "stored_planes");
+}
+
 #[test]
 fn df_fragment_tzvp() {
     check_df(&fragment(4), "def2-tzvp", true, 0.25, true);
+    // f pairs and the fit's g shells in Hermite space
+    check_df(&fragment(4), "def2-tzvp", true, 0.0, false);
 }
 
 /// Dense (P|op|mn) as [P][m][n] (linus-ints' four-center code with the auxiliary shells as
@@ -561,7 +631,12 @@ fn check_df_op(mol: &Structure, basis_name: &str, restricted: bool, xop: Operato
             block_bytes: if small { 1 << 15 } else { 2 << 30 },
             deriv_bytes: if small { 1 << 16 } else { 2 << 30 },
             thresholds: DfThresholds::none(),
-            fused,
+            planes: if fused {
+                DerivPlanes::Fused
+            } else {
+                DerivPlanes::Stored
+            },
+            hermite_j: false,
         };
         let mut eng = GpuDfGrad::new(&gpu, &basis, &aux, &opts).unwrap();
         let r = eng.compute(&gpu, &occ_ref, restricted, xop).unwrap();
@@ -847,10 +922,11 @@ fn xc_fragment_becke_and_ssf() {
     check_xc(&fragment(5), "def2-svp", GridSpec::linus(1), "pbe", true);
 }
 
-/// The weight-derivative kernel with several atoms per thread (39 atoms, 32 threads) and with
-/// several points per block (the default) agree to round-off.
+/// The weight-derivative kernels agree to round-off: the pair kernel (the default at 39 atoms)
+/// and the warp kernel (forced: no shared memory for the pair kernel), with and without the
+/// screening of negligible atoms.
 #[test]
-fn xc_becke_block_shapes_agree() {
+fn xc_becke_kernels_agree() {
     let Some(gpu) = common::gpu() else { return };
     let mol = fragment(39);
     let basis = harness::basis(&mol, "def2-svp").unwrap();
@@ -858,35 +934,32 @@ fn xc_becke_block_shapes_agree() {
     let grid = harness::grid(&mol, &spec).unwrap();
     let nbf = basis.nbf;
     let d = density(nbf, 12, 5, 2.0);
-    let run = |threads: usize, becke_screen: bool, becke_pairs: bool| {
+    let run = |becke_screen: bool, warp: bool| {
         let opts = GpuXcGradOptions {
-            becke_threads: threads,
             becke_screen,
-            becke_pairs,
+            becke_pair_shared: if warp {
+                0
+            } else {
+                GpuXcGradOptions::default().becke_pair_shared
+            },
             ..Default::default()
         };
         let mut eng = GpuXcGrad::new(&gpu, &basis, &grid, &spec, "pbe", &opts).unwrap();
         eng.compute(&gpu, &[&d], true, true).unwrap()
     };
-    // the pair kernel (the default); the per-atom kernel at two block shapes; without the
-    // screening of negligible atoms (1e-18 relative)
-    let a = run(256, true, true);
-    let b = run(256, true, false);
-    let c = run(32, true, false);
-    let e = run(256, false, true);
+    // the pair kernel, screened (1e-18 relative) and not; the warp kernel, screened and not
+    let (a, e) = (run(true, false), run(false, false));
+    let (w, w0) = (run(true, true), run(false, true));
     let scale = a
         .iter()
         .flat_map(|x| x.iter())
         .fold(0.0f64, |m, v| m.max(v.abs()));
-    let (dpair, dshape, dscreen) = (
-        max_abs_diff(&a, &b),
-        max_abs_diff(&b, &c),
-        max_abs_diff(&a, &e),
-    );
+    let dscreen = max_abs_diff(&a, &e);
+    let (dwarp, dwarp0) = (max_abs_diff(&a, &w), max_abs_diff(&e, &w0));
     eprintln!(
-        "u1an39 Becke: max |g| {scale:.3e}, pairs vs per atom {dpair:.2e}, block shapes {dshape:.2e}, screened vs all pairs {dscreen:.2e}"
+        "39 atoms Becke: max |g| {scale:.3e}, screened vs all pairs {dscreen:.2e}, warp vs pairs {dwarp:.2e} (unscreened {dwarp0:.2e})"
     );
-    for x in [dpair, dshape, dscreen] {
+    for x in [dscreen, dwarp, dwarp0] {
         assert!(x < 1e-12 * scale.max(1.0));
     }
 }

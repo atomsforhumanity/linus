@@ -172,6 +172,7 @@ impl GpuPcmScf {
         mode: PcmScfMode,
         aux: Option<&BasisSet>,
         derivatives: bool,
+        pairs: Option<&linus_ints::PairSet>,
         mut timers: Timers,
     ) -> Result<Self, GpuError> {
         if mode == PcmScfMode::Df {
@@ -189,8 +190,10 @@ impl GpuPcmScf {
             .zip(&op.pot_zeta)
             .map(|(p, &z)| PcmPoint { r: p.r, zeta: z })
             .collect();
-        // the shell pairs the CPU's SurfacePlan keeps (scf.rs exact_plan)
-        let host = PcmIntsHost::new(basis, &pts, resolved.int_thresh * 1e-3, derivatives)?;
+        // the shell pairs the CPU's SurfacePlan keeps (scf.rs exact_plan), screened from the
+        // SCF's set when it is still held
+        let host =
+            PcmIntsHost::with_pairs(basis, pairs, &pts, resolved.int_thresh * 1e-3, derivatives)?;
         let ints = GpuPcmInts::new(&gpu, &host)?;
         drop(host);
         let kind = match op.model {
@@ -593,6 +596,10 @@ impl GpuScfEnvironment {
         )?;
         // the gradient after this SCF reuses the term: pack the derivatives now
         let derivatives = setup.purpose == crate::driver::Purpose::Gradient;
+        // the SCF's shell pairs (its J/K setup left them for this setup: crate::backend::scf)
+        let pairs = calc
+            .integrals
+            .pairs(&calc.basis, linus_ints::DerivOrder::Zero);
         let built = GpuPcmScf::new(
             gpu.clone(),
             resolved.clone(),
@@ -601,8 +608,10 @@ impl GpuScfEnvironment {
             mode,
             pcm.aux.as_ref(),
             derivatives,
+            Some(&pairs),
             timers,
         );
+        drop(pairs);
         let state = match setup_of(Family::Pcm, built)? {
             Setup::Ready(s) => s,
             Setup::Declined(why) => return Ok(Setup::Declined(why)),
@@ -733,6 +742,7 @@ impl<'a> GpuSolventGradient<'a> {
                         PcmScfMode::Exact,
                         None,
                         true,
+                        None,
                         t,
                     )
                 });

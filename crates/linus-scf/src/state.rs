@@ -22,6 +22,14 @@ pub(crate) struct OrbitalState {
     /// The occupied orbitals of the densities per channel, D_s = C_s C_s^T (None: the density is a
     /// guess, not from orbitals).
     pub occ: Option<Vec<Mat<f64>>>,
+    /// The occupied orbitals are the lowest eigenvectors of a Fock matrix (a diagonalization step,
+    /// the core guess, a device iteration's orbitals): at convergence the final Fock matrix's
+    /// lowest eigenvectors span them. False after rotations (a quasi-Newton step, a stability
+    /// step) and the escalation's start, which keep an occupied set by continuity: a converged
+    /// point reached so need not be the aufbau set of its Fock matrix (C2 singlet PBE: the
+    /// 3 sigma_g orbital empty 3.7e-4 Eh below the occupied pi pair), and the SCF's final orbitals
+    /// are then the canonical orbitals of the occupied space (`run`; docs/internal/deggrad.md).
+    pub aufbau: bool,
 }
 
 impl OrbitalState {
@@ -37,6 +45,7 @@ impl OrbitalState {
             da,
             db,
             occ: None,
+            aufbau: false,
         }
     }
 
@@ -52,17 +61,26 @@ impl OrbitalState {
     }
 
     /// The densities and occupied orbitals of the current orbitals `c_a`, `c_b`.
-    pub fn refresh(&mut self, par: Par) {
+    fn refresh(&mut self, par: Par) {
         let [na, nb] = self.nocc;
         self.da = density(self.c_a.as_ref(), na, par);
         self.db = density(self.c_b.as_ref(), nb, par);
         self.occ = Some(self.occupied_of(&self.c_a, &self.c_b));
     }
 
-    /// New orbitals per spin, and their densities.
+    /// [`Self::refresh`] for orbitals that are the eigenvectors of a Fock matrix, occupied by
+    /// aufbau (a diagonalization step).
+    pub fn refresh_aufbau(&mut self, par: Par) {
+        self.refresh(par);
+        self.aufbau = true;
+    }
+
+    /// New orbitals per spin from a rotation of the current ones (a quasi-Newton or stability
+    /// step: the occupied set is kept, not chosen by aufbau), and their densities.
     pub fn set_orbitals(&mut self, c_a: Mat<f64>, c_b: Mat<f64>, par: Par) {
         (self.c_a, self.c_b) = (c_a, c_b);
         self.refresh(par);
+        self.aufbau = false;
     }
 
     /// The densities of the occupied orbitals `occ` alone (per channel), the orbitals unchanged:
@@ -75,6 +93,7 @@ impl OrbitalState {
             mm(occ[1].as_ref(), occ[1].transpose(), par)
         };
         self.occ = Some(occ);
+        self.aufbau = false;
     }
 
     /// The densities per channel (one for a closed shell).

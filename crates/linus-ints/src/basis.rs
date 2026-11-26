@@ -677,6 +677,58 @@ impl BasisSet {
             cart_norm_matrix(sh.l)
         }
     }
+
+    /// The basis in Cartesian components: each shell's first Cartesian row and the
+    /// transform from them to the basis's functions ([`CartLayout`]).
+    pub fn cart_layout(&self) -> CartLayout {
+        let mut offsets = Vec::with_capacity(self.shells.len() + 1);
+        let mut nc = 0;
+        for sh in &self.shells {
+            offsets.push(nc);
+            nc += ncart(sh.l);
+        }
+        offsets.push(nc);
+        let n = self.nbf;
+        let mut t = vec![0.0; n * nc];
+        let mut identity = nc == n;
+        for (s, sh) in self.shells.iter().enumerate() {
+            let ncs = ncart(sh.l);
+            let ts = Self::shell_transform(sh);
+            for j in 0..sh.nfunc() {
+                for i in 0..ncs {
+                    let (row, col) = (sh.ao_start + j, offsets[s] + i);
+                    let v = ts[j * ncs + i];
+                    t[col * n + row] = v;
+                    if v != if row == col { 1.0 } else { 0.0 } {
+                        identity = false;
+                    }
+                }
+            }
+        }
+        CartLayout {
+            offsets,
+            t,
+            identity,
+        }
+    }
+}
+
+/// A basis in Cartesian components ([`BasisSet::cart_layout`]).
+#[derive(Clone, Debug)]
+pub struct CartLayout {
+    /// The first Cartesian row of each shell, and the total (last).
+    pub offsets: Vec<usize>,
+    /// T (nbf x ncart, column-major): the basis's functions from the Cartesian components.
+    pub t: Vec<f64>,
+    /// T is the identity (a Cartesian basis of s and p shells).
+    pub identity: bool,
+}
+
+impl CartLayout {
+    /// The number of Cartesian components.
+    pub fn ncart(&self) -> usize {
+        self.offsets.last().copied().unwrap_or(0)
+    }
 }
 
 /// Diagonal matrix that scales x^lx y^ly z^lz (normalized as x^l) to... unchanged: we keep the

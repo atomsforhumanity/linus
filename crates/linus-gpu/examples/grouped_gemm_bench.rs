@@ -6,7 +6,7 @@
 //!   cargo run --release -p linus-gpu --features gpu --example grouped_gemm_bench -- [--count 256]
 
 mod common;
-use common::device_ms;
+use common::{device_ms, median};
 use linus_gpu::blas::{Blas, GemmDims, GemmShape, MatMut, MatRef, Op};
 use linus_gpu::kernels::vgemm::{Vgemm, VgemmProduct, VgemmTile};
 use linus_gpu::{DeviceBuf, Gpu, GpuError};
@@ -22,11 +22,6 @@ impl Lcg {
             .wrapping_add(1442695040888963407);
         ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
     }
-}
-
-fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    v[v.len() / 2]
 }
 
 fn main() -> R<()> {

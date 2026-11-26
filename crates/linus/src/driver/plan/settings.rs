@@ -27,9 +27,9 @@
 use crate::derivatives::hessian::ResolvedCphf;
 use crate::driver::backend::{Family, Placement};
 use crate::driver::options::{
-    nlc_grid_for, AuxBasis, BackendKind, DfLongRange, DfPrecision, DispersionSetting, ExactStorage,
-    Fp32Mode, Fp64Mode, FreqAnalysis, IterationAux, Reference, ResponsePrecision, ScfLoop,
-    Stability, Thermo,
+    nlc_grid_for, AuxBasis, BackendKind, DfJEngine, DfLongRange, DfPrecision, DispersionSetting,
+    ExactStorage, Fp32Mode, Fp64Mode, FreqAnalysis, IterationAux, NuclearAttractionPlace,
+    Reference, ResponsePrecision, ScfLoop, Stability, Thermo,
 };
 use crate::driver::report::CalcType;
 use crate::driver::schema::{self, Concern, Needs};
@@ -174,6 +174,7 @@ pub(crate) fn applies(path: &str, s: &Scope<'_>) -> Applies {
     let jk = o.jk_method();
     let jk_df = matches!(jk, JkMethod::Df { .. });
     let jk_snk = matches!(jk, JkMethod::RijSnk { .. });
+    let jk_cgk = matches!(jk, JkMethod::RijCgk { .. });
     let jk_exact = jk == JkMethod::Exact;
     let exact_direct = jk_exact && o.jk.exact_storage().resolved() == ExactStorage::Direct;
     let scf_jk_cpu = !(s.on_device)(Family::Jk);
@@ -185,10 +186,16 @@ pub(crate) fn applies(path: &str, s: &Scope<'_>) -> Applies {
         p if p.starts_with("solvent.") => Used,
         // the J/K method
         "jk.kind" => Used,
-        "jk.aux" if jk_df || jk_snk => Used,
+        "jk.aux" if jk_df || jk_snk || jk_cgk => Used,
         "jk.aux" => no("jk exact has no auxiliary basis"),
-        "jk.k_grid" if jk_snk => Used,
-        "jk.k_grid" => no("jk.k_grid is the seminumerical exchange's grid (jk rij_snk)"),
+        "jk.k_grid" if (jk_snk || jk_cgk) && s.method.exchange.is_none() => no(
+            "jk.k_grid is the grid of the seminumerical and grid-based exchange, and the method has \
+             no exact exchange",
+        ),
+        "jk.k_grid" if jk_snk || jk_cgk => Used,
+        "jk.k_grid" => no(
+            "jk.k_grid is the grid of the seminumerical and grid-based exchange (jk rij_snk, rij_cgk)",
+        ),
         "jk.exact_storage" if jk_exact => Used,
         "jk.exact_storage" => no("jk.exact_storage is for jk exact"),
         "jk.screening" if jk_exact => Used,
@@ -206,6 +213,9 @@ pub(crate) fn applies(path: &str, s: &Scope<'_>) -> Applies {
         "jk.df_long_range" if scf_jk_cpu => Used,
         "jk.df_long_range" => Contingent("the SCF's J/K falls back to the CPU"),
         "jk.incremental" if exact_direct || jk_snk => Used,
+        "jk.incremental" if jk_cgk => no(
+            "compensated grid-K builds every K from the density (its K is affine in D, not linear)",
+        ),
         "jk.incremental" => no(
             "incremental builds are for integral-direct exact J/K and the seminumerical exchange",
         ),
@@ -243,12 +253,29 @@ pub(crate) fn applies(path: &str, s: &Scope<'_>) -> Applies {
         "precision.response" => no("the response's exact exchange runs in double precision"),
         "backend.scf_loop" if (s.on_device)(Family::Jk) => Used,
         "backend.scf_loop" => no("the SCF's J/K runs on the CPU"),
+        "backend.df_j" if !(s.on_device)(Family::Jk) => no(
+            "the SCF's J/K runs on the CPU (df_j is the engine of a GPU's density-fitted J)",
+        ),
+        "backend.df_j" if o.backend.df_j() == DfJEngine::Direct && jk_df && s.method.exchange.is_some() => {
+            no("df_j direct builds J alone, and jk df's exchange needs the stored tensor (use stored or auto, or jk rij_cgk)")
+        }
+        "backend.df_j" if o.backend.df_j() == DfJEngine::Direct && o.solvent.is_some() => no(
+            "df_j direct does not hand its fit to the implicit solvent's Coulomb term (use stored or auto)",
+        ),
+        "backend.df_j" => Used,
+        "backend.nuclear_attraction" if !(s.on_device)(Family::Jk) => no(
+            "the SCF's J/K runs on the CPU (V goes to the device beside a device J/K's setup)",
+        ),
+        "backend.nuclear_attraction" => Used,
         // grids
         "grid.xc" | "grid.kernel" if dft => Used,
         "grid.xc" | "grid.kernel" => no("Hartree-Fock has no XC quadrature"),
         "grid.nlc" if s.method.vv10 => Used,
         "grid.nlc" => no("grid.nlc is VV10's grid (-V functionals)"),
         "grid.response" if dft || jk_snk => Used,
+        "grid.response" if jk_cgk => no(
+            "compensated grid-K's gradient always differentiates its grid (the weights and the points)",
+        ),
         "grid.response" => no("grid.response is for the XC and seminumerical-exchange grids"),
         // the SCF
         "scf.convergence" | "scf.e_tol" | "scf.g_tol" | "scf.max_iter" | "scf.guess"
@@ -290,9 +317,10 @@ pub(crate) fn applies(path: &str, s: &Scope<'_>) -> Applies {
         "scf.stability_hessian_check" => no("the zero-mode check is for open-shell Hessians"),
         "scf.two_cycle" => Contingent("the energy cycles between two determinants"),
         "scf.plateau_window" => Contingent("the SCF reaches scf.max_iter"),
-        "scf.escalate" => Contingent("DIIS stagnates or the SCF spends 2/3 of scf.max_iter"),
+        "scf.escalate" => Contingent("DIIS stagnates or blows up, or the SCF spends 2/3 of scf.max_iter"),
         "scf.stagnation_window" if o.scf.escalate() => Contingent("DIIS stagnates"),
-        "scf.stagnation_window" => no("scf.escalate is off"),
+        "scf.blowup_window" if o.scf.escalate() => Contingent("DIIS blows up"),
+        "scf.stagnation_window" | "scf.blowup_window" => no("scf.escalate is off"),
         // the response equations (Hessians: the table's calctype half)
         "response.tol" | "response.field_tol" => Used,
         "response.iteration_aux" if jk_df && !(s.on_device)(Family::ResponseJk) => Used,
@@ -348,6 +376,12 @@ pub(crate) struct RunFacts<'a> {
     pub response: Option<&'a ResolvedCphf>,
     /// The implicit solvent's SCF mode.
     pub solvent_scf: Option<PcmScfMode>,
+    /// The engine of the SCF's density-fitted J on the device (`stored` or `direct`) and why;
+    /// None when no device J/K's setup decided it.
+    pub df_j: Option<(&'static str, String)>,
+    /// Where the SCF's nuclear attraction ran, or is planned to (`gpu` or `cpu`), and why; None
+    /// when no device J/K's setup decided it.
+    pub nuclear_attraction: Option<(&'static str, String)>,
 }
 
 /// Sets `path` (dotted) in the object `v` to `x`, creating the groups on the way.
@@ -393,7 +427,7 @@ impl CalcContext {
     /// calctype, `not_applicable` when only in calctypes not declared. Contingent settings pass.
     pub(crate) fn check_settings(&self) -> Result<(), LinusError> {
         let (na, nb) = self.mol.nalpha_nbeta().map_err(LinusError::Input)?;
-        let open_shell = !self.plan.restricted().unwrap_or(na == nb);
+        let open_shell = !self.plan.restricted_for(na, nb);
         // backend gpu: the GPU's kernels must cover the basis sets of a declared calctype's
         // device families (D40)
         if let (Some(why), BackendKind::Gpu) = (self.plan.uncovered(), self.plan.backend().kind()) {
@@ -440,7 +474,7 @@ impl CalcContext {
         let mut opts = self.plan.request.clone();
         opts.freq = freq;
         let (na, nb) = self.mol.nalpha_nbeta().map_err(LinusError::Input)?;
-        let open_shell = !self.plan.restricted().unwrap_or(na == nb);
+        let open_shell = !self.plan.restricted_for(na, nb);
         let on_device = |k: Family| self.placement(k) == Some(Placement::Device);
         let scope = Scope {
             opts: &opts,
@@ -522,7 +556,13 @@ impl CalcContext {
             if o.jk.k_grid() == GridChoice::Auto {
                 why(
                     "jk.k_grid",
-                    "auto: the ORCA-like COSX grids of DefGrid2".into(),
+                    match jk {
+                        JkMethod::RijCgk { .. } => {
+                            "auto: rij_cgk's default (one COSX grid, level 2)"
+                        }
+                        _ => "auto: the ORCA-like COSX grids of DefGrid2",
+                    }
+                    .into(),
                 );
             }
         }
@@ -585,6 +625,29 @@ impl CalcContext {
                     Value::String(p.precision.setting().into()),
                 );
                 why("precision.fp64", p.auto_note.clone().unwrap_or_default());
+            }
+            // (not where the J/K's device setup gave the SCF to the CPU after deciding)
+            let jk_on_cpu = matches!(self.record.setup(Family::Jk), Some(Some(_)));
+            if let (DfJEngine::Auto, Some((engine, reason)), false) =
+                (o.backend.df_j(), &run.df_j, jk_on_cpu)
+            {
+                set(&mut v, "backend.df_j", Value::String((*engine).into()));
+                why("backend.df_j", format!("auto: {engine} ({reason})"));
+            }
+            // (where V ran, even where the J/K's device setup then gave the SCF to the CPU: V's
+            // device pass does not depend on it)
+            if let (NuclearAttractionPlace::Auto, Some((place, reason))) =
+                (o.backend.nuclear_attraction(), &run.nuclear_attraction)
+            {
+                set(
+                    &mut v,
+                    "backend.nuclear_attraction",
+                    Value::String((*place).into()),
+                );
+                why(
+                    "backend.nuclear_attraction",
+                    format!("auto: {place} ({reason})"),
+                );
             }
             if o.backend.scf_loop() == ScfLoop::Auto {
                 let on = self.placement(Family::ScfLoop) == Some(Placement::Device);

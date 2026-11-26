@@ -8,13 +8,14 @@
 //! values of functions that are negligible on most of the block's batches: 1.6-2x the flops of
 //! per-batch products on u1an39 and ts61 (def2-TZVP).
 //!
-//! [`XcLayout`] finds the per-batch lists once per geometry, on the device: each block is
-//! collocated and a kernel takes the CPU's value test per batch and function (`xcb_flags`).
-//! A call then collocates each block as before, copies every batch's kept functions into a
-//! compressed per-batch array (`xcb_compress`), and runs the per-batch products of a chunk of
-//! batches in one launch of the variable-size batched GEMM ([`crate::kernels::vgemm`]). The
-//! potential of each batch is added to a fixed-point accumulator (`detsum`): exact and
-//! independent of the order of the batches.
+//! [`XcLayout`] finds the per-batch lists once per geometry, on the device: one screening kernel
+//! per (l, pure) class takes the CPU's value test per batch and function
+//! (`kernels::colloc::generate_screen`, the kept functions as bits). A call then collocates
+//! every batch's kept functions straight into its compressed per-batch array (one launch per
+//! class and chunk, `kernels::colloc::generate_batched`, [`XcLayout::prepare`]) and runs the
+//! per-batch products of a chunk of batches in one launch of the variable-size batched GEMM
+//! ([`crate::kernels::vgemm`]) or cuBLAS's grouped GEMM. The potential of each batch is added to
+//! a fixed-point accumulator (`detsum`): exact and independent of the order of the batches.
 //!
 //! Batch descriptor (`BD` i64 per batch, `bd[BD j + field]`): first grid point, points,
 //! kept functions, first point within the block, offset of its function lists, offsets of its
@@ -123,6 +124,24 @@ pub(crate) fn chunks(
     out
 }
 
+/// `parts` one after another, copied in parallel.
+pub(crate) fn par_concat(parts: &[&[i32]]) -> Vec<i32> {
+    use rayon::prelude::*;
+    let total = parts.iter().map(|p| p.len()).sum();
+    let mut out = vec![0i32; total];
+    let mut dst: Vec<&mut [i32]> = Vec::with_capacity(parts.len());
+    let mut rest = &mut out[..];
+    for p in parts {
+        let (a, b) = rest.split_at_mut(p.len());
+        dst.push(a);
+        rest = b;
+    }
+    dst.into_par_iter()
+        .zip(parts.par_iter())
+        .for_each(|(d, s)| d.copy_from_slice(s));
+    out
+}
+
 /// The batch descriptors (BD per batch; offsets within each batch's chunk) and the function
 /// lists (local, global) of `batches` for `chunks` with `ncomp` components of compressed
 /// values.
@@ -132,7 +151,7 @@ pub(crate) fn descriptors(
     ncomp: usize,
 ) -> (Vec<i64>, Vec<i32>, Vec<i32>) {
     let mut bd = vec![0i64; BD * batches.len()];
-    let (mut lf, mut gf) = (Vec::new(), Vec::new());
+    let mut fl = 0usize;
     for c in chunks {
         let (mut xo, mut dd) = (0usize, 0usize);
         for j in c.j0..c.j1 {
@@ -143,16 +162,30 @@ pub(crate) fn descriptors(
             d[BD_NP] = h.np as i64;
             d[BD_NF] = nf as i64;
             d[BD_Q0] = h.q0 as i64;
-            d[BD_FL] = lf.len() as i64;
+            d[BD_FL] = fl as i64;
             d[BD_PHI] = (ncomp * xo) as i64;
             d[BD_X] = xo as i64;
             d[BD_D] = dd as i64;
-            lf.extend_from_slice(&h.local);
-            gf.extend_from_slice(&h.global);
+            fl += nf;
             xo += nf * h.np;
             dd += nf * nf;
         }
     }
+    // the lists in chunk order: the batches in order when the chunks run over them in order
+    let in_order = chunks.first().is_none_or(|c| c.j0 == 0)
+        && chunks.windows(2).all(|w| w[0].j1 == w[1].j0)
+        && chunks.last().is_none_or(|c| c.j1 == batches.len());
+    let order: Vec<usize> = if in_order {
+        (0..batches.len()).collect()
+    } else {
+        chunks.iter().flat_map(|c| c.j0..c.j1).collect()
+    };
+    let locals: Vec<&[i32]> = order.iter().map(|&j| batches[j].local.as_slice()).collect();
+    let globals: Vec<&[i32]> = order
+        .iter()
+        .map(|&j| batches[j].global.as_slice())
+        .collect();
+    let (lf, gf) = rayon::join(|| par_concat(&locals), || par_concat(&globals));
     (bd, lf, gf)
 }
 
@@ -186,8 +219,6 @@ mod device {
         "xc_batched",
         || Cow::Owned(format!("{}\n{}", crate::detsum::DEVICE_SRC, KERNELS)),
         &[
-            "xcb_flags",
-            "xcb_compress",
             "xcb_gather_d",
             "xcb_densities",
             "xcb_weights",
@@ -198,8 +229,6 @@ mod device {
     );
 
     pub(crate) struct Kernels {
-        pub(crate) flags: Kernel,
-        pub(crate) compress: Kernel,
         pub(crate) gather_d: Kernel,
         pub(crate) densities: Kernel,
         pub(crate) weights: Kernel,
@@ -213,8 +242,6 @@ mod device {
             let src = MODULE.source();
             let k = |e: &str| gpu.kernel(MODULE.name, &src, e);
             Ok(Kernels {
-                flags: k("xcb_flags")?,
-                compress: k("xcb_compress")?,
                 gather_d: k("xcb_gather_d")?,
                 densities: k("xcb_densities")?,
                 weights: k("xcb_weights")?,
@@ -239,7 +266,6 @@ mod device {
     /// A block on the device: its collocation work (as `GpuXc`'s blocks) and its batches.
     pub(crate) struct LBlock {
         pub(crate) p0: usize,
-        pub(crate) np: usize,
         pub(crate) nf: usize,
         /// (colloc kernel index, shells, offset in the flat lists)
         pub(crate) groups: Vec<(usize, usize, usize)>,
@@ -263,13 +289,34 @@ mod device {
     }
 
     /// How a chunk's blocks are collocated: at the layout's own order, or with the kernels of
-    /// another order and their components (from [`XcLayout::kernels_of_order`]; the gradient's
-    /// and the Hessian's first-order values on their higher-order layouts).
+    /// another order (from [`XcLayout::kernels_of_order`]; the gradient's and the Hessian's
+    /// first-order values on their higher-order layouts).
     #[derive(Clone, Copy)]
     pub(crate) enum Collocation<'a> {
         Own,
-        With(&'a [Kernel], usize),
+        With(&'a OrderKernels),
     }
+
+    /// The collocation kernels of one derivative order for the basis's (l, pure) classes, per
+    /// batch into the compressed values (`colloc::generate_batched`), and their components.
+    pub(crate) struct OrderKernels {
+        pub(crate) batched: Vec<Kernel>,
+        pub(crate) ncomp: usize,
+    }
+
+    /// The direct collocation's work list of a chunking: per entry (a batch and one of its
+    /// shells that keeps a function) its batch, global shell and the offset of the shell's kept
+    /// positions in the layout's `fmap`; the entries of chunk c and class k at `ranges[c][k]`
+    /// (offset, count).
+    pub(crate) struct DirectList {
+        ent: DeviceBuf<i32>,
+        ranges: Vec<Vec<(usize, usize)>>,
+    }
+
+    /// Per block and (l, pure) class, the direct collocation's entries of the block's batches
+    /// (batch, global shell, offset of the shell's functions' kept positions in `fmap`), in
+    /// batch order.
+    type BlockLists = Vec<Vec<Vec<i32>>>;
 
     /// The per-batch screening of a grid for one collocation order and threshold (see the
     /// module docs), with the device tables and the kernels that work on it: the unit the XC
@@ -283,16 +330,21 @@ mod device {
         pub(crate) bd: DeviceBuf<i64>,
         pub(crate) lf: DeviceBuf<i32>,
         pub(crate) gf: DeviceBuf<i32>,
-        /// Collocation of a block: kernels per (l, pure), shell lists and local first
-        /// functions, the shell tables.
-        colloc: Vec<Kernel>,
+        /// Collocation of each batch into its compressed values: kernels per (l, pure) and the
+        /// shell tables.
+        colloc: OrderKernels,
+        /// The direct collocation's work list per chunk (rebuilt with the chunks).
+        direct: DirectList,
+        /// The kept positions of every block's shells' functions (-1: not kept), which the
+        /// entries of `direct` point into (the same for any chunking).
+        fmap: DeviceBuf<i32>,
+        /// Every block's direct collocation entries per class (their functions' kept positions
+        /// in the direct list's `fmap`).
+        block_lists: BlockLists,
         /// The basis's (l, pure) classes, in the kernels' order.
         keys: Vec<(usize, bool)>,
-        lists: DeviceBuf<i32>,
-        aos: DeviceBuf<i32>,
         tables: ShellTables,
         pub(crate) max_block_nf: usize,
-        pub(crate) max_block_np: usize,
         /// Largest workspaces over the chunks: sum nf np, sum nf^2.
         pub(crate) max_x: usize,
         pub(crate) max_d: usize,
@@ -301,10 +353,8 @@ mod device {
         /// The per-batch kernels and the variable-size batched GEMM of the engines on it.
         pub(crate) k: Kernels,
         pub(crate) vg: Vgemm,
-        /// Setup seconds: the blocks (host), the per-batch value test on the device (tables,
-        /// kernels, collocation, flags, their download), the batches' lists, chunks and
-        /// descriptors (host) with their uploads.
-        pub(crate) setup_times: [f64; 3],
+        /// The setup's parts.
+        pub(crate) setup_times: crate::xc::XcLayoutTimes,
     }
 
     impl XcLayout {
@@ -335,7 +385,7 @@ mod device {
             };
             let (mut lists, mut aos) = (Vec::<i32>::new(), Vec::<i32>::new());
             let mut lblocks = Vec::with_capacity(bl.len());
-            let (mut max_nf, mut max_np) = (0, 0);
+            let mut max_nf = 0;
             let mut nbatch = 0;
             for (b, sp) in bl.iter().zip(&split) {
                 let mut groups = Vec::new();
@@ -352,10 +402,8 @@ mod device {
                     }
                 }
                 max_nf = max_nf.max(b.funcs.len());
-                max_np = max_np.max(b.np);
                 lblocks.push(LBlock {
                     p0: b.p0,
-                    np: b.np,
                     nf: b.funcs.len(),
                     groups,
                     j0: nbatch,
@@ -363,83 +411,91 @@ mod device {
                 });
                 nbatch += sp.len();
             }
-            let lists_d = gpu.upload(if lists.is_empty() { &[0] } else { &lists })?;
-            let aos_d = gpu.upload(if aos.is_empty() { &[0] } else { &aos })?;
             let tables = ShellTables::new(gpu, basis)?;
-            // the value test at the screening order, on the device
+            // the value test at the screening order, on the device: one launch per (l, pure)
+            // class over the (block, shell) entries, each batch's kept functions as bits (the
+            // words of its block's functions)
             let ksrc = colloc::module_source(basis, screen_order);
-            let colloc_s = keys
+            let screen_k = keys
                 .iter()
                 .map(|&(l, p)| {
-                    gpu.kernel("colloc", &ksrc, &colloc::kernel_name(l, p, screen_order))
+                    gpu.kernel(
+                        "colloc",
+                        &ksrc,
+                        &colloc::screen_kernel_name(l, p, screen_order),
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let ncs = crate::cpu::ncomp(screen_order);
             let kern = Kernels::new(gpu)?;
-            // provisional descriptors: points and block offsets only
+            // provisional descriptors: points, block offsets and the batches' first flag words
             let mut bd0 = vec![0i64; BD * nbatch.max(1)];
-            for (b, (lb, sp)) in lblocks.iter().zip(&split).enumerate() {
-                let _ = b;
+            let mut words = 0usize;
+            let wpb: Vec<usize> = lblocks.iter().map(|lb| lb.nf.div_ceil(32)).collect();
+            for (lb, (sp, &w)) in lblocks.iter().zip(split.iter().zip(&wpb)) {
                 for (i, &(q0, np)) in sp.iter().enumerate() {
                     let d = &mut bd0[BD * (lb.j0 + i)..BD * (lb.j0 + i + 1)];
                     d[BD_P0] = (lb.p0 + q0) as i64;
                     d[BD_NP] = np as i64;
                     d[BD_Q0] = q0 as i64;
+                    d[BD_FL] = words as i64;
+                    words += w;
                 }
             }
             let bd_d0 = gpu.upload(&bd0)?;
-            let fstride = max_nf.max(1);
-            let mut flags = gpu.alloc_zeros::<u8>((nbatch * fstride).max(1))?;
+            let mut flags = gpu.alloc_zeros::<u32>(words.max(1))?;
             let x = gpu.upload(&grid.x)?;
             let y = gpu.upload(&grid.y)?;
             let z = gpu.upload(&grid.z)?;
-            let phi = gpu.alloc_zeros::<f64>((max_nf * ncs * max_np).max(1))?;
-            let ws = gpu.warp_size() as usize;
+            // per class: (first batch, batches, shell, its first function in the block)
+            let mut ents: Vec<Vec<i32>> = vec![Vec::new(); keys.len()];
+            let mut max_nb = 0;
             for lb in &lblocks {
                 if lb.nf == 0 || lb.j1 == lb.j0 {
                     continue;
                 }
-                let at = |buf: &DeviceBuf<f64>| buf.at(lb.p0);
+                max_nb = max_nb.max(lb.j1 - lb.j0);
                 for &(ki, nsh, off) in &lb.groups {
-                    // SAFETY: the block's shells of this kernel's (l, pure) with their local
-                    // first functions (< nf); the output holds nf ncs np values.
-                    unsafe {
-                        tables.launch(
-                            gpu,
-                            &colloc_s[ki],
-                            nsh,
-                            lists_d.at(off),
-                            aos_d.at(off),
-                            [at(&x), at(&y), at(&z)],
-                            lb.np,
-                            ncs * lb.np,
-                            lb.np,
-                            phi.ptr(),
-                        )
-                    }?;
+                    for q in off..off + nsh {
+                        ents[ki].extend([lb.j0 as i32, (lb.j1 - lb.j0) as i32, lists[q], aos[q]]);
+                    }
                 }
-                let per_block = 256 / ws;
-                let cfg = Launch {
-                    grid: (lb.nf.div_ceil(per_block) as u32, (lb.j1 - lb.j0) as u32, 1),
-                    block: (256, 1, 1),
-                    shared_bytes: 0,
+            }
+            for (ki, e) in ents.iter().enumerate() {
+                let ne = e.len() / 4;
+                if ne == 0 {
+                    continue;
+                }
+                let (l, pure) = keys[ki];
+                let nf = if pure {
+                    2 * l + 1
+                } else {
+                    (l + 1) * (l + 2) / 2
                 };
-                // SAFETY: matches xcb_flags; reads the block's collocation (nf ncs np) at its
-                // batches' points, writes flags of batches j0.. (< nbatch) and functions < nf
-                // (<= fstride).
+                let de = gpu.upload(e)?;
+                let cfg = Launch {
+                    grid: (ne as u32, 1, 1),
+                    block: (128, 1, 1),
+                    shared_bytes: (max_nb * nf) as u32,
+                };
+                // SAFETY: matches the screening kernel: entries of this class (blocks' batches
+                // < nbatch, shells of the class, first functions + nf <= the block's
+                // functions), the grid's coordinates at the blocks' points; the bits of batch j
+                // at its word offset (bd0) within `words`; max_nb nf bytes of shared memory.
                 unsafe {
                     gpu.launch(
-                        &kern.flags,
+                        &screen_k[ki],
                         cfg,
                         &[
-                            Arg::I32(lb.nf as i32),
-                            Arg::I32(ncs as i32),
-                            Arg::I32(lb.np as i32),
-                            Arg::F64(thresh),
+                            Arg::buf(&x),
+                            Arg::buf(&y),
+                            Arg::buf(&z),
                             Arg::buf(&bd_d0),
-                            Arg::I32(lb.j0 as i32),
-                            Arg::I64(fstride as i64),
-                            Arg::buf(&phi),
+                            Arg::buf(&de),
+                            Arg::F64(thresh),
+                            Arg::buf(&tables.p0),
+                            Arg::buf(&tables.center),
+                            Arg::buf(&tables.exp),
+                            Arg::buf(&tables.coef),
                             Arg::buf_mut(&mut flags),
                         ],
                     )
@@ -447,41 +503,111 @@ mod device {
             }
             let hf = gpu.download(&flags)?;
             let t_screen = t0.elapsed().as_secs_f64();
-            drop((phi, flags, bd_d0));
-            // the kept functions per batch
-            let mut host = Vec::with_capacity(nbatch);
-            for (b, (lb, sp)) in bl.iter().zip(lblocks.iter().zip(&split)) {
-                for (i, &(q0, np)) in sp.iter().enumerate() {
-                    let j = lb.j0 + i;
-                    let (mut local, mut global) = (Vec::new(), Vec::new());
-                    for (f, &gfun) in b.funcs.iter().enumerate() {
-                        if hf[j * fstride + f] != 0 {
-                            local.push(f as i32);
-                            global.push(gfun as i32);
-                        }
-                    }
-                    host.push(HostBatch {
-                        p0: lb.p0 + q0,
-                        np,
-                        q0,
-                        local,
-                        global,
-                    });
-                }
-            }
+            drop((flags, bd_d0, x, y, z));
+            // the kept functions per batch, the blocks in parallel
+            let host: Vec<HostBatch> = {
+                use rayon::prelude::*;
+                bl.par_iter()
+                    .zip(lblocks.par_iter())
+                    .zip(split.par_iter())
+                    .zip(wpb.par_iter())
+                    .flat_map_iter(|(((b, lb), sp), &w)| {
+                        let (hf, bd0) = (&hf, &bd0);
+                        sp.iter().enumerate().map(move |(i, &(q0, np))| {
+                            let wo = bd0[BD * (lb.j0 + i) + BD_FL] as usize;
+                            let (mut local, mut global) = (Vec::new(), Vec::new());
+                            for (k, &word) in hf[wo..wo + w].iter().enumerate() {
+                                let mut m = word;
+                                while m != 0 {
+                                    let f = 32 * k + m.trailing_zeros() as usize;
+                                    m &= m - 1;
+                                    local.push(f as i32);
+                                    global.push(b.funcs[f] as i32);
+                                }
+                            }
+                            HostBatch {
+                                p0: lb.p0 + q0,
+                                np,
+                                q0,
+                                local,
+                                global,
+                            }
+                        })
+                    })
+                    .collect()
+            };
             let ncomp = crate::cpu::ncomp(order);
             let bb: Vec<(usize, usize)> = lblocks.iter().map(|b| (b.j0, b.j1)).collect();
             let ch = chunks(&host, &bb, ncomp, budget);
             let (bd, lf, gf) = descriptors(&host, &ch, ncomp);
             let (values, _) = work(&host);
-            let colloc_k = if order == screen_order {
-                colloc_s
-            } else {
-                let src = colloc::module_source(basis, order);
-                keys.iter()
-                    .map(|&(l, p)| gpu.kernel("colloc", &src, &colloc::kernel_name(l, p, order)))
-                    .collect::<Result<Vec<_>, _>>()?
+            let colloc_k = order_kernels(gpu, basis, &keys, order)?;
+            // per block and class the kept shells of its batches (in batch order) and their
+            // functions' kept positions (fmap), the blocks in parallel
+            let class: Vec<usize> = (0..basis.shells.len()).map(key_of).collect();
+            let nclass = keys.len();
+            let mut parts: Vec<(Vec<Vec<i32>>, Vec<i32>)> = {
+                use rayon::prelude::*;
+                bl.par_iter()
+                    .zip(lblocks.par_iter())
+                    .map(|(b, lb)| {
+                        let mut lists = vec![Vec::new(); nclass];
+                        let mut fm = Vec::new();
+                        // the block's function -> its shell (in the block's list)
+                        let mut fsh = vec![0u32; b.funcs.len()];
+                        for (i, (&sh, &a)) in b.shells.iter().zip(&b.ao_local).enumerate() {
+                            fsh[a..a + basis.shells[sh].nfunc()].fill(i as u32);
+                        }
+                        let mut pos = vec![-1i32; b.funcs.len()];
+                        for (j, h) in host.iter().enumerate().take(lb.j1).skip(lb.j0) {
+                            for (q, &l) in h.local.iter().enumerate() {
+                                pos[l as usize] = q as i32;
+                            }
+                            let mut last = u32::MAX;
+                            for &l in &h.local {
+                                let i = fsh[l as usize];
+                                if i == last {
+                                    continue;
+                                }
+                                last = i;
+                                let (sh, a) = (b.shells[i as usize], b.ao_local[i as usize]);
+                                lists[class[sh]].extend([j as i32, sh as i32, fm.len() as i32]);
+                                fm.extend_from_slice(&pos[a..a + basis.shells[sh].nfunc()]);
+                            }
+                            for &l in &h.local {
+                                pos[l as usize] = -1;
+                            }
+                        }
+                        (lists, fm)
+                    })
+                    .collect()
             };
+            // the blocks' kept positions one after another: their offsets into the entries
+            let fmap = {
+                use rayon::prelude::*;
+                let bases: Vec<i32> = parts
+                    .iter()
+                    .scan(0i32, |acc, (_, fm)| {
+                        let o = *acc;
+                        *acc += fm.len() as i32;
+                        Some(o)
+                    })
+                    .collect();
+                parts
+                    .par_iter_mut()
+                    .zip(bases.par_iter())
+                    .for_each(|((lists, _), &o)| {
+                        for list in lists.iter_mut() {
+                            for e in list.as_chunks_mut::<3>().0 {
+                                e[2] += o;
+                            }
+                        }
+                    });
+                let fms: Vec<&[i32]> = parts.iter().map(|(_, fm)| fm.as_slice()).collect();
+                par_concat(&fms)
+            };
+            let block_lists: BlockLists = parts.into_iter().map(|(lists, _)| lists).collect();
+            let direct = direct_list(gpu, &block_lists, &ch, nclass)?;
             Ok(XcLayout {
                 ncomp,
                 max_x: ch.iter().map(|c| c.x_len).max().unwrap_or(0),
@@ -493,143 +619,52 @@ mod device {
                 lf: gpu.upload(if lf.is_empty() { &[0] } else { &lf })?,
                 gf: gpu.upload(if gf.is_empty() { &[0] } else { &gf })?,
                 colloc: colloc_k,
+                direct,
+                fmap: gpu.upload(if fmap.is_empty() { &[0] } else { &fmap })?,
+                block_lists,
                 keys,
-                lists: lists_d,
-                aos: aos_d,
                 tables,
                 max_block_nf: max_nf,
-                max_block_np: max_np,
                 values,
                 k: kern,
                 vg: vgemm(gpu)?,
-                setup_times: [
-                    t_blocks,
-                    t_screen - t_blocks,
-                    t0.elapsed().as_secs_f64() - t_screen,
-                ],
+                setup_times: crate::xc::XcLayoutTimes {
+                    blocks: t_blocks,
+                    screen: t_screen - t_blocks,
+                    lists: t0.elapsed().as_secs_f64() - t_screen,
+                },
             })
         }
 
+        /// Takes `ch` (consecutive runs of whole blocks covering every block, an engine's own
+        /// chunking) as the layout's chunks: the batch descriptors, function lists, workspace
+        /// sizes and the direct collocation's work list follow them. The batch descriptors (BD
+        /// per batch, as uploaded), for the engine's own tables.
+        pub(crate) fn set_chunks(
+            &mut self,
+            gpu: &Gpu,
+            ch: Vec<Chunk>,
+        ) -> Result<Vec<i64>, GpuError> {
+            let (bd, lf, gf) = descriptors(&self.host, &ch, self.ncomp);
+            self.max_x = ch.iter().map(|c| c.x_len).max().unwrap_or(0);
+            self.max_d = ch.iter().map(|c| c.d_len).max().unwrap_or(0);
+            self.bd = gpu.upload(if bd.is_empty() { &[0] } else { &bd })?;
+            self.lf = gpu.upload(if lf.is_empty() { &[0] } else { &lf })?;
+            self.gf = gpu.upload(if gf.is_empty() { &[0] } else { &gf })?;
+            self.direct = direct_list(gpu, &self.block_lists, &ch, self.keys.len())?;
+            self.chunks = ch;
+            Ok(bd)
+        }
+
         /// Collocation kernels of the basis's (l, pure) classes at derivative `order` (for
-        /// [`XcLayout::collocate_with`]).
+        /// [`XcLayout::prepare`] with [`Collocation::With`]).
         pub(crate) fn kernels_of_order(
             &self,
             gpu: &Gpu,
             basis: &BasisSet,
             order: usize,
-        ) -> Result<Vec<Kernel>, GpuError> {
-            let src = colloc::module_source(basis, order);
-            self.keys
-                .iter()
-                .map(|&(l, p)| gpu.kernel("colloc", &src, &colloc::kernel_name(l, p, order)))
-                .collect()
-        }
-
-        /// Collocates block `b` (all its functions, the layout's order) into `phi` at the
-        /// grid coordinates x, y, z (device buffers of the whole grid).
-        pub(crate) fn collocate(
-            &self,
-            gpu: &Gpu,
-            b: &LBlock,
-            xyz: [&DeviceBuf<f64>; 3],
-            phi: &mut DeviceBuf<f64>,
-        ) -> Result<(), GpuError> {
-            self.collocate_with(gpu, &self.colloc, self.ncomp, b, xyz, phi)
-        }
-
-        /// [`XcLayout::collocate`] with the kernels `kern` of another derivative order
-        /// (`ncomp` components; from [`XcLayout::kernels_of_order`]).
-        pub(crate) fn collocate_with(
-            &self,
-            gpu: &Gpu,
-            kern: &[Kernel],
-            ncomp: usize,
-            b: &LBlock,
-            xyz: [&DeviceBuf<f64>; 3],
-            phi: &mut DeviceBuf<f64>,
-        ) -> Result<(), GpuError> {
-            let at = |buf: &DeviceBuf<f64>| buf.at(b.p0);
-            if ncomp * b.nf * b.np > phi.len() || kern.len() != self.keys.len() {
-                return Err(GpuError::Contract(
-                    "XC: collocation buffer too small".into(),
-                ));
-            }
-            for &(ki, nsh, off) in &b.groups {
-                // SAFETY: the block's shells of this kernel's (l, pure) with their local first
-                // functions (< nf); the output holds nf ncomp np values (checked).
-                unsafe {
-                    self.tables.launch(
-                        gpu,
-                        &kern[ki],
-                        nsh,
-                        self.lists.at(off),
-                        self.aos.at(off),
-                        [at(xyz[0]), at(xyz[1]), at(xyz[2])],
-                        b.np,
-                        ncomp * b.np,
-                        b.np,
-                        phi.ptr(),
-                    )
-                }?;
-            }
-            Ok(())
-        }
-
-        /// Copies block `b`'s batches' kept functions from its collocation `phi` into the
-        /// compressed array `phic` (f64) and/or `phic32` (f32) of its chunk.
-        pub(crate) fn compress(
-            &self,
-            gpu: &Gpu,
-            b: &LBlock,
-            phi: &DeviceBuf<f64>,
-            phic: Option<&mut DeviceBuf<f64>>,
-            phic32: Option<&mut DeviceBuf<f32>>,
-        ) -> Result<(), GpuError> {
-            self.compress_nc(gpu, self.ncomp, b, phi, phic, phic32)
-        }
-
-        /// [`XcLayout::compress`] of a collocation with `nc` (<= the layout's) components.
-        pub(crate) fn compress_nc(
-            &self,
-            gpu: &Gpu,
-            nc: usize,
-            b: &LBlock,
-            phi: &DeviceBuf<f64>,
-            phic: Option<&mut DeviceBuf<f64>>,
-            phic32: Option<&mut DeviceBuf<f32>>,
-        ) -> Result<(), GpuError> {
-            if b.j1 == b.j0 {
-                return Ok(());
-            }
-            assert!(nc <= self.ncomp);
-            let per = (b.j0..b.j1)
-                .map(|j| nc * self.host[j].global.len() * self.host[j].np)
-                .max()
-                .unwrap_or(0);
-            if per == 0 {
-                return Ok(());
-            }
-            let p64 = phic.map_or(DevPtr::null(), |p| p.ptr());
-            let p32 = phic32.map_or(DevPtr::null(), |p| p.ptr());
-            // SAFETY: matches xcb_compress; reads the block's collocation (nf ncomp np) at its
-            // batches' kept functions (< nf) and points, writes each batch's compressed values
-            // at its offset within the chunk's workspaces (sized for the largest chunk).
-            unsafe {
-                gpu.launch(
-                    &self.k.compress,
-                    per_batch(per, b.j1 - b.j0, 256),
-                    &[
-                        Arg::I32(nc as i32),
-                        Arg::I32(b.np as i32),
-                        Arg::buf(&self.bd),
-                        Arg::I32(b.j0 as i32),
-                        Arg::buf(&self.lf),
-                        Arg::buf(phi),
-                        p64.into(),
-                        p32.into(),
-                    ],
-                )
-            }
+        ) -> Result<OrderKernels, GpuError> {
+            order_kernels(gpu, basis, &self.keys, order)
         }
 
         /// The largest nf^2 and nf np over the batches of chunk `c`.
@@ -640,34 +675,69 @@ mod device {
             })
         }
 
-        /// Collocates every block of chunk `c` with functions (`colloc`) into `phi` at the grid
-        /// coordinates `xyz`, and compresses each into the chunk's `phic` and/or `phic32`.
-        #[allow(clippy::too_many_arguments)]
+        /// Collocates every batch of chunk `c` (with the kernels `colloc`) at the grid coordinates
+        /// `xyz` straight into the chunk's compressed values `phic` and/or `phic32`: one launch
+        /// per (l, pure) class over the chunk's (batch, kept shell) entries, each of the shell's
+        /// kept functions written to its place.
         pub(crate) fn prepare(
             &self,
             gpu: &Gpu,
             c: &Chunk,
             colloc: Collocation<'_>,
             xyz: [&DeviceBuf<f64>; 3],
-            phi: &mut DeviceBuf<f64>,
-            mut phic: Option<&mut DeviceBuf<f64>>,
-            mut phic32: Option<&mut DeviceBuf<f32>>,
+            phic: Option<&mut DeviceBuf<f64>>,
+            phic32: Option<&mut DeviceBuf<f32>>,
         ) -> Result<(), GpuError> {
-            for b in &self.blocks[c.b0..c.b1] {
-                if b.nf == 0 {
+            let ci = self
+                .chunks
+                .iter()
+                .position(|x| x.j0 == c.j0 && x.j1 == c.j1)
+                .ok_or_else(|| GpuError::Contract("XC: a chunk of another layout".into()))?;
+            let kern = match colloc {
+                Collocation::Own => &self.colloc,
+                Collocation::With(k) => k,
+            };
+            if kern.batched.len() != self.keys.len() {
+                return Err(GpuError::Contract(
+                    "XC: collocation kernels of another basis".into(),
+                ));
+            }
+            let p64 = phic.map_or(DevPtr::null(), |p| p.ptr());
+            let p32 = phic32.map_or(DevPtr::null(), |p| p.ptr());
+            for (ki, &(off, n)) in self.direct.ranges[ci].iter().enumerate() {
+                if n == 0 {
                     continue;
                 }
-                let nc = match colloc {
-                    Collocation::Own => {
-                        self.collocate(gpu, b, xyz, phi)?;
-                        self.ncomp
-                    }
-                    Collocation::With(kern, nc) => {
-                        self.collocate_with(gpu, kern, nc, b, xyz, phi)?;
-                        nc
-                    }
+                let cfg = Launch {
+                    grid: (n as u32, 1, 1),
+                    block: (128, 1, 1),
+                    shared_bytes: 0,
                 };
-                self.compress_nc(gpu, nc, b, phi, phic.as_deref_mut(), phic32.as_deref_mut())?;
+                // SAFETY: matches the batched collocation kernel: the entries off.. off + n of
+                // this chunk and class (batches of the chunk, shells of the class, kept
+                // positions < the batch's functions), the grid's coordinates at the batches'
+                // points; each batch's values at its offset within the chunk's workspaces
+                // (sized for the largest chunk).
+                unsafe {
+                    gpu.launch(
+                        &kern.batched[ki],
+                        cfg,
+                        &[
+                            Arg::buf(xyz[0]),
+                            Arg::buf(xyz[1]),
+                            Arg::buf(xyz[2]),
+                            Arg::buf(&self.bd),
+                            Arg::from(self.direct.ent.at(3 * off)),
+                            Arg::buf(&self.fmap),
+                            Arg::buf(&self.tables.p0),
+                            Arg::buf(&self.tables.center),
+                            Arg::buf(&self.tables.exp),
+                            Arg::buf(&self.tables.coef),
+                            p64.into(),
+                            p32.into(),
+                        ],
+                    )
+                }?;
             }
             Ok(())
         }
@@ -727,6 +797,54 @@ mod device {
             }
             out
         }
+    }
+
+    /// The batched collocation kernels of the (l, pure) classes `keys` at `order`.
+    fn order_kernels(
+        gpu: &Gpu,
+        basis: &BasisSet,
+        keys: &[(usize, bool)],
+        order: usize,
+    ) -> Result<OrderKernels, GpuError> {
+        let src = colloc::module_source(basis, order);
+        let k = |name: String| gpu.kernel("colloc", &src, &name);
+        Ok(OrderKernels {
+            batched: keys
+                .iter()
+                .map(|&(l, p)| k(colloc::batched_kernel_name(l, p, order)))
+                .collect::<Result<Vec<_>, _>>()?,
+            ncomp: crate::cpu::ncomp(order),
+        })
+    }
+
+    /// The direct collocation's work list of `chunks` over `nclass` (l, pure) classes: each
+    /// chunk's entries grouped by class (its blocks' lists in block order).
+    fn direct_list(
+        gpu: &Gpu,
+        lists: &BlockLists,
+        chunks: &[Chunk],
+        nclass: usize,
+    ) -> Result<DirectList, GpuError> {
+        let mut parts: Vec<&[i32]> = Vec::new();
+        let mut ranges = Vec::with_capacity(chunks.len());
+        let mut at = 0;
+        for c in chunks {
+            let mut per = Vec::with_capacity(nclass);
+            for k in 0..nclass {
+                let n0 = at;
+                for bl in &lists[c.b0..c.b1] {
+                    parts.push(&bl[k]);
+                    at += bl[k].len() / 3;
+                }
+                per.push((n0, at - n0));
+            }
+            ranges.push(per);
+        }
+        let ent = par_concat(&parts);
+        Ok(DirectList {
+            ent: gpu.upload(if ent.is_empty() { &[0, 0, 0] } else { &ent })?,
+            ranges,
+        })
     }
 
     /// Plans of variable-size batched GEMMs with the default tile.

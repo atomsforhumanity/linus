@@ -23,11 +23,11 @@ pub mod soscf;
 pub(crate) use adiis::Adiis;
 pub use diis::{err_norm, Diis, DiisRule};
 
-pub(crate) use soscf::{rotate, semicanonical_orbitals, Soscf};
+pub(crate) use soscf::{rotate, Soscf};
 
 use super::settings::{DiisDrop, ScfAlgorithm};
 use super::state::OrbitalState;
-use super::{trace, try_diagonalize, ScfIteration};
+use super::{trace, try_diagonalize, try_semicanonical, ScfIteration};
 use faer::{Mat, MatRef, Par};
 use linus_base::linalg::mm;
 use linus_base::progress::Progress;
@@ -222,12 +222,18 @@ impl<'m> Accelerators<'m> {
             if std::mem::take(&mut self.complete) {
                 // the escalation's start: full orbitals from its occupied ones
                 let o = st.occ.as_ref().expect("occupied orbitals");
-                st.c_a = semicanonical_orbitals(&o[0], fa, x, s, par);
-                st.c_b = if restricted {
-                    st.c_a.clone()
-                } else {
-                    semicanonical_orbitals(&o[1], fb, x, s, par)
+                let Some((_, c_a)) = try_semicanonical(&o[0], fa, x, s, par) else {
+                    return Err("non_finite");
                 };
+                st.c_b = if restricted {
+                    c_a.clone()
+                } else {
+                    let Some((_, c_b)) = try_semicanonical(&o[1], fb, x, s, par) else {
+                        return Err("non_finite");
+                    };
+                    c_b
+                };
+                st.c_a = c_a;
             }
             timers.time("soscf", || {
                 let (cs, fs) = if restricted {
@@ -291,7 +297,7 @@ impl<'m> Accelerators<'m> {
                 };
                 (st.eps_b, st.c_b) = (e, c);
             }
-            st.refresh(par);
+            st.refresh_aufbau(par);
             true
         });
         if ok {

@@ -2,21 +2,26 @@
 //! XC family's shared parts.
 //!
 //! The quadrature of linus's CPU integrator (`XcIntegrator` in the `linus` crate) on the same
-//! grid, functional and screening threshold, with the density from the occupied orbitals.
+//! grid, functional and screening threshold, with the density from the occupied orbitals (or
+//! given as density matrices: `GpuXc::compute_densities`, a guess's).
 //! The XC engines (V_xc here, the gradient `crate::grad::xc`, the Hessian's XC terms
 //! `crate::hess::xc`, the CPKS kernel `crate::response::xc`, VV10 [`vv10`]) are composed on
 //! the same parts:
 //! - `layout`: the per-batch screening (`XcLayout`): blocks of consecutive grid batches with
 //!   about `block_points` points ([`blocks`]: a block keeps the shells whose screening radius,
 //!   linus-ints' `Collocator` bound at `func_thresh`, reaches its box), and per batch the
-//!   functions the CPU's value test keeps, compressed per chunk of batches;
-//! - `density`: the grid densities and the per-batch density pass: per chunk the blocks
-//!   collocated (the generated kernels of `kernels::colloc`) and compressed, per spin
-//!   X = phi D_b (and Y = grad phi D_b for tau) for every batch in one launch, then rho,
-//!   grad rho and tau per point;
-//! - `functional`: the functional through linus-xc (libxc on the CPU; the grid's densities
-//!   go to the host once and the derivatives come back once), or a device function in its
-//!   place (VV10's pair sums).
+//!   functions the CPU's value test keeps (screened on the device), compressed per chunk of
+//!   batches;
+//! - `density`: the grid densities and the per-batch density pass: per chunk each batch's kept
+//!   functions collocated straight into its compressed values (the generated kernels of
+//!   `kernels::colloc`), per spin X = phi D_b (and Y = grad phi D_b for tau) for every batch in
+//!   one launch, then rho, grad rho and tau per point;
+//! - `functional`: the functional's derivatives at the grid's densities: libxc's own code
+//!   compiled for the device (`devfunc`, checked against libxc when it is set up), else libxc
+//!   on the host (the densities go to the host once and the derivatives come back once), or a
+//!   device function in its place (VV10's pair sums);
+//! - `partition`: the grid's partition weights on the device (linus-grid's
+//!   `DevicePartition`).
 //!
 //! V_xc per batch and spin: W = 1/2 w vrho phi + w vg . grad phi (vg_k = 2 vsigma_ss
 //! grad_s,k + vsigma_ab grad_s',k), V_b = phi^T W (+ for meta-GGA grad phi^T (1/4 w vtau
@@ -40,12 +45,22 @@ use crate::cpu::{BasisSet, Collocator, Family, Functional, MolecularGrid};
 // without a GPU; only the device side uses it.
 #[cfg_attr(not(feature = "gpu"), allow(dead_code))]
 pub(crate) mod layout;
-// the one host evaluator of the XC engines; without `gpu` only its unit tests use it
+// the functional's evaluation for the XC engines (on the device, or libxc on the host); without
+// `gpu` only its unit tests use it
 #[cfg_attr(not(feature = "gpu"), allow(dead_code))]
 pub(crate) mod functional;
 // the grid densities and the per-batch density pass of the engines
 #[cfg(feature = "gpu")]
 pub(crate) mod density;
+// the functional compiled for the device
+#[cfg(feature = "gpu")]
+pub(crate) mod devfunc;
+// the grid's partition weights on the device
+#[cfg(feature = "gpu")]
+pub mod partition;
+#[cfg(feature = "gpu")]
+pub use devfunc::module_source_for as devfunc_module_source;
+pub use functional::FunctionalPlace;
 pub mod vv10;
 
 #[cfg(feature = "gpu")]
@@ -71,6 +86,8 @@ pub struct GpuXcOptions {
     pub math: XcMath,
     /// What runs the FP64 per-batch products.
     pub products: ProductEngine,
+    /// Where the functional's derivatives are evaluated (`devfunc`).
+    pub functional: FunctionalPlace,
 }
 
 impl Default for GpuXcOptions {
@@ -84,6 +101,7 @@ impl Default for GpuXcOptions {
             workspace: 1 << 30,
             math: XcMath::Fp64,
             products: ProductEngine::Vgemm,
+            functional: FunctionalPlace::Device,
         }
     }
 }
@@ -164,6 +182,17 @@ pub enum ProductEngine {
     /// cuBLAS's grouped DGEMM, on the FP64 tensor cores of FP64-rich cards (17.7-18.8 against
     /// vgemm's 9.4-11.0 TFLOP/s on an H200).
     Grouped,
+}
+
+/// The parts of a per-batch layout's setup (seconds, `XcLayout`): the blocks of batches (host),
+/// the per-batch value test on the device (tables, kernels, the screening, the kept functions'
+/// download), and the batches' lists, chunks, descriptors and direct-collocation work lists
+/// (host) with their uploads.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XcLayoutTimes {
+    pub blocks: f64,
+    pub screen: f64,
+    pub lists: f64,
 }
 
 /// How a block's densities are formed (the block path's; feature `study`).
@@ -414,7 +443,17 @@ mod device {
         pub values: usize,
         pub kept_fraction: f64,
         pub max_block_funcs: usize,
+        /// Multiply-adds of one product pass over the batches (sum of kept functions squared
+        /// times points; the per-batch path's): a V_xc call runs 2 (LDA, GGA) or 8 (meta-GGA) of
+        /// them.
+        pub product_fma: f64,
         pub setup_seconds: f64,
+        /// Of `setup_seconds`: the engine's blocks and their function lists on the device, the
+        /// per-batch layout's parts, and the rest of the per-batch path (workspaces, product
+        /// plans).
+        pub setup_blocks: f64,
+        pub setup_layout: XcLayoutTimes,
+        pub setup_plans: f64,
     }
 
     /// A block on the device (crate-internal: the response engine's XC kernel walks the same
@@ -556,8 +595,6 @@ mod device {
     pub(crate) struct Batched {
         pub(crate) lay: layout::XcLayout,
         plans: Vec<ChunkPlans>,
-        /// Collocation of one block.
-        pub(crate) phi: DeviceBuf<f64>,
         /// Compressed values, X/W, Y/Wt, D/V in FP64 and FP32 (as the arithmetic needs).
         pub(crate) phic: DeviceBuf<f64>,
         xw: DeviceBuf<f64>,
@@ -606,7 +643,6 @@ mod device {
             let math = opts.math;
             let (d64, d32) = (!matches!(math, XcMath::Fp32), math.fp32_potential());
             let sz = |n: usize, on: bool| if on { n.max(1) } else { 1 };
-            let phi = gpu.alloc_zeros::<f64>((lay.max_block_nf * nc * lay.max_block_np).max(1))?;
             let phic = gpu.alloc_zeros::<f64>((nc * lay.max_x).max(1))?;
             let xw = gpu.alloc_zeros::<f64>(sz(lay.max_x, d64))?;
             let yw = gpu.alloc_zeros::<f64>(sz(3 * lay.max_x, d64 && mgga))?;
@@ -725,7 +761,6 @@ mod device {
             Ok(Batched {
                 lay,
                 plans,
-                phi,
                 phic,
                 xw,
                 yw,
@@ -796,13 +831,41 @@ mod device {
         pub last: GpuXcCallTimes,
     }
 
-    /// One V_xc evaluation's inputs (checked by [`GpuXc::compute_device`]): the occupied
-    /// orbitals of the channels side by side, their counts and occupations, and the
+    /// [`GpuXc::prepare_functional`] of an engine's functional.
+    pub(crate) fn prepare(f: &HostFunctional, gpu: &Gpu, nsp: usize) -> Result<(), String> {
+        if !(1..=2).contains(&nsp) {
+            return Err(format!("{nsp} spin channels"));
+        }
+        if f.kind().none {
+            return Ok(());
+        }
+        match f.device(gpu, nsp) {
+            Some(_) => Ok(()),
+            None => Err(f
+                .device_status(nsp)
+                .and_then(|r| r.err())
+                .unwrap_or_else(|| "on the host by the engine's setting".into())),
+        }
+    }
+
+    /// Where a V_xc evaluation's densities come from.
+    pub(crate) enum VxcSource<'a> {
+        /// The occupied orbitals of the channels side by side, their counts and occupations
+        /// (checked by [`GpuXc::compute_device`]).
+        Orbitals {
+            cmo: &'a DeviceBuf<f64>,
+            ncols: &'a [usize],
+            occ: &'a DeviceBuf<f64>,
+        },
+        /// The spin densities themselves (nsp nbf x nbf, column-major; the per-batch path
+        /// only, [`GpuXc::compute_densities`]).
+        Densities(&'a DeviceBuf<f64>),
+    }
+
+    /// One V_xc evaluation's inputs: its densities' source, the spin treatment, and the
     /// pointwise functional in place of libxc when given.
     pub(crate) struct VxcCall<'a, 'f> {
-        pub(crate) cmo: &'a DeviceBuf<f64>,
-        pub(crate) ncols: &'a [usize],
-        pub(crate) occ: &'a DeviceBuf<f64>,
+        pub(crate) src: VxcSource<'a>,
         pub(crate) restricted: bool,
         pub(crate) func: Option<&'a mut PointFn<'f>>,
     }
@@ -853,7 +916,7 @@ mod device {
             opts: &GpuXcOptions,
         ) -> Result<GpuXc, GpuError> {
             let t0 = std::time::Instant::now();
-            let functional = HostFunctional::new(name, kind)?;
+            let functional = HostFunctional::new(name, kind)?.with_place(opts.functional);
             if functional.needs_lapl() && kind.is_none() {
                 return Err(GpuError::NotCovered(format!(
                     "{name}: Laplacian-dependent meta-GGAs are not implemented"
@@ -862,6 +925,7 @@ mod device {
             let kind = functional.kind();
             let order = kind.order();
             let ncomp = crate::cpu::ncomp(order);
+            let t_blocks = std::time::Instant::now();
             let bl = blocks(
                 basis,
                 grid,
@@ -934,6 +998,8 @@ mod device {
                 scatter: k("xc_scatter")?,
             };
             let npts = grid.x.len();
+            let t_blocks = t_blocks.elapsed().as_secs_f64();
+            let t_bat = std::time::Instant::now();
             let bat = match opts.screen {
                 XcScreen::Batch => {
                     if opts.math.emulated() {
@@ -955,13 +1021,21 @@ mod device {
                 }
             };
             let values = bat.as_ref().map_or(values, |b| b.lay.values);
+            let t_bat = t_bat.elapsed().as_secs_f64();
+            let lt = bat
+                .as_ref()
+                .map_or(XcLayoutTimes::default(), |b| b.lay.setup_times);
             let stats = GpuXcStats {
                 npts,
                 nblocks: dev.len(),
                 values,
                 kept_fraction: values as f64 / (basis.nbf * npts).max(1) as f64,
                 max_block_funcs: max_nf,
+                product_fma: bat.as_ref().map_or(0.0, |b| layout::work(&b.lay.host).1),
                 setup_seconds: t0.elapsed().as_secs_f64(),
+                setup_blocks: t_blocks,
+                setup_layout: lt,
+                setup_plans: t_bat - lt.blocks - lt.screen - lt.lists,
             };
             // the block path's GEMMs: emulated with block screening and an emulated arithmetic
             let gemm_arith = match (opts.screen, opts.math) {
@@ -1002,6 +1076,13 @@ mod device {
 
         pub fn stats(&self) -> &GpuXcStats {
             &self.stats
+        }
+
+        /// Compiles and checks the functional for the device for `nsp` spin channels now (the
+        /// engine does it at its first evaluation otherwise): Ok when the calls evaluate it on
+        /// the device, Err with the reason when libxc on the host does.
+        pub fn prepare_functional(&self, gpu: &Gpu, nsp: usize) -> Result<(), String> {
+            prepare(&self.functional, gpu, nsp)
         }
 
         pub fn kind(&self) -> XcKind {
@@ -1131,6 +1212,51 @@ mod device {
             })
         }
 
+        /// E_xc and V_xc of the spin densities `dm` (host, one nbf x nbf symmetric matrix per
+        /// spin: the alpha density alone for a closed shell with `restricted`), for densities
+        /// that do not come from orbitals (a guess): on the per-batch path the densities go to
+        /// the device as they are; None on the block path (it takes orbitals).
+        pub fn compute_densities(
+            &mut self,
+            gpu: &Gpu,
+            dm: &[&[f64]],
+            restricted: bool,
+        ) -> Result<Option<GpuXcResult>, GpuError> {
+            let nbf = self.nbf;
+            let n2 = nbf * nbf;
+            let nsp = if restricted { 1 } else { 2 };
+            if self.bat.is_none() {
+                return Ok(None);
+            }
+            if dm.len() != nsp || dm.iter().any(|d| d.len() != n2) {
+                return Err(GpuError::Contract(
+                    "XC: densities of the wrong number or size".into(),
+                ));
+            }
+            if self.kind().none {
+                return Ok(Some(GpuXcResult {
+                    exc: 0.0,
+                    v: vec![vec![0.0; n2]; nsp],
+                }));
+            }
+            let m0 = gpu.mark()?;
+            let flat: Vec<f64> = dm.iter().flat_map(|d| d.iter().copied()).collect();
+            let dd = gpu.upload(&flat)?;
+            let mut v = gpu.alloc_zeros::<f64>(nsp * n2)?;
+            let call = VxcCall {
+                src: VxcSource::Densities(&dd),
+                restricted,
+                func: None,
+            };
+            let exc = self.compute_batched(gpu, call, &mut v)?;
+            let hv = gpu.download(&v)?;
+            self.last.total = m0.seconds_until(&gpu.mark()?)?;
+            Ok(Some(GpuXcResult {
+                exc,
+                v: hv.chunks(n2).map(|c| c.to_vec()).collect(),
+            }))
+        }
+
         /// E_xc (returned) and V_xc (into `v`: one nbf x nbf column-major matrix per spin,
         /// overwritten; exactly symmetric) of occupied orbitals on the device: `cmo` holds the
         /// channels side by side (nbf x sum(ncols), column-major; one channel for a closed shell
@@ -1151,7 +1277,10 @@ mod device {
 
         /// As [`GpuXc::compute_device`], with the pointwise functional `func` in place of
         /// libxc when given (crate-internal: VV10).
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "a call's inputs and the evaluation's options, as compute_device"
+        )]
         pub(crate) fn compute_device_with(
             &mut self,
             gpu: &Gpu,
@@ -1190,9 +1319,11 @@ mod device {
                 }
             };
             let call = VxcCall {
-                cmo,
-                ncols,
-                occ: occd,
+                src: VxcSource::Orbitals {
+                    cmo,
+                    ncols,
+                    occ: occd,
+                },
                 restricted,
                 func,
             };
@@ -1203,10 +1334,59 @@ mod device {
             }
         }
 
-        /// The per-batch path of [`GpuXc::compute_device`] (arguments checked there): per
-        /// chunk of batches, each block collocated and its batches' kept functions compressed,
-        /// then the products of all the chunk's batches in one launch each; the potential of
-        /// every batch into a fixed-point accumulator.
+        /// D_s = C_s diag(occ_s) C_s^T of every channel (nsp nbf x nbf, column-major) from the
+        /// orbitals `cmo` side by side (`ncols` per channel) and their occupations; None without
+        /// occupied orbitals.
+        fn orbital_densities(
+            &self,
+            gpu: &Gpu,
+            cmo: &DeviceBuf<f64>,
+            ncols: &[usize],
+            occ: &DeviceBuf<f64>,
+        ) -> Result<Option<DeviceBuf<f64>>, GpuError> {
+            let nbf = self.nbf;
+            let n2 = nbf * nbf;
+            let ntot: usize = ncols.iter().sum();
+            if ntot == 0 {
+                return Ok(None);
+            }
+            let mut d = gpu.alloc_zeros::<f64>(ncols.len() * n2)?;
+            let mut cs = gpu.alloc_zeros::<f64>(nbf * ntot)?;
+            // SAFETY: matches xc_scale_cols; nbf ntot values in and out.
+            unsafe {
+                gpu.launch(
+                    &self.kernels.scale_cols,
+                    Launch::linear(nbf * ntot, 256),
+                    &[
+                        Arg::I64(nbf as i64),
+                        Arg::I32(ntot as i32),
+                        Arg::buf(cmo),
+                        Arg::buf(occ),
+                        Arg::buf_mut(&mut cs),
+                    ],
+                )
+            }?;
+            let mut c0 = 0;
+            for (sp, &ncol) in ncols.iter().enumerate() {
+                if ncol > 0 {
+                    self.gemm.gemm(
+                        self.gemm_arith,
+                        GemmDims::new(Op::N, Op::T, nbf, nbf, ncol),
+                        (1.0, 0.0),
+                        MatRef::new(&cs, c0 * nbf, nbf),
+                        MatRef::new(cmo, c0 * nbf, nbf),
+                        MatMut::new(&mut d, sp * n2, nbf),
+                    )?;
+                }
+                c0 += ncol;
+            }
+            Ok(Some(d))
+        }
+
+        /// The per-batch path of [`GpuXc::compute_device`] and [`GpuXc::compute_densities`]
+        /// (arguments checked there): per chunk of batches, each batch's kept functions
+        /// collocated into its compressed values, then the products of all the chunk's batches
+        /// in one launch each; the potential of every batch into a fixed-point accumulator.
         fn compute_batched(
             &mut self,
             gpu: &Gpu,
@@ -1214,55 +1394,29 @@ mod device {
             v: &mut DeviceBuf<f64>,
         ) -> Result<f64, GpuError> {
             let VxcCall {
-                cmo,
-                ncols,
-                occ: occd,
+                src,
                 restricted,
                 func,
             } = call;
             let (nbf, npts) = (self.nbf, self.npts);
             let n2 = nbf * nbf;
-            let nsp = ncols.len();
-            let ntot: usize = ncols.iter().sum();
+            let nsp = if restricted { 1 } else { 2 };
             let mut times = GpuXcCallTimes::default();
             let m0 = gpu.mark()?;
             let (gga, mgga) = (self.kind().gga, self.kind().mgga);
             let single_d = matches!(self.math, XcMath::Fp32);
             let single_v = self.math.fp32_potential();
             let mut gd = GridDensities::new(gpu, npts, nsp, self.kind())?;
-            // D_s = C_s diag(occ_s) C_s^T
-            let mut d = gpu.alloc_zeros::<f64>(nsp * n2)?;
-            if ntot > 0 {
-                let mut cs = gpu.alloc_zeros::<f64>(nbf * ntot)?;
-                // SAFETY: matches xc_scale_cols; nbf ntot values in and out.
-                unsafe {
-                    gpu.launch(
-                        &self.kernels.scale_cols,
-                        Launch::linear(nbf * ntot, 256),
-                        &[
-                            Arg::I64(nbf as i64),
-                            Arg::I32(ntot as i32),
-                            Arg::buf(cmo),
-                            Arg::buf(occd),
-                            Arg::buf_mut(&mut cs),
-                        ],
-                    )
-                }?;
-                let mut c0 = 0;
-                for (sp, &ncol) in ncols.iter().enumerate() {
-                    if ncol > 0 {
-                        self.gemm.gemm(
-                            self.gemm_arith,
-                            GemmDims::new(Op::N, Op::T, nbf, nbf, ncol),
-                            (1.0, 0.0),
-                            MatRef::new(&cs, c0 * nbf, nbf),
-                            MatRef::new(cmo, c0 * nbf, nbf),
-                            MatMut::new(&mut d, sp * n2, nbf),
-                        )?;
-                    }
-                    c0 += ncol;
+            // D_s = C_s diag(occ_s) C_s^T, or the densities given (None: no occupied orbitals,
+            // zero densities)
+            let own_d;
+            let d = match src {
+                VxcSource::Densities(dm) => Some(dm),
+                VxcSource::Orbitals { cmo, ncols, occ } => {
+                    own_d = self.orbital_densities(gpu, cmo, ncols, occ)?;
+                    own_d.as_ref()
                 }
-            }
+            };
             let mut tl = Timeline::<GpuXcCallTimes>::new(gpu);
             let xyz = [&self.x, &self.y, &self.z];
             let w = &self.w;
@@ -1279,7 +1433,7 @@ mod device {
                 lay: &bat.lay,
                 colloc: Collocation::Own,
                 xyz,
-                d: (ntot > 0).then_some(&d),
+                d,
                 nbf,
                 nsp,
                 scale: if restricted { 2.0 } else { 1.0 },
@@ -1287,7 +1441,6 @@ mod device {
                 gemm: &bat.gemm,
             };
             let mut work = DensityWork {
-                phi: &mut bat.phi,
                 phic: &mut bat.phic,
                 phic32: if any32 { Some(&mut bat.phic32) } else { None },
                 ops: if single_d {
@@ -1371,7 +1524,6 @@ mod device {
                         &c,
                         Collocation::Own,
                         xyz,
-                        &mut bat.phi,
                         Some(&mut bat.phic),
                         if any32 { Some(&mut bat.phic32) } else { None },
                     )?;
@@ -1574,14 +1726,8 @@ mod tests {
     fn a_product_plan_runs_in_its_own_arithmetic() {
         use crate::kernels::vgemm::VgemmProduct;
         use crate::linalg::{Arith, Gemm};
-        use crate::Gpu;
-        let gpu = match Gpu::new(0) {
-            Ok(g) => g,
-            Err(e) if std::env::var("LINUS_GPU_REQUIRED").as_deref() != Ok("1") => {
-                eprintln!("skipped, no GPU: {e}");
-                return;
-            }
-            Err(e) => panic!("LINUS_GPU_REQUIRED=1 but no GPU: {e}"),
+        let Some(gpu) = crate::harness::gpu() else {
+            return;
         };
         let (vg, gemm) = (layout::vgemm(&gpu).unwrap(), Gemm::new(&gpu).unwrap());
         // C = A B with A = [[1, 3], [2, 4]] and B = 2 I (column-major): C = 2 A

@@ -90,6 +90,7 @@
 //! bitwise reproducible run to run on a device.
 
 pub mod df;
+pub mod krylov;
 pub mod xc;
 
 /// Perturbations per group and auxiliary functions per exchange block for a workspace of

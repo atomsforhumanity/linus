@@ -8,10 +8,10 @@
 //!
 //! | family | on the device when | otherwise on the CPU |
 //! |---|---|---|
-//! | `jk` (SCF J/K) | `jk` df | exact, rij_snk; `solvent.scf: "df"` (the density-fitted PCM rides on the CPU's J build) |
+//! | `jk` (SCF J/K) | `jk` df, rij_cgk (the J on the DF engine, or without a stored tensor: `backend.df_j`) | exact, rij_snk; `solvent.scf: "df"` (the density-fitted PCM rides on the CPU's J build) |
 //! | `xc` (SCF XC) | DFT | - |
 //! | `vv10` (VV10's energy, SCF potential and gradient, on the NLC grid) | DFT with VV10 | - |
-//! | `gradient_jk` (the two-electron gradient) | `jk` df | exact, rij_snk |
+//! | `gradient_jk` (the two-electron gradient) | `jk` df | exact, rij_snk, rij_cgk |
 //! | `gradient_xc` (the XC gradient) | DFT | - |
 //! | `hessian_jk` (the Hessian's explicit two-electron terms and their F^x) | `jk` df | exact |
 //! | `hessian_xc` (the Hessian's explicit XC terms, the grid response included) | DFT | - |
@@ -41,7 +41,7 @@ use crate::driver::options::{BackendKind, BackendSettings as Backend, Fp32Mode, 
 use crate::driver::policy::{DevicePolicy, DevicePrecision};
 use crate::driver::record::Decision;
 use crate::driver::report::{
-    EmulationUsed, Fallback, FamilyArith, ResolvedBackend, ResponseArithmetic,
+    EmulationUsed, Fallback, FamilyArith, PlaceRecord, ResolvedBackend, ResponseArithmetic,
 };
 use crate::driver::CalcContext;
 use linus_base::error::LinusError;
@@ -189,8 +189,17 @@ impl ResponseRecords {
             plan_violation: None,
             estimate_s: None,
             xc: None,
+            solver: None,
+            assembly: None,
             reason,
         });
+    }
+
+    /// Where the CPHF/CPKS solver's algebra of the response of `purpose` ran.
+    pub(crate) fn set_solver(&self, purpose: &'static str, at: PlaceRecord) {
+        if let Some(r) = self.lock().iter_mut().rev().find(|r| r.purpose == purpose) {
+            r.solver = Some(at);
+        }
     }
 
     /// The plan violations of the responses (`plan_violation` warnings).
@@ -291,6 +300,20 @@ impl BackendState {
     pub(crate) fn grant_violations(&self) -> Vec<(Family, String)> {
         self.provider()
             .map_or_else(Vec::new, |p| p.grant_violations())
+    }
+
+    /// Where the device's XC families evaluate the functional
+    /// ([`crate::backend::Backend::functional_places`]; none without a device).
+    pub(crate) fn functional_places(&self) -> Vec<(Family, Option<String>)> {
+        self.provider()
+            .map_or_else(Vec::new, |p| p.functional_places())
+    }
+
+    /// Where the last grid built with the device partition took its weights, and why
+    /// ([`crate::backend::Backend::grid_partition_place`]; None without a device or a grid that
+    /// asked it).
+    pub(crate) fn grid_partition_place(&self) -> Option<(&'static str, String)> {
+        self.provider().and_then(|p| p.grid_partition_place())
     }
 
     /// Starts the measure of a calculation's peak device memory (nothing without a device).
@@ -427,16 +450,44 @@ impl CalcContext {
                     .collect()
             }),
             one_electron: "cpu",
+            nuclear_attraction: self.record.nuclear_attraction().map(|(place, reason)| {
+                PlaceRecord {
+                    place,
+                    reason: Some(reason),
+                }
+            }),
+            grid_partition: self.backend.grid_partition_place().map(|(place, reason)| {
+                PlaceRecord {
+                    place,
+                    reason: Some(reason),
+                }
+            }),
             jk,
             xc,
             vv10,
             gradient_jk,
+            gradient_jk_kernels: self
+                .record
+                .gradient_jk_kernels()
+                .map(|(kernels, reason)| crate::driver::report::KernelsRecord { kernels, reason }),
             gradient_xc,
             hessian_jk,
             hessian_xc,
             response_jk,
             response_xc,
             scf_loop,
+            // the memory-lean J, or its declined setup (the DF engine's tensor otherwise: absent)
+            j: self
+                .record
+                .scf_df_j()
+                .filter(|c| c.engine == "direct" || c.declined.is_some())
+                .map(|c| crate::driver::report::JEngine {
+                    engine: c.engine,
+                    reason: c.reason,
+                    kernels: c.kernels.as_ref().map(|k| k.0),
+                    kernels_reason: c.kernels.map(|k| k.1),
+                    declined: c.declined,
+                }),
             pcm,
             solvent: cpu(self.plan.solvent().is_some()),
             dispersion: cpu(self.method.dispersion.is_some()),
@@ -460,6 +511,16 @@ impl CalcContext {
                     gradient: p.vv10_grad.name(),
                 }
             }),
+            functional: self
+                .backend
+                .functional_places()
+                .into_iter()
+                .map(|(k, why)| crate::driver::report::FunctionalRecord {
+                    kernel: k.name(),
+                    place: if why.is_none() { "gpu" } else { "cpu" },
+                    reason: why,
+                })
+                .collect(),
         }
     }
 }

@@ -32,6 +32,13 @@ pub const TASK_WORDS: usize = 4;
 /// The CUDA C source (the device layer pastes the portability header in front).
 pub const SOURCE: &str = include_str!("../../device/scf/kernels.cu");
 
+/// Device bytes of an `Ops` workspace for batches of up to `max_tasks` reductions and
+/// combinations of up to `max_terms` matrices (`Ops::new` allocates them, `Ops::bytes`).
+pub fn ops_bytes(max_tasks: usize, max_terms: usize) -> usize {
+    let t = max_tasks.max(1);
+    8 * (TASK_WORDS * t + 2 * RED_BLOCKS as usize * t + 2 * max_terms.max(1))
+}
+
 #[cfg(feature = "gpu")]
 pub use device::*;
 

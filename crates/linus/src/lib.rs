@@ -45,7 +45,7 @@ pub use driver::report::{AoMatrices, AoOutputs, CalcType, Failure, Report, Resol
 pub use driver::request::Request;
 pub use driver::settings::CalcTypes;
 pub use driver::Session;
-pub use linus_base::error::{LinusError, ResponseFailure, ScfFailure};
+pub use linus_base::error::{LinusError, ResponseEnd, ResponseFailure, ScfFailure};
 pub use linus_base::progress;
 /// What a calculation's memory is checked against: the process kinds ([`memory::Process`],
 /// `Session::set_process`) and the phases' needs ([`memory::PhaseNeed`]: the plan's `memory`).
@@ -67,7 +67,7 @@ pub use linus_ints;
 /// CHANGELOG's "Changed: behaviour" gives the sizes). Bump it in any merge that changes results
 /// beyond the bitwise guarantee. Reported next to the version: `linus --version`, the result
 /// JSON's `numerics_epoch` and Python's `linus.NUMERICS_EPOCH`.
-pub const NUMERICS_EPOCH: u32 = 10;
+pub const NUMERICS_EPOCH: u32 = 13;
 
 /// Whether this build has the GPU backend (the `gpu` cargo feature; `backend: "gpu"` is valid).
 /// Python's `linus.GPU_BUILD`: true in the GPU distribution `afh-linus-cuda13`, false in

@@ -108,8 +108,6 @@ pub(crate) enum DensityOps<'a> {
 
 /// An engine's workspaces for a density pass (sized for its layout's largest block and chunk).
 pub(crate) struct DensityWork<'a> {
-    /// One block's collocation.
-    pub(crate) phi: &'a mut DeviceBuf<f64>,
     /// The chunk's compressed values, and their FP32 copy when the engine has an FP32
     /// arithmetic (the FP32 products read it).
     pub(crate) phic: &'a mut DeviceBuf<f64>,
@@ -162,7 +160,7 @@ impl DensityPass<'_> {
         let lay = self.lay;
         let nc = match self.colloc {
             Collocation::Own => lay.ncomp,
-            Collocation::With(_, nc) => nc,
+            Collocation::With(k) => k.ncomp,
         };
         let (gga, mgga) = (self.kind.gga, self.kind.mgga);
         let n2 = self.nbf * self.nbf;
@@ -179,7 +177,6 @@ impl DensityPass<'_> {
                 c,
                 self.colloc,
                 self.xyz,
-                work.phi,
                 Some(&mut *work.phic),
                 work.phic32.as_deref_mut(),
             )?;

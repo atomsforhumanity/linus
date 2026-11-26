@@ -9,7 +9,7 @@ use common::Rng;
 use linus_gpu::cpu::{metric, Aux3c, BasisSet, Operator};
 use linus_gpu::df::{
     DfFit, DfIntegrals, DfLayout, DfStorage, Factor, GpuDfJk, GpuDfJkOptions, GpuJkDeviceRequest,
-    GpuJkRequest, KMath, ROW_DIAG_UPPER, ROW_OFFDIAG,
+    GpuJkRequest, KMath, PanelKernel, PanelPlan, ROW_DIAG_UPPER, ROW_OFFDIAG,
 };
 use linus_gpu::harness::{self, compare, Structure};
 
@@ -192,13 +192,12 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
     };
     let mut first = None;
     let oz = DfFit::Ozaki { slices: 7 };
-    // (storage, K arithmetic, SYRK update, auxiliary block, K-update column block, the
-    // setup's integrals and fit)
-    for (storage, k_math, k_syrk, k_block, k_update_block, integrals, fit) in [
+    // (storage, K arithmetic, auxiliary block, K-update column block, the setup's integrals
+    // and fit)
+    for (storage, k_math, k_block, k_update_block, integrals, fit) in [
         (
             DfStorage::Device,
             KMath::Native,
-            false,
             0,
             0,
             DfIntegrals::Auto,
@@ -207,7 +206,6 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
         (
             DfStorage::Device,
             KMath::Native,
-            true,
             24,
             0,
             DfIntegrals::Cpu,
@@ -216,7 +214,6 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
         (
             DfStorage::Device,
             KMath::Native,
-            false,
             24,
             16,
             DfIntegrals::Device,
@@ -225,25 +222,15 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
         (
             DfStorage::Host,
             KMath::Native,
-            false,
             40,
             50,
             DfIntegrals::Auto,
             DfFit::Native,
         ),
-        (
-            DfStorage::Host,
-            KMath::Native,
-            false,
-            40,
-            50,
-            DfIntegrals::Cpu,
-            oz,
-        ),
+        (DfStorage::Host, KMath::Native, 40, 50, DfIntegrals::Cpu, oz),
         (
             DfStorage::Device,
             KMath::Emulated { bits: 55 },
-            false,
             0,
             32,
             DfIntegrals::Auto,
@@ -253,7 +240,6 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
         (
             DfStorage::Device,
             KMath::Ozaki { slices: 7 },
-            false,
             0,
             32,
             DfIntegrals::Auto,
@@ -262,7 +248,6 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
         (
             DfStorage::Device,
             KMath::Ozaki { slices: 7 },
-            false,
             24,
             0,
             DfIntegrals::Auto,
@@ -271,7 +256,6 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
         (
             DfStorage::Host,
             KMath::Ozaki { slices: 7 },
-            false,
             40,
             50,
             DfIntegrals::Device,
@@ -281,7 +265,6 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
         let opts = GpuDfJkOptions {
             storage,
             k_math,
-            k_syrk,
             k_block,
             k_update_block,
             integrals,
@@ -313,7 +296,7 @@ fn check(mol: &Structure, basis_name: &str, two_densities: bool) {
             );
         }
         let tag = format!(
-            "{} {basis_name} {storage:?} {k_math:?} syrk {k_syrk} block {k_block} update {k_update_block} \
+            "{} {basis_name} {storage:?} {k_math:?} block {k_block} update {k_update_block} \
              {integrals:?} {fit:?}",
             harness::formula(mol)
         );
@@ -507,6 +490,183 @@ fn layout_rows_match_pair_shapes() {
     assert_eq!(total, lay.nx);
 }
 
+/// The shell panels cover exactly the stored rows: every panel row (m, n_k) of a shell is the
+/// stored row of the pair {m, n_k} (both triangles of a diagonal block), and every stored row
+/// appears in the panels of both its functions' shells (once on a diagonal block's).
+#[test]
+fn panels_cover_the_stored_rows() {
+    let mol = fragment(5);
+    let basis = harness::basis(&mol, "def2-tzvp").unwrap();
+    let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
+    let lay = DfLayout::new(&basis, &Aux3c::new(&aux), 1e-10);
+    let plan = PanelPlan::new(&basis, &lay);
+    let mut uses = vec![0usize; lay.nx];
+    let mut rows = 0;
+    for s in &plan.shells {
+        assert_eq!(s.r0, rows);
+        for k in 0..s.w {
+            let n = plan.cn[s.c0 + k];
+            for ia in 0..s.d {
+                let m = (s.f0 + ia) as i32;
+                let x = plan.src[s.r0 + ia + s.d * k] as usize;
+                let (rm, rn) = (lay.row_m[x], lay.row_n[x]);
+                assert!(
+                    (rm, rn) == (m, n) || (rm, rn) == (n, m),
+                    "panel row ({m}, {n}) -> ({rm}, {rn})"
+                );
+                uses[x] += 1;
+            }
+        }
+        rows += s.d * s.w;
+    }
+    assert_eq!(rows, plan.np());
+    for (x, (&u, &kind)) in uses.iter().zip(&lay.row_kind).enumerate() {
+        let want = if kind == ROW_OFFDIAG { 2 } else { 1 };
+        assert_eq!(u, want, "row {x}");
+    }
+    assert!(
+        plan.np() < basis.nbf * basis.nbf,
+        "def2-TZVP at 1e-10 drops pairs"
+    );
+}
+
+/// Native K on the shell panels against the CPU reference: every GEMM variant, several panel
+/// blocks and shell groups, one and two factors; bitwise run to run.
+#[test]
+fn panel_variants_match_the_reference() {
+    let Some(gpu) = common::gpu() else { return };
+    let mol = fragment(4);
+    let basis = harness::basis(&mol, "def2-tzvp").unwrap();
+    let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
+    let nbf = basis.nbf;
+    let (ca, da) = factors(nbf, 7, 3);
+    let (cb, db) = factors(nbf, 4, 5);
+    let dens = vec![da, db];
+    let cs: Vec<FactorOwned> = vec![(ca, 7), (cb, 4)];
+    let r = reference(&basis, &aux, &dens, &cs);
+    let dref: Vec<&[f64]> = dens.iter().map(|d| d.as_slice()).collect();
+    let fs: Vec<Factor> = cs.iter().map(|(c, n)| Factor { c, ncol: *n }).collect();
+    let req = GpuJkRequest {
+        dens: &dref,
+        factors: &fs,
+        want_j: true,
+        want_k: true,
+    };
+    // the tensor-core kernel (NVIDIA compute capability 9.0 and later: for its own architecture,
+    // and on 9.0 for sm_90a) at a small tile and the default one (its stages capped to the
+    // card's shared memory); its copy modes: block 0 (bulk copies for the first factor where the
+    // auxiliary count is even; the second factor starts at the odd column 7: one double per
+    // cp.async) and 41 (an odd block: cp.async)
+    let cc = gpu.info().cc;
+    for (gemm, block, ws, tile) in [
+        (PanelKernel::Strided, 0, 0, [0; 5]),
+        (PanelKernel::Strided, 40, 1 << 16, [0; 5]),
+        (PanelKernel::Strided, 56, 0, [0; 5]),
+        (PanelKernel::Strided, 0, 1 << 17, [0; 5]),
+        (PanelKernel::Mma, 0, 0, [64, 64, 2, 2, 2]),
+        (PanelKernel::Mma, 41, 0, [64, 64, 2, 2, 2]),
+        (PanelKernel::Mma, 0, 0, [0; 5]),
+        (PanelKernel::Mma, 41, 0, [0; 5]),
+        (PanelKernel::MmaSm90a, 0, 0, [0; 5]),
+        (PanelKernel::MmaSm90a, 41, 0, [0; 5]),
+    ] {
+        match gemm {
+            PanelKernel::Mma if cc.0 < 9 => continue,
+            PanelKernel::MmaSm90a if cc != (9, 0) => continue,
+            _ => {}
+        }
+        let opts = GpuDfJkOptions {
+            k_panel_kernel: gemm,
+            k_block: block,
+            k_panel_workspace: ws,
+            k_panel_mma_tile: tile,
+            ..Default::default()
+        };
+        let mut eng = GpuDfJk::new(&gpu, &basis, &aux, &opts).unwrap();
+        let out = eng.compute(&gpu, &req).unwrap();
+        let again = eng.compute(&gpu, &req).unwrap();
+        for (a, b) in out.k.iter().zip(&again.k) {
+            assert!(same_bits(a, b), "{gemm:?}: not bitwise reproducible");
+        }
+        for (d, (g, c)) in out.k.iter().zip(&r.k).enumerate() {
+            let st = compare(g, c);
+            eprintln!("{gemm:?} block {block} ws {ws} K[{d}]: {st}");
+            st.check(0.0, 2e-12).unwrap();
+            for i in 0..nbf {
+                for j in 0..i {
+                    assert_eq!(g[j * nbf + i].to_bits(), g[i * nbf + j].to_bits());
+                }
+            }
+        }
+    }
+}
+
+/// The tensor-core panel kernel of the card (compute capability 9.0: compiled for sm_90a, the
+/// register hand-over; above: for the card's own architecture) against cuBLAS on the gathered
+/// panels: every copy mode (block 0: bulk copies where the auxiliary count is even; block 41: an
+/// odd block; the second factor at the odd column 133: one double per copy), two orbital tiles
+/// (133 orbitals, the gathered orbitals' odd rows padded to even), global and range-separated
+/// exchange; bitwise run to run.
+#[test]
+fn panel_mma_matches_the_strided_panels() {
+    let Some(gpu) = common::gpu() else { return };
+    if gpu.info().cc.0 < 9 {
+        return;
+    }
+    let mol = fragment(6);
+    let basis = harness::basis(&mol, "def2-tzvp").unwrap();
+    let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
+    let nbf = basis.nbf;
+    assert!(nbf > 138, "nbf {nbf}");
+    let (ca, da) = factors(nbf, 133, 11);
+    let (cb, db) = factors(nbf, 5, 12);
+    let dens = [da.as_slice(), db.as_slice()];
+    let fs = [Factor { c: &ca, ncol: 133 }, Factor { c: &cb, ncol: 5 }];
+    let req = GpuJkRequest {
+        dens: &dens,
+        factors: &fs,
+        want_j: false,
+        want_k: true,
+    };
+    let want = if gpu.info().cc == (9, 0) {
+        PanelKernel::MmaSm90a
+    } else {
+        PanelKernel::Mma
+    };
+    for op in [None, Some(Operator::from_libxc(1.0, -0.842294, 0.3))] {
+        let run = |opts: GpuDfJkOptions| {
+            let mut eng = GpuDfJk::new(&gpu, &basis, &aux, &opts).unwrap();
+            if let Some(op) = op {
+                eng.set_exchange_operator(&gpu, op).unwrap();
+            }
+            let a = eng.compute(&gpu, &req).unwrap();
+            let b = eng.compute(&gpu, &req).unwrap();
+            (eng.resolved().k_panel_kernel, a.k, b.k)
+        };
+        let (_, strided, _) = run(GpuDfJkOptions {
+            k_panel_kernel: PanelKernel::Strided,
+            ..Default::default()
+        });
+        for block in [0, 41] {
+            let (kind, k, again) = run(GpuDfJkOptions {
+                k_panel_kernel: want,
+                k_block: block,
+                ..Default::default()
+            });
+            assert_eq!(kind, want);
+            for (d, ((g, r), a)) in k.iter().zip(&strided).zip(&again).enumerate() {
+                assert!(
+                    same_bits(g, a),
+                    "{want:?} block {block}: not bitwise reproducible"
+                );
+                let st = compare(g, r);
+                eprintln!("{want:?} {op:?} block {block} K[{d}] against cuBLAS's panels: {st}");
+                st.check(0.0, 1e-13).unwrap();
+            }
+        }
+    }
+}
+
 fn same_bits(a: &[f64], b: &[f64]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())
 }
@@ -556,19 +716,20 @@ fn device_entry_point_matches_the_host_one_bitwise() {
     assert!(same_bits(&gpu.download(&k1).unwrap(), &k));
 }
 
-/// The fitted K block (`k_block_fit`): an allowance the automatic block does not fit gives a
-/// smaller block (a multiple of 8, at least K_BLOCK_MIN) that fits, and J/K are bitwise those of
-/// that block set explicitly; without the fit the setup is out of memory. (24 atoms of u1an39 in
+/// The storage plan's shrunk rung: an allowance the automatic block does not fit gives a smaller
+/// block (a multiple of 8, at least K_BLOCK_MIN) that fits, and J/K are bitwise those of that
+/// block set explicitly; an allowance no block fits is out of memory. (24 atoms of u1an39 in
 /// def2-TZVP: the automatic block's workspace is above the setup's 1 GiB batch.)
 #[test]
 fn k_block_fitted_to_the_allowance() {
-    use linus_gpu::df::{auto_k_block, K_BLOCK_MIN};
+    use linus_gpu::df::plan::DfRung;
+    use linus_gpu::df::K_BLOCK_MIN;
     use linus_gpu::GpuError;
     let Some(gpu) = common::gpu() else { return };
     let mol = fragment(24);
     let basis = harness::basis(&mol, "def2-tzvp").unwrap();
     let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
-    let (nbf, naux) = (basis.nbf, aux.nbf);
+    let nbf = basis.nbf;
     let (ca, _) = factors(nbf, 20, 5);
     let fa = [Factor { c: &ca, ncol: 20 }];
     let req = GpuJkRequest {
@@ -577,52 +738,51 @@ fn k_block_fitted_to_the_allowance() {
         want_j: true,
         want_k: true,
     };
+    // the unpacked exchange's block (emulated K: its workspace is A_Q), the tensor on the device
     let base = GpuDfJkOptions {
         storage: DfStorage::Device,
         others_reserve: 0,
+        k_math: KMath::Emulated { bits: 55 },
         ..GpuDfJkOptions::default()
     };
-    let auto = auto_k_block(nbf, naux, base.k_workspace);
-    // the setup's need with the automatic block, from its out-of-memory error
-    let need = match GpuDfJk::new(
-        &gpu,
-        &basis,
-        &aux,
-        &GpuDfJkOptions {
-            device_budget: Some(1),
-            ..base.clone()
-        },
-    ) {
-        Err(GpuError::OutOfMemory { requested, .. }) => requested,
-        r => panic!("expected out of memory, got {:?}", r.err()),
-    };
     let probe = GpuDfJk::new(&gpu, &basis, &aux, &base).unwrap();
-    let tensor = probe.resolved().tensor_bytes;
+    let (tensor, full) = (probe.resolved().tensor_bytes, probe.resolved().plan);
     drop(probe);
-    let work = need - tensor;
+    assert_eq!(full.rung, DfRung::Device);
+    let work = full.device_bytes - tensor;
     assert!(
         work > 2 << 30,
         "{nbf} functions: a build's workspace {work} bytes"
     );
-    let capped = GpuDfJkOptions {
-        device_budget: Some(tensor + work * 3 / 4),
-        ..base.clone()
-    };
-    assert!(GpuDfJk::new(&gpu, &basis, &aux, &capped).is_err());
+    match GpuDfJk::new(
+        &gpu,
+        &basis,
+        &aux,
+        &GpuDfJkOptions {
+            device_budget: Some(tensor),
+            ..base.clone()
+        },
+    ) {
+        Err(GpuError::OutOfMemory { .. }) => {}
+        r => panic!("expected out of memory, got {:?}", r.err()),
+    }
     let mut fitted = GpuDfJk::new(
         &gpu,
         &basis,
         &aux,
         &GpuDfJkOptions {
-            k_block_fit: true,
-            ..capped
+            device_budget: Some(tensor + work * 3 / 4),
+            ..base.clone()
         },
     )
     .unwrap();
+    let p = fitted.resolved().plan;
     let nq = fitted.resolved().k_block;
+    assert_eq!((p.rung, p.k_block), (DfRung::DeviceShrunk, nq));
     assert!(
-        (K_BLOCK_MIN..auto).contains(&nq) && nq.is_multiple_of(8),
-        "{nq} of {auto}"
+        (K_BLOCK_MIN..full.k_block).contains(&nq) && nq.is_multiple_of(8),
+        "{nq} of {}",
+        full.k_block
     );
     let a = fitted.compute(&gpu, &req).unwrap();
     drop(fitted);
@@ -991,13 +1151,13 @@ fn ozaki_mode_switch() {
         ..Default::default()
     };
     let mut eng = GpuDfJk::new(&gpu, &basis, &aux, &opts).unwrap();
-    let held = eng.resolved().device_bytes;
     let native = eng.compute(&gpu, &req).unwrap().k;
+    // after the first panel build, which uploads the panels' tables and holds them
+    let held = eng.resolved().device_bytes;
     let kmax = native[0].iter().fold(0.0f64, |m, v| m.max(v.abs()));
     let mut last = 0.0;
     for slices in [7usize, 5, 3] {
-        eng.set_k_math(&gpu, KMath::Ozaki { slices }, false)
-            .unwrap();
+        eng.set_k_math(&gpu, KMath::Ozaki { slices }).unwrap();
         assert_eq!(eng.resolved().k_math, KMath::Ozaki { slices });
         assert!(eng.resolved().device_bytes > held);
         let k = eng.compute(&gpu, &req).unwrap().k;
@@ -1016,10 +1176,8 @@ fn ozaki_mode_switch() {
         assert!(err >= last);
         last = err;
     }
-    assert!(eng
-        .set_k_math(&gpu, KMath::Ozaki { slices: 9 }, false)
-        .is_err());
-    eng.set_k_math(&gpu, KMath::Native, false).unwrap();
+    assert!(eng.set_k_math(&gpu, KMath::Ozaki { slices: 9 }).is_err());
+    eng.set_k_math(&gpu, KMath::Native).unwrap();
     assert_eq!(eng.resolved().device_bytes, held);
     let back = eng.compute(&gpu, &req).unwrap().k;
     assert!(same_bits(&back[0], &native[0]));

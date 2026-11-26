@@ -23,6 +23,10 @@
 //! - Device: 0.54 (the CUDA context and the libraries' handles) + T + G (Hessians also
 //!   2.3 + 1.5 D), within the device's limit.
 //!
+//! - rij_cgk adds its grid-K arrays, sized from its grid's points rather than fitted
+//!   (`CalcContext::gridk_memory`): on the host the SCF's builds' with the J/K on the CPU and the
+//!   gradient's (on the CPU), on the device the engine's.
+//!
 //! With `memory_gib` set the budgets keep the run within it, and the host estimate is at most
 //! the limit.
 
@@ -53,7 +57,7 @@ pub struct Estimate {
     /// How many cases.
     pub cases: u32,
     /// How the value was made.
-    pub model: &'static str,
+    pub model: String,
     /// Always true: an estimate, not a measurement.
     pub estimate: bool,
 }
@@ -98,6 +102,9 @@ pub(crate) struct EstimateInputs<'a> {
     pub device_limit: Option<usize>,
     /// Whether the SCF's J/K runs on the device.
     pub jk_on_device: bool,
+    /// rij_cgk's grid-K arrays (bytes; None without them), sized from its grid's points, not
+    /// fitted: they come on top of the models.
+    pub gridk: Option<crate::two_electron::GridKMemory>,
 }
 
 /// An estimate's model: its value (GiB), its description and its (band, cases).
@@ -218,7 +225,7 @@ impl EstimateInputs<'_> {
             value,
             band,
             cases,
-            model,
+            model: model.into(),
             estimate: true,
         };
         let mut memory = est(if self.jk_on_device {
@@ -226,12 +233,34 @@ impl EstimateInputs<'_> {
         } else {
             self.host_cpu()
         });
+        let mut device_memory = self.device().map(est);
+        // rij_cgk's grid-K: the host's arrays of a CPU J/K's SCF and of the gradient (on the
+        // CPU), the device engine's with a device J/K
+        if let Some(m) = &self.gridk {
+            let host = match self.calctype {
+                CalcType::Energy if !self.jk_on_device => m.scf_host,
+                CalcType::Gradient if self.jk_on_device => m.gradient_host,
+                CalcType::Gradient => m.scf_host.max(m.gradient_host),
+                _ => 0,
+            };
+            if host > 0 {
+                memory.value += host as f64 / GIB;
+                memory.model += " + grid-K arrays";
+            }
+            if let (Some(d), Some(limit), true) =
+                (device_memory.as_mut(), self.device_limit, self.jk_on_device)
+            {
+                // within the device's limit, as the models
+                d.value = (d.value + m.device as f64 / GIB).min(0.54 + limit as f64 / GIB);
+                d.model += " + grid-K engine";
+            }
+        }
         if let Some(limit) = self.memory_limit {
             memory.value = memory.value.min(limit as f64 / GIB);
         }
         PlannedEstimates {
             memory_gib: memory,
-            device_memory_gib: self.device().map(est),
+            device_memory_gib: device_memory,
             threads: est(self.threads()),
         }
     }
@@ -254,6 +283,7 @@ mod tests {
             memory_limit: None,
             device_limit: None,
             jk_on_device: false,
+            gridk: None,
         }
     }
 

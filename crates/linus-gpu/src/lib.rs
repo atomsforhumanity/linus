@@ -76,9 +76,14 @@ pub mod emu;
 pub mod eri3c;
 pub mod error;
 pub mod grad;
+pub mod gridk;
 #[cfg(any(test, feature = "testkit"))]
 pub mod harness;
 pub mod hess;
+pub mod jdirect;
+mod jdirect_hermite;
+#[cfg(feature = "gpu")]
+mod jengine;
 pub mod kernels;
 pub mod pcm;
 pub mod response;

@@ -40,23 +40,28 @@ pub const BASE_OPTIONS: &[&str] = &["--std=c++17", "--fmad=true", "-lineinfo"];
 pub enum Target {
     /// `sm_XY` binary.
     Cubin(u32),
+    /// `sm_XYa` binary: the architecture-specific features of `sm_XY` (e.g. sm_90a's register
+    /// hand-over, `setmaxnreg`), for that architecture alone.
+    CubinArchSpecific(u32),
     /// `compute_XY` PTX for the driver to JIT.
     Ptx(u32),
 }
 
 impl Target {
     pub fn arch_option(&self) -> String {
-        match self {
-            Target::Cubin(a) => format!("--gpu-architecture=sm_{a}"),
-            Target::Ptx(a) => format!("--gpu-architecture=compute_{a}"),
-        }
+        format!("--gpu-architecture={}", self.tag())
     }
 
     fn tag(&self) -> String {
         match self {
             Target::Cubin(a) => format!("sm_{a}"),
+            Target::CubinArchSpecific(a) => format!("sm_{a}a"),
             Target::Ptx(a) => format!("compute_{a}"),
         }
+    }
+
+    fn is_cubin(&self) -> bool {
+        !matches!(self, Target::Ptx(_))
     }
 }
 
@@ -201,14 +206,27 @@ impl KernelCache {
         self.modules.lock().unwrap().clear();
     }
 
-    fn options(&self, extra: &[&str]) -> Vec<String> {
+    /// The device's architecture-specific target (`sm_XYa`): only where the cache compiles
+    /// binaries for the device's own architecture (not PTX for an older one).
+    pub fn arch_specific(&self) -> Result<Target, GpuError> {
+        match self.target {
+            Target::Cubin(a) => Ok(Target::CubinArchSpecific(a)),
+            ref t => Err(GpuError::NotCovered(format!(
+                "an architecture-specific kernel needs NVRTC to compile for the device's architecture \
+                 (it compiles {})",
+                t.tag()
+            ))),
+        }
+    }
+
+    fn options(&self, extra: &[&str], target: &Target) -> Vec<String> {
         let mut o: Vec<String> = BASE_OPTIONS.iter().map(|s| s.to_string()).collect();
-        o.push(self.target.arch_option());
+        o.push(target.arch_option());
         o.extend(extra.iter().map(|s| s.to_string()));
         o
     }
 
-    fn key(&self, src: &str, opts: &[String]) -> [u8; 32] {
+    fn key(&self, src: &str, opts: &[String], target: &Target) -> [u8; 32] {
         let mut h = Sha256::new();
         h.update(b"linus-gpu kernel cache v1\n");
         h.update(
@@ -216,7 +234,7 @@ impl KernelCache {
                 "nvrtc {}.{}\n{}\n",
                 self.nvrtc_version.0,
                 self.nvrtc_version.1,
-                self.target.tag()
+                target.tag()
             )
             .as_bytes(),
         );
@@ -229,22 +247,19 @@ impl KernelCache {
         h.finalize().into()
     }
 
-    fn path(&self, key: &[u8; 32]) -> Option<PathBuf> {
+    fn path(&self, key: &[u8; 32], target: &Target) -> Option<PathBuf> {
         let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
-        let ext = if matches!(self.target, Target::Cubin(_)) {
-            "cubin"
-        } else {
-            "ptx"
-        };
+        let ext = if target.is_cubin() { "cubin" } else { "ptx" };
         self.dir
             .as_ref()
-            .map(|d| d.join(self.target.tag()).join(format!("{hex}.{ext}")))
+            .map(|d| d.join(target.tag()).join(format!("{hex}.{ext}")))
     }
 
-    fn load(&self, image: Vec<u8>) -> Result<Arc<CudaModule>, GpuError> {
-        let ptx = match self.target {
-            Target::Cubin(_) => Ptx::from_binary(image),
-            Target::Ptx(_) => Ptx::from_src(String::from_utf8_lossy(&image).into_owned()),
+    fn load(&self, image: Vec<u8>, target: &Target) -> Result<Arc<CudaModule>, GpuError> {
+        let ptx = if target.is_cubin() {
+            Ptx::from_binary(image)
+        } else {
+            Ptx::from_src(String::from_utf8_lossy(&image).into_owned())
         };
         Ok(self.ctx.load_module(ptx)?)
     }
@@ -256,19 +271,31 @@ impl KernelCache {
         src: &str,
         extra: &[&str],
     ) -> Result<Arc<CudaModule>, GpuError> {
-        let opts = self.options(extra);
-        let key = self.key(src, &opts);
+        self.module_for(name, src, extra, &self.target.clone())
+    }
+
+    /// [`KernelCache::module`] for `target` (the device's own, or its architecture-specific
+    /// one, [`KernelCache::arch_specific`]).
+    pub fn module_for(
+        &self,
+        name: &str,
+        src: &str,
+        extra: &[&str],
+        target: &Target,
+    ) -> Result<Arc<CudaModule>, GpuError> {
+        let opts = self.options(extra, target);
+        let key = self.key(src, &opts, target);
         if let Some(m) = self.modules.lock().unwrap().get(&key) {
             self.stats.lock().unwrap().memory_hits += 1;
             return Ok(m.clone());
         }
         if let Some(d) = &self.dump {
-            self.dump_source(d, &key, name, src, &opts);
+            self.dump_source(d, &key, name, src, &opts, target);
         }
-        let path = self.path(&key);
+        let path = self.path(&key, target);
         if let Some(p) = &path {
             if let Ok(image) = std::fs::read(p) {
-                if let Ok(m) = self.load(image) {
+                if let Ok(m) = self.load(image, target) {
                     self.stats.lock().unwrap().disk_hits += 1;
                     self.modules.lock().unwrap().insert(key, m.clone());
                     return Ok(m);
@@ -276,7 +303,7 @@ impl KernelCache {
             }
         }
         let t0 = Instant::now();
-        let (image, _log) = compile(name, src, &opts, &self.target)?;
+        let (image, _log) = compile(name, src, &opts, target)?;
         {
             let mut s = self.stats.lock().unwrap();
             s.compiled += 1;
@@ -286,14 +313,22 @@ impl KernelCache {
             // a cache that cannot be written only costs a recompilation next time
             let _ = write_atomic(p, &image);
         }
-        let m = self.load(image)?;
+        let m = self.load(image, target)?;
         self.modules.lock().unwrap().insert(key, m.clone());
         Ok(m)
     }
 
     /// `$LINUS_GPU_KERNEL_DUMP`: the module's source and its description in `dir` (module
     /// docs). Best effort: a dump that cannot be written changes nothing else.
-    fn dump_source(&self, dir: &Path, key: &[u8; 32], name: &str, src: &str, opts: &[String]) {
+    fn dump_source(
+        &self,
+        dir: &Path,
+        key: &[u8; 32],
+        name: &str,
+        src: &str,
+        opts: &[String],
+        target: &Target,
+    ) {
         let hex = |b: &[u8]| -> String { b.iter().map(|x| format!("{x:02x}")).collect() };
         let quote = |s: &str| -> String {
             let mut q = String::from("\"");
@@ -313,7 +348,7 @@ impl KernelCache {
             "{{\"name\": {}, \"options\": [{}], \"target\": {}, \"nvrtc\": \"{}.{}\", \"source_sha256\": \"{}\"}}\n",
             quote(name),
             options.join(", "),
-            quote(&self.target.tag()),
+            quote(&target.tag()),
             self.nvrtc_version.0,
             self.nvrtc_version.1,
             hex(&Sha256::digest(src.as_bytes()))
@@ -326,7 +361,7 @@ impl KernelCache {
     /// Compiles `src` without caching and returns NVRTC's log (with `extra` options such as
     /// `--ptxas-options=-v`, which reports registers, spills and shared memory per kernel).
     pub fn compile_log(&self, name: &str, src: &str, extra: &[&str]) -> Result<String, GpuError> {
-        Ok(compile(name, src, &self.options(extra), &self.target)?.1)
+        Ok(compile(name, src, &self.options(extra, &self.target), &self.target)?.1)
     }
 }
 
@@ -420,7 +455,7 @@ fn compile(
             log: log.clone(),
         }),
         Ok(()) => match target {
-            Target::Cubin(_) => {
+            Target::Cubin(_) | Target::CubinArchSpecific(_) => {
                 let mut n = 0usize;
                 // SAFETY: sized buffer for the CUBIN of a compiled program.
                 unsafe { nvsys::nvrtcGetCUBINSize(prog, &mut n) }

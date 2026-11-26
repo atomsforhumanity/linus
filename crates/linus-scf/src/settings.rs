@@ -207,12 +207,12 @@ pub struct ScfAlgorithm {
     /// change; the residual is reported in `resolved.record.scf.plateau`.
     pub plateau_window: usize,
     /// Escalation within `max_iter`: an SCF whose DIIS stagnates (the lowest energy not improved
-    /// for `stagnation_window` iterations), or that has spent 2/3 of `max_iter` unconverged,
-    /// restarts once from the orbitals of the lowest-energy iteration it visited (on the final J/K
-    /// approximation), with a new DIIS subspace, no level shift and no damping, and takes
-    /// quasi-Newton (SOSCF) steps, which descend in energy, for the rest of the budget (the
-    /// plateau rule decides first, and at the end). It needs at least 2 iterations left
-    /// (`control::MIN_ESCALATION`). Reported in `resolved.record.scf.escalation`, with the
+    /// for `stagnation_window` iterations) or blows up (`blowup_window`), or that has spent 2/3 of
+    /// `max_iter` unconverged, restarts once from the orbitals of the lowest-energy iteration it
+    /// visited (on the final J/K approximation), with a new DIIS subspace, no level shift and no
+    /// damping, and takes quasi-Newton (SOSCF) steps, which descend in energy, for the rest of the
+    /// budget (the plateau rule decides first, and at the end). It needs at least 2 iterations
+    /// left (`control::MIN_ESCALATION`). Reported in `resolved.record.scf.escalation`, with the
     /// reason when it did not run in an SCF that used its budget.
     pub escalate: bool,
     /// Iterations without a new lowest energy after which the escalation starts (0: only at 2/3
@@ -221,6 +221,18 @@ pub struct ScfAlgorithm {
     /// iteration 85 would have reached it first (a smaller window escalates more SCFs that
     /// converge on their own: 676 at 32); of the 9,003 that failed, 3,506 reach it by iteration 85.
     pub stagnation_window: usize,
+    /// Iterations in a row of a DIIS blow-up after which the escalation starts (0: off): the
+    /// energy more than [`BLOWUP_ENERGY`](crate::control::BLOWUP_ENERGY) (1 Eh) above the lowest
+    /// visited while max |F_ai| is more than [`BLOWUP_GRADIENT`](crate::control::BLOWUP_GRADIENT)
+    /// (10) times the smallest visited (both since the J/K builder's last change of
+    /// approximation). A nearly gapless Trp-cage (PBE/def2-SVP) descends to iteration 23, then
+    /// sits 11 Eh higher at 21.6x the gradient and later 560 Eh: the stagnation window escalates
+    /// at iteration 87, the blow-up at 27, from the same orbitals. Default 4: of the 80,987 SCF
+    /// histories of the robustness sweep and its SCF runs that converge without escalating, 17
+    /// would have escalated first (LiF at 7 Å, Cr2 at 2.5 Å, NiCl4 2- without the level shift, a
+    /// cobalt complex's triplet; DIIS recovers after 60-280 iterations); the constants' evidence is
+    /// in `control::blowup`.
+    pub blowup_window: usize,
     /// Linear-dependence threshold of the canonical orthogonalization, absolute: eigenvectors of
     /// the overlap matrix with eigenvalues at or below `lindep` are dropped
     /// ([`ScfResult::dropped_functions`](crate::ScfResult::dropped_functions)); fewer
@@ -231,6 +243,8 @@ pub struct ScfAlgorithm {
 impl ScfAlgorithm {
     /// The default of [`ScfAlgorithm::stagnation_window`].
     pub const STAGNATION_WINDOW: usize = 64;
+    /// The default of [`ScfAlgorithm::blowup_window`].
+    pub const BLOWUP_WINDOW: usize = 4;
 }
 
 impl Default for ScfAlgorithm {
@@ -262,6 +276,7 @@ impl Default for ScfAlgorithm {
             plateau_window: 50,
             escalate: true,
             stagnation_window: ScfAlgorithm::STAGNATION_WINDOW,
+            blowup_window: ScfAlgorithm::BLOWUP_WINDOW,
             lindep: 1e-8,
         }
     }

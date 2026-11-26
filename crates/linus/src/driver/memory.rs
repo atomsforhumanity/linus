@@ -8,7 +8,8 @@
 //!
 //! | item | rule | taken by |
 //! |---|---|---|
-//! | `others_reserve` | max(8 GiB, limit / 10), at most limit / 4 | the DF-J/K's optional planes (Ozaki pre-sliced, native K's dense) leave it free for the other engines |
+//! | `others_reserve` | max(8 GiB, limit / 10), at most limit / 4 | the SCF's DF-J/K plans its storage and workspaces within the limit less it (`linus_gpu::df::plan`); the response DF-J/K's shrunk storage rungs and the Ozaki exchange's pre-sliced planes leave it free for the other engines |
+//! | `grid_partition` | `others_reserve` | the device grid partition, which runs beside the SCF's DF-J/K setup: within this share its grant (up to 512 MiB of tile scratch and about 48 B per grid point) fits beside the setup's planned allocations whatever the two threads' timing; a grid that needs more is partitioned on the host |
 //! | `response_workspace` | the response J/K's default (8 GiB), at most limit / 4 | the response exchange's workspace per call |
 //! | `k_operator_reserve` | the response J/K's default (6 GiB), at most limit / 4 | the stored exchange operator leaves it free (the CPKS kernel's workspace per call) |
 //! | `w_planes_reserve` | the response J/K's default (2 GiB) | the Ozaki planes of a range-separated operator tensor W leave it free beside the workspace |
@@ -26,6 +27,7 @@ pub(crate) struct DeviceMemoryPlan {
     /// The device limit the engines plan against (bytes).
     pub limit: usize,
     pub others_reserve: usize,
+    pub grid_partition: usize,
     pub response_workspace: usize,
     pub k_operator_reserve: usize,
     pub w_planes_reserve: usize,
@@ -60,9 +62,11 @@ impl DeviceMemoryPlan {
             w_planes_reserve,
         } = defaults;
         let response_workspace = workspace.min(limit / 4);
+        let others_reserve = OTHERS_RESERVE.max(limit / 10).min(limit / 4);
         DeviceMemoryPlan {
             limit,
-            others_reserve: OTHERS_RESERVE.max(limit / 10).min(limit / 4),
+            others_reserve,
+            grid_partition: others_reserve,
             response_workspace,
             k_operator_reserve: k_operator_reserve.min(limit / 4),
             w_planes_reserve,
@@ -93,6 +97,8 @@ mod tests {
             (p.others_reserve, p.response_workspace, p.k_operator_reserve),
             (l8 / 4, l8 / 4, l8 / 4)
         );
+        // the grid partition beside the DF-J/K's setup: the share that setup leaves
+        assert_eq!(p.grid_partition, p.others_reserve);
         assert_eq!(p.ground_cache_leave, l8 / 4 + G);
         // 24 GiB: the operator's reserve kept, the workspace capped
         let p = DeviceMemoryPlan::for_limit(24 * G, D);

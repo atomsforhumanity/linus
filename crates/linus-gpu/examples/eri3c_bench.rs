@@ -10,7 +10,7 @@
 //!               [--thresh 1e-16] [--batch-gb 4] [--omega 0.3] [--no-cpu] [--no-deriv]
 
 mod common;
-use common::device_ms;
+use common::{arg, device_ms};
 use linus_gpu::cpu::{pair_block, Aux3c, Operator, Pair3c, Work3c};
 use linus_gpu::eri3c::{all_pairs, Eri3c, Eri3cHost, Eri3cKind, PairRow};
 use linus_gpu::harness;
@@ -19,12 +19,6 @@ use linus_gpu::{Arg, Gpu, GpuError, Launch};
 use std::time::Instant;
 
 type R<T> = Result<T, GpuError>;
-
-fn arg(args: &[String], name: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1).cloned())
-}
 
 /// FP64 FMA throughput (GFLOP/s) of eight independent FMA chains per thread.
 fn fp64_peak(gpu: &Gpu) -> R<f64> {

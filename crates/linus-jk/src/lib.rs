@@ -19,6 +19,7 @@
 pub mod cosx;
 pub mod df;
 pub mod exact;
+pub mod gridk;
 
 use faer::{Mat, Par};
 use linus_base::error::LinusError;
@@ -228,7 +229,8 @@ impl JkBuilder for CompositeJk {
                 want_j: false,
                 want_k: true,
             };
-            out.k = self.k.compute(&r, par)?.k;
+            let k = self.k.compute(&r, par)?;
+            (out.k, out.k_energy) = (k.k, k.k_energy);
         }
         Ok(out)
     }

@@ -329,6 +329,9 @@ impl CalcContext {
             grid: grid.spec(),
             nlc_grid: (self.method.vv10 && nlc).then(|| self.plan.nlc_grid().spec()),
             kernel_budget_mb: self.plan.memory().xc_kernel_mb(),
+            partition: self.backend.provider().and_then(|p| {
+                p.grid_partition(self.plan.device().map(|d| d.memory.grid_partition))
+            }),
         })
     }
 
@@ -423,17 +426,33 @@ impl CalcContext {
         (s, h)
     }
 
-    /// Overlap and T + V (point nuclei with their effective charges), without the ECPs.
-    pub fn one_electron_no_ecp(&self, pairs: &PairSet) -> (Mat<f64>, Mat<f64>) {
+    /// Overlap and kinetic energy (the nuclear attraction apart:
+    /// [`CalcContext::nuclear_attraction_host`], or a device's).
+    pub(crate) fn overlap_kinetic(&self) -> (Mat<f64>, Mat<f64>) {
+        let n = self.basis.nbf;
+        let (mut s, mut t) = (Mat::zeros(n, n), Mat::zeros(n, n));
+        OneEPlan::new(&self.basis, DerivOrder::Zero)
+            .overlap_kinetic(&mut ao_view_mut(s.as_mut()), &mut ao_view_mut(t.as_mut()));
+        (s, t)
+    }
+
+    /// The nuclear attraction V of the point charges (the nuclei with their effective charges
+    /// and any external ones) on the host.
+    pub(crate) fn nuclear_attraction_host(&self, pairs: &PairSet) -> Mat<f64> {
         let n = self.basis.nbf;
         let charges = self.mol.point_charges();
         let plan = OneEPlan::new(&self.basis, DerivOrder::Zero)
             .with_charges(pairs, &charges)
             .expect("the potential takes pairs of any order");
-        let (mut s, mut t, mut v) = (Mat::zeros(n, n), Mat::zeros(n, n), Mat::zeros(n, n));
-        plan.overlap_kinetic(&mut ao_view_mut(s.as_mut()), &mut ao_view_mut(t.as_mut()));
+        let mut v = Mat::zeros(n, n);
         plan.potential(&mut ao_view_mut(v.as_mut()));
-        (s, t + v)
+        v
+    }
+
+    /// Overlap and T + V (point nuclei with their effective charges), without the ECPs.
+    pub fn one_electron_no_ecp(&self, pairs: &PairSet) -> (Mat<f64>, Mat<f64>) {
+        let (s, t) = self.overlap_kinetic();
+        (s, t + self.nuclear_attraction_host(pairs))
     }
 
     /// The ECP part of the core Hamiltonian (None without ECPs).
@@ -539,12 +558,44 @@ impl Session {
             .map_err(|e| {
                 LinusError::resource(format!("cannot start {} threads: {e}", plan.threads()))
             })?;
-        // the device of a GPU backend, once per session
-        let backend = backend::BackendState::open(
-            plan.backend(),
-            plan.device_memory_cap()?.map(|c| c.0),
-            &plan.backend().kernel_cache(),
-        )?;
+        // with a device to open (its context creation: 0.2-0.4 s of driver work on this thread),
+        // the host's first setups of the geometry run beside it on the session's pool: the
+        // index-ordered shell pairs (the integral context then holds them) and SAD's atomic
+        // densities (cached for the process), which need only the basis; the same results as
+        // built later
+        let device_cap = plan.device_memory_cap()?.map(|c| c.0);
+        let sad = plan.guess() == Guess::Sad;
+        let ahead = || {
+            if sad {
+                let _ = linus_scf::guess::atomic_densities(&basis_def, &basis, &mol.z);
+            }
+            let pairs = PairSet::build(
+                &basis,
+                linus_ints::PairOptions::with_order(DerivOrder::Zero),
+            );
+            // their Schwarz factors (the device J/K's layout and the device PCM screen with
+            // them), cached in the set
+            let _ = pairs.schwarz();
+            Arc::new(pairs)
+        };
+        let (backend, ahead) = std::thread::scope(|s| {
+            let ahead = (plan.backend().kind() != options::BackendKind::Cpu)
+                .then(|| {
+                    std::thread::Builder::new()
+                        .name("linus-setup-ahead".into())
+                        .spawn_scoped(s, || pool.install(ahead))
+                        .ok()
+                })
+                .flatten();
+            // the device of a GPU backend, once per session
+            let backend = backend::BackendState::open(
+                plan.backend(),
+                device_cap,
+                &plan.backend().kernel_cache(),
+            );
+            (backend, ahead.and_then(|h| h.join().ok()))
+        });
+        let backend = backend?;
         // the device's policy and memory plan, and where every family of kernels runs
         plan.decide(&method, backend.device());
         let progress = if plan.verbose() {
@@ -567,6 +618,9 @@ impl Session {
             progress,
             process: Default::default(),
         };
+        if let Some(pairs) = ahead {
+            cx.integrals.set_pairs(pairs);
+        }
         // the auxiliary basis of the energy (names, elements, angular momentum) and the
         // dispersion parameters and elements, before any SCF
         let aux = match cx.plan.jk().aux() {
@@ -1019,19 +1073,9 @@ impl Session {
                 let pairs = timers.time("pairs", || {
                     self.cx.integrals.pairs(&self.cx.basis, DerivOrder::Zero)
                 });
-                let (s, mut h) =
-                    timers.time("one_electron", || self.cx.one_electron_no_ecp(&pairs));
-                if let Some(u) = timers.time("ecp", || self.cx.ecp_matrix(&pairs)) {
-                    h += u;
-                }
-                // the SCF's J/K and XC term on the backends the plan puts them on
-                // (crate::backend::scf); the pairs are done with once the J/K is set up
-                let terms = self.cx.scf_terms(pairs, &setup, &mut timers)?;
-                // VV10's statistics so far (an integrator shared with an earlier phase of this
-                // geometry has some): the SCF's are the difference
-                let vv10_before = terms.xc.as_ref().and_then(|x| x.vv10_stats());
                 let (na, nb) = self.cx.mol.nalpha_nbeta().map_err(LinusError::Input)?;
-                let guess = match (guess, self.cx.plan.guess()) {
+                // the starting densities: the given ones, none (the core guess) or SAD's
+                let start = |timers: &mut Timers| match (guess, self.cx.plan.guess()) {
                     (Some(g), _) => Some(g),
                     (None, Guess::Core) => None,
                     (None, Guess::Sad) => Some(timers.time("guess", || {
@@ -1045,6 +1089,13 @@ impl Session {
                         )
                     })),
                 };
+                // the SCF's J/K and XC term on the backends the plan puts them on, and the host's
+                // own setup: S, h and the starting densities (crate::backend::scf)
+                let (host, terms) = self.cx.scf_setups(pairs, &setup, start, &mut timers)?;
+                let crate::backend::scf::ScfHost { s, h, guess } = host;
+                // VV10's statistics so far (an integrator shared with an earlier phase of this
+                // geometry has some): the SCF's are the difference
+                let vv10_before = terms.xc.as_ref().and_then(|x| x.vv10_stats());
                 let algo = self.cx.plan.scf_algorithm().clone();
                 let mut opts = ScfConfig {
                     restricted: self.cx.plan.restricted(),
@@ -1101,8 +1152,12 @@ impl Session {
                     let mut scf = self.cx.scf_loop(&mut terms, run)?;
                     self.cx.scf_on(&setup, scf.as_mut())?
                 };
-                // the J/K is done with; the XC term keeps VV10's statistics
+                // the J/K is done with (its engines' phases join the SCF's timers); the XC term
+                // keeps VV10's statistics
                 let ScfTerms { jk, xc, .. } = terms;
+                if let Some(t) = jk.timers() {
+                    r.timers.merge(&t);
+                }
                 drop(jk);
                 vv10 = xc
                     .as_ref()

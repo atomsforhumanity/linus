@@ -258,32 +258,10 @@ impl ThreadAccs {
 /// First Cartesian row of each shell, the number of Cartesian rows and the spherical
 /// transform T (nbf x ncart; None if it is the identity).
 pub(crate) fn cart_layout(basis: &BasisSet) -> (Vec<usize>, usize, Option<Mat<f64>>) {
-    let mut off = Vec::with_capacity(basis.shells.len());
-    let mut nc = 0;
-    for sh in &basis.shells {
-        off.push(nc);
-        nc += linus_ints::basis::ncart(sh.l);
-    }
-    let mut t = Mat::<f64>::zeros(basis.nbf, nc);
-    let mut identity = nc == basis.nbf;
-    for (s, sh) in basis.shells.iter().enumerate() {
-        let ncs = linus_ints::basis::ncart(sh.l);
-        let ts = BasisSet::shell_transform(sh);
-        for j in 0..sh.nfunc() {
-            for i in 0..ncs {
-                let v = ts[j * ncs + i];
-                t[(sh.ao_start + j, off[s] + i)] = v;
-                if v != if sh.ao_start + j == off[s] + i {
-                    1.0
-                } else {
-                    0.0
-                } {
-                    identity = false;
-                }
-            }
-        }
-    }
-    (off, nc, if identity { None } else { Some(t) })
+    let c = basis.cart_layout();
+    let (n, nc) = (basis.nbf, c.ncart());
+    let t = (!c.identity).then(|| Mat::from_fn(n, nc, |i, j| c.t[j * n + i]));
+    (c.offsets, nc, t)
 }
 
 /// Row-major nbf x nbf matrix times T: row-major nbf x ncart (a copy without T).
@@ -368,27 +346,13 @@ struct Counters {
 impl CosxK {
     /// Builder on `grid` with the significant shell pairs of `basis`.
     pub fn new(basis: &BasisSet, grid: impl Into<Arc<MolecularGrid>>, opts: CosxConfig) -> Self {
-        let ns = basis.shells.len();
         let extents = basis
             .shells
             .iter()
             .map(|s| shell_extent(s, opts.bf_cut))
             .collect();
         // primitive pairs that cannot matter at any F and X are dropped here
-        let pair_list: Vec<(usize, usize)> =
-            (0..ns).flat_map(|i| (0..=i).map(move |j| (i, j))).collect();
-        let cut = opts.thresh * 1e-6;
-        let pairs: Vec<PotPair> = pair_list
-            .par_iter()
-            .map(|&(i, j)| {
-                let mut p = PotPair::new(basis, i, j, 1e-30);
-                let keep = p.nprim_above(cut);
-                p.prims.truncate(keep);
-                p.est = p.prims.iter().map(|q| q.est).sum();
-                p
-            })
-            .filter(|p| !p.prims.is_empty())
-            .collect();
+        let pairs = PotPair::significant(basis, opts.thresh * 1e-6);
         let (cart_off, ncart, tsph) = cart_layout(basis);
         CosxK {
             basis: basis.clone(),
@@ -1261,7 +1225,11 @@ impl JkBuilder for CosxK {
                 self.last_incremental = true;
                 self.prev = Some((req.dens.to_vec(), k.clone()));
                 self.log(true);
-                return Ok(JkOutput { j: vec![], k });
+                return Ok(JkOutput {
+                    j: vec![],
+                    k,
+                    k_energy: None,
+                });
             }
         }
         let k = self.build(req.dens, par);
@@ -1271,7 +1239,11 @@ impl JkBuilder for CosxK {
             self.prev = Some((req.dens.to_vec(), k.clone()));
         }
         self.log(false);
-        Ok(JkOutput { j: vec![], k })
+        Ok(JkOutput {
+            j: vec![],
+            k,
+            k_energy: None,
+        })
     }
 }
 

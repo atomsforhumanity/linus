@@ -24,7 +24,7 @@ use crate::driver::{CalcContext, Purpose, Session, UnconvergedResponse};
 use crate::properties::dipole::ElectricField;
 use crate::two_electron::{ResponseRequest, ResponseUse};
 use faer::{Mat, Par};
-use linus_base::error::{LinusError, ResponseFailure};
+use linus_base::error::{LinusError, ResponseEnd, ResponseFailure};
 use linus_base::terms::ResponseJk;
 use linus_core::timing::Timers;
 use linus_ints::DerivOrder;
@@ -45,6 +45,8 @@ pub struct Polarizability {
     /// Max-abs residual of the last CPHF/CPKS iteration (at most `response.field_tol`, or
     /// the polarizability is an error).
     pub max_residual: f64,
+    /// How the CPHF/CPKS ended (the failure's cause when it stopped above the tolerance).
+    pub end: ResponseEnd,
     pub timers: Timers,
 }
 
@@ -63,6 +65,7 @@ impl FieldResponse {
             alpha: self.alpha,
             cphf_iterations: self.stats.iterations,
             max_residual: self.stats.max_residual,
+            end: self.stats.end,
             timers,
         }
     }
@@ -95,7 +98,7 @@ impl CalcContext {
         let tol = self.plan.response().field_tol();
         // the field as a perturbation of the reference (crate::properties::dipole): its
         // right-hand sides b_s^c = -C_vs^T r_c C_os
-        let field = ElectricField::new(reference, basis, par);
+        let field = ElectricField::new(reference, self.dipole_ints(), par);
         // the geometry's pairs (crate::context)
         let pairs = self.integrals.pairs(basis, DerivOrder::Zero);
         // the reference's spin channels (crate::reference): the alpha orbitals of a closed shell
@@ -173,7 +176,7 @@ impl CalcContext {
         let mut m = Mat::<f64>::zeros(3, 3);
         for s in 0..u.len() {
             stacked_gram(&mut m, f, &refs(&u[s]), &refs(&rhs[s]), par);
-            correction.add_gram(&mut m, s, f, par);
+            correction.add_gram(None, &mut m, s, f, par)?;
         }
         let alpha: [[f64; 3]; 3] =
             std::array::from_fn(|c| std::array::from_fn(|d| 0.5 * (m[(c, d)] + m[(d, c)])));
@@ -228,6 +231,7 @@ impl Session {
                 iterations: p.cphf_iterations,
                 max_residual: p.max_residual,
                 tol,
+                end: p.end,
             };
             self.unconverged_response = Some(UnconvergedResponse::Polarizability(Box::new(p)));
             return Err(LinusError::ResponseNotConverged(Box::new(failure)));

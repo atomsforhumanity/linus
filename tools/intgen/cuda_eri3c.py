@@ -69,10 +69,10 @@ depend on the architecture records.
 import json
 import pathlib
 
+from cuda_common import CPrinter, boys_stage, lit
 from ir import CudaSchedule, Graph, r_graph
-from mdmath import (BOYS_COLS, BOYS_TMAX, ERI_PREF, INV_FACT, INV_INT, cart_components, e_pattern,
-                    e_pattern_deriv, e_pattern_deriv2, herm_idx, herm_tuv, ncart, nfunc, nherm, r_direction,
-                    sph_coefs)
+from mdmath import (BOYS_TMAX, ERI_PREF, cart_components, e_pattern, e_pattern_deriv, e_pattern_deriv2,
+                    herm_idx, herm_tuv, ncart, nfunc, nherm, r_direction, sph_coefs)
 
 MAX_L_ORB = 4
 MAX_L_AUX = 6
@@ -97,12 +97,6 @@ SET_NAMES = {"e": ["E"], "d": ["Ax", "Ay", "Az", "Bx", "By", "Bz"],
 KIND_TEXT = {"e": "integrals", "d": "first derivatives", "h": "second derivatives"}
 # the kind in the generated Rust tables (linus-gpu's eri3c_class::Eri3cKind)
 KIND_RUST = {"e": "Eri3cKind::Integrals", "d": "Eri3cKind::Derivatives", "h": "Eri3cKind::Hessian"}
-
-
-def lit(v):
-    """A C literal that parses to exactly v."""
-    s = repr(float(v))
-    return s if any(c in s for c in ".enai") else s + ".0"
 
 
 def classes():
@@ -256,38 +250,6 @@ def build_rh(ci, rule, h_too=True):
     return g, nodes, R, H
 
 
-class CPrinter:
-    """Prints IR nodes as C: fma(a, b, c), a * b, a + b, a - b, -a, literals."""
-
-    def __init__(self):
-        self.names = {}
-
-    def bind(self, n, name):
-        self.names[n.id] = name
-
-    def ref(self, n):
-        nm = self.names.get(n.id)
-        return nm if nm is not None else self.defn(n)
-
-    def defn(self, n):
-        a = n.args
-        if n.op == "in":
-            return n.value
-        if n.op == "const":
-            return lit(n.value)
-        if n.op == "mul":
-            return f"{self.ref(a[0])} * {self.ref(a[1])}"
-        if n.op == "add":
-            return f"{self.ref(a[0])} + {self.ref(a[1])}"
-        if n.op == "sub":
-            return f"{self.ref(a[0])} - {self.ref(a[1])}"
-        if n.op == "neg":
-            return f"-{self.ref(a[0])}"
-        if n.op == "fma":
-            return f"fma({self.ref(a[0])}, {self.ref(a[1])}, {self.ref(a[2])})"
-        raise ValueError(n.op)
-
-
 # ---------------------------------------------------------------- shared source pieces
 
 SIGNATURE = """(long long npair, int nauxsh, const int *__restrict__ pr_p0, const double *__restrict__ pr_d,
@@ -328,45 +290,16 @@ def operator_header():
 
 def boys_rn(lt, ind):
     """Statements accumulating s_n += pref (-2 alpha)^n F_n(T) for one auxiliary primitive (bd);
-    needs p, rr, ipref = ERI_PREF / p and s0..s{lt} in scope. The Boys scheme of linus-ints' eri3c,
-    with the operator's step (operator_header) on alpha and the prefactor."""
-    o = []
-    o.append(f"{ind}const double ae = bd[0];")
-    o.append(f"{ind}const double sp = p + ae;")
-    o.append(f"{ind}const double rs = rsqrt(sp);")
-    o.append(f"{ind}double al = p * ae * (rs * rs);")
-    o.append(f"{ind}double pref = ipref * rs * bd[1];   // bd[1] = c (2a)^-l (-1)^l / a")
-    o.append(f"{ind}ERI3C_OPERATOR(al, pref);")
-    o.append(f"{ind}const double t = al * rr;")
-    fv = ", ".join(f"f{m}" for m in range(lt + 1))
-    o.append(f"{ind}double {fv};")
-    o.append(f"{ind}if (t < {lit(BOYS_TMAX)}) {{")
-    o.append(f"{ind}    const int i = (int)(t * 10.0 + 0.5);")
-    o.append(f"{ind}    const double dt = i * 0.1 - t;")
-    o.append(f"{ind}    const double *row = btab + i * {BOYS_COLS};")
-    o.append(f"{ind}    double acc = row[{lt + 7}];")
-    for k in range(6, -1, -1):
-        o.append(f"{ind}    acc = row[{lt + k}] + acc * dt * {lit(INV_INT[k + 1])};")
-    o.append(f"{ind}    f{lt} = acc;")
-    ser = lit(INV_FACT[8])
-    for k in range(7, -1, -1):
-        ser = f"{lit(INV_FACT[k])} + dt * ({ser})"
-    o.append(f"{ind}    const double e = row[{BOYS_COLS - 1}] * ({ser});")
-    for m in range(lt - 1, -1, -1):
-        o.append(f"{ind}    f{m} = (2.0 * t * f{m + 1} + e) * {lit(1.0 / (2 * m + 1))};")
-    o.append(f"{ind}}} else {{")
-    o.append(f"{ind}    const double ti = 1.0 / t;")
-    o.append(f"{ind}    f0 = 0.5 * sqrt({lit(3.141592653589793)} * ti);")
-    for m in range(1, lt + 1):
-        o.append(f"{ind}    f{m} = f{m - 1} * ({lit((2 * m - 1) * 0.5)} * ti);")
-    o.append(f"{ind}}}")
-    o.append(f"{ind}const double m2a = -2.0 * al;")
-    o.append(f"{ind}double sc = pref;")
-    for n in range(lt + 1):
-        o.append(f"{ind}s{n} += sc * f{n};")
-        if n < lt:
-            o.append(f"{ind}sc *= m2a;")
-    return o
+    needs p, rr, ipref = ERI_PREF / p and s0..s{lt} in scope. The Boys scheme of linus-ints' eri3c
+    (cuda_common.boys_stage, cutoff BOYS_TMAX), with the operator's step (operator_header) on alpha
+    and the prefactor."""
+    prologue = ["const double ae = bd[0];",
+                "const double sp = p + ae;",
+                "const double rs = rsqrt(sp);",
+                "double al = p * ae * (rs * rs);",
+                "double pref = ipref * rs * bd[1];   // bd[1] = c (2a)^-l (-1)^l / a",
+                "ERI3C_OPERATOR(al, pref);"]
+    return boys_stage(lt, ind, prologue, BOYS_TMAX, accumulate=True)
 
 
 def rn_loop(ci, ind, kvar):

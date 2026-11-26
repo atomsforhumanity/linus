@@ -109,8 +109,8 @@ pub mod state;
 pub mod trace;
 
 pub use result::{
-    Escalation, EscalationRun, ModeCheck, Plateau, PlateauRefusal, ScfIteration, ScfResult,
-    MODE_CHECK_THRESHOLD,
+    Escalation, EscalationRun, ModeCheck, NonAufbau, Plateau, PlateauRefusal, ScfIteration,
+    ScfResult, MODE_CHECK_THRESHOLD,
 };
 pub use settings::{
     DiisDrop, Guess, ScfAlgorithm, ScfConfig, CLOSED_SHELL_GAP, CLOSED_SHELL_PROBE_AUTO,
@@ -165,6 +165,43 @@ pub fn try_diagonalize(
     let fp = mm(x.transpose(), mm(f, x, par).as_ref(), par);
     let (eps, cp) = try_eigh(fp.as_ref(), par).ok()?;
     Some((eps, mm(x, cp.as_ref(), par)))
+}
+
+/// The canonical orbitals of the occupied space of `o` (nbf x nocc, S-orthonormal) in the Fock
+/// matrix `f`: orbitals (nbf x nmo) whose first nocc span `o` and the rest its complement in the
+/// orthonormal basis `x` (nbf x nmo), each block diagonal in `f` (semicanonical), with their
+/// orbital energies (each block ascending). The density of `o` is kept. Where `o` spans an
+/// invariant subspace of `f` (a converged SCF's occupied orbitals) these are eigenvectors of `f`
+/// to within the orbital gradient, occupied as `o` is whether or not that is the aufbau set.
+/// The SCF's final orbitals after quasi-Newton steps or rotations (`run`) and the escalation's
+/// start, which keeps only the occupied orbitals of an earlier iteration (`accel`). None when
+/// `f` (in the orthonormal basis) has non-finite elements.
+pub(crate) fn try_semicanonical(
+    o: &Mat<f64>,
+    f: &Mat<f64>,
+    x: MatRef<'_, f64>,
+    s: MatRef<'_, f64>,
+    par: Par,
+) -> Option<(Vec<f64>, Mat<f64>)> {
+    let (nmo, no) = (x.ncols(), o.ncols());
+    // O = X P with P = X^T S O (orthonormal columns); the complement: the eigenvectors of
+    // I - P P^T with eigenvalue 1 (the last nmo - nocc, ascending)
+    let p = mm(x.transpose(), mm(s, o.as_ref(), par).as_ref(), par);
+    let q = Mat::<f64>::identity(nmo, nmo) - mm(p.as_ref(), p.transpose(), par);
+    let (_, u) = try_eigh(q.as_ref(), par).ok()?;
+    let fx = mm(x.transpose(), mm(f.as_ref(), x, par).as_ref(), par);
+    let semi = |b: MatRef<'_, f64>| -> Option<(Vec<f64>, Mat<f64>)> {
+        let fb = mm(b.transpose(), mm(fx.as_ref(), b, par).as_ref(), par);
+        let (e, w) = try_eigh(fb.as_ref(), par).ok()?;
+        Some((e, mm(b, w.as_ref(), par)))
+    };
+    let (mut eps, co) = semi(p.as_ref())?;
+    let (ev, cv) = semi(u.subcols(no, nmo - no))?;
+    eps.extend(ev);
+    let mut c = Mat::<f64>::zeros(nmo, nmo);
+    c.subcols_mut(0, no).copy_from(co.as_ref());
+    c.subcols_mut(no, nmo - no).copy_from(cv.as_ref());
+    Some((eps, mm(x, c.as_ref(), par)))
 }
 
 /// All elements finite.
@@ -233,6 +270,59 @@ mod tests {
     use super::*;
     use linus_base::terms::{JkOutput, JkRequest, XcDensity};
 
+    /// The semicanonical orbitals of a non-aufbau occupied space keep its density and are
+    /// eigenvectors of F in each block: F = diag(-1, -0.6, -0.5, 0.2) rotated in a non-orthonormal
+    /// basis, the occupied space spanned by its eigenvectors 0 and 2 (the second one empty below
+    /// an occupied one, as after the escalation): the occupied energies -1, -0.5 and the virtual
+    /// -0.6, 0.2, the density the projector onto that space, and `NonAufbau::of` names the hole
+    /// (position 1 in ascending energy) and the particle (position 2), 0.1 Eh apart.
+    #[test]
+    fn semicanonical_orbitals_keep_a_non_aufbau_occupied_space() {
+        let n = 4;
+        // S = L L^T with a lower-triangular L; X = L^-T is S-orthonormal
+        let l = Mat::from_fn(n, n, |i, j| match (i, j) {
+            _ if i == j => 1.0 + 0.1 * i as f64,
+            _ if i > j => 0.05 * (i + 2 * j + 1) as f64,
+            _ => 0.0,
+        });
+        let s = &l * l.transpose();
+        let x = linus_base::linalg::canonical_orthogonalizer(s.as_ref(), 1e-10, Par::Seq);
+        // an orthogonal U from a rotation's eigenvectors; the eigenvectors C = X U
+        let a = Mat::from_fn(n, n, |i, j| {
+            ((i * 7 + j * 3) % 5) as f64 + (i == j) as u8 as f64
+        });
+        let (_, u) = linus_base::linalg::eigh((&a + a.transpose()).as_ref(), Par::Seq);
+        let c = &x * &u;
+        let e = [-1.0, -0.6, -0.5, 0.2];
+        // F C = S C e, so F = S C e C^T S
+        let sc = &s * &c;
+        let f = Mat::from_fn(n, n, |i, j| {
+            (0..n).map(|k| sc[(i, k)] * e[k] * sc[(j, k)]).sum()
+        });
+        let o = Mat::from_fn(n, 2, |i, k| c[(i, [0, 2][k])]);
+        let (eps, cs) = try_semicanonical(&o, &f, x.as_ref(), s.as_ref(), Par::Seq).unwrap();
+        for (got, want) in eps.iter().zip([-1.0, -0.5, -0.6, 0.2]) {
+            assert!((got - want).abs() < 1e-12, "{eps:?}");
+        }
+        let d0 = &o * o.transpose();
+        let d1 = density(cs.as_ref(), 2, Par::Seq);
+        let fc = &f * &cs;
+        let scs = &s * &cs;
+        for i in 0..n {
+            for j in 0..n {
+                assert!((d0[(i, j)] - d1[(i, j)]).abs() < 1e-12);
+                // F c_p = e_p S c_p
+                assert!((fc[(i, j)] - eps[j] * scs[(i, j)]).abs() < 1e-12);
+            }
+        }
+        let v = NonAufbau::of("restricted", &eps, 2, 1e-10).unwrap();
+        assert_eq!((&v.holes[..], &v.particles[..]), (&[1][..], &[2][..]));
+        assert!((v.inversion - 0.1).abs() < 1e-12);
+        // an aufbau spectrum, and an inversion within the tolerance, are not recorded
+        assert!(NonAufbau::of("alpha", &[-1.0, -0.5, -0.6, 0.2], 1, 1e-10).is_none());
+        assert!(NonAufbau::of("alpha", &[-1.0, -0.5, -0.5 - 1e-12, 0.2], 2, 1e-10).is_none());
+    }
+
     /// No electron-electron terms: a two-function model's SCF is its core Hamiltonian's.
     struct NoJk;
 
@@ -246,6 +336,7 @@ mod tests {
             Ok(JkOutput {
                 j: req.dens.iter().map(z).collect(),
                 k: req.dens.iter().map(z).collect(),
+                k_energy: None,
             })
         }
     }

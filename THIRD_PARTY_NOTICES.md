@@ -12,7 +12,7 @@ the Python wheel (in its `.dist-info/licenses/`) and command-line release archiv
 | linus (crates `linus`, `linus-ints`, `linus-grid`, `linus-xc`, `linus-cli`, `linus-py`) | MIT | yes | yes |
 | linus-gpu (in development; GPU kernels behind its `gpu` feature) | MIT | yes | no |
 | linus-disp (D3/D4 dispersion) and axtb-d4 | LGPL-3.0-or-later | yes (axtb-d4: a pinned Cargo dependency) | with the `dispersion` feature (on by default) |
-| libxc 7.0.0 | MPL-2.0 | downloaded at build time | statically linked |
+| libxc 7.0.0 | MPL-2.0 | downloaded at build time | statically linked; GPU builds also embed the source of 24 functional files, compiled at run time |
 | Basis Set Exchange basis sets and ECPs (`data/basis`) | BSD-3-Clause | yes | the wheel ships them |
 | Data and constants derived from PySCF 2.15 | Apache-2.0 | yes | yes |
 | Lebedev-Laikov tables (SciPy, Robert Parrish) | BSD-3-Clause, BSD-2-Clause | yes | yes |
@@ -51,6 +51,15 @@ statically. Source code: https://gitlab.com/libxc/libxc/-/archive/7.0.0/libxc-7.
 (SHA-256 `8d4e343041c9cd869833822f57744872076ae709a613c118d70605539fb13a77`). License text:
 `LICENSES/MPL-2.0.txt`. linus's FFI declarations (`crates/linus-xc/src`) and the glibc `cbrt`
 shim (`crates/linus-xc/csrc`) are linus's own.
+
+Builds with the GPU backend (the `gpu` feature: the `afh-linus-cuda13` wheel, the GPU container
+image) also carry, unmodified apart from leaving out their third and fourth derivatives, libxc's
+Maple-generated functional code and the parameter structs of 24 of its source files
+(`src/maple2c/*/<name>.c` and `src/<name>.c`, extracted from the same tarball at build time by
+`crates/linus-xc/build.rs`, feature `device-sources`, which lists them). linus compiles them for the
+GPU at run time with NVRTC, inside a harness of its own (`crates/linus-gpu/device/xc/devfunc.cuh`,
+`crates/linus-gpu/src/xc/devfunc.rs`); they remain under MPL-2.0, with their source at the address
+above.
 
 ## Basis Set Exchange (BSD-3-Clause)
 

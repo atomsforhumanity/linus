@@ -44,6 +44,13 @@ kernels for gradients and Hessians. For debugging, `LINUS_GPU_KERNEL_DUMP=<direc
 each module's full source as the compiler sees it (`<key>.cu`) and its name and compile options
 (`<key>.json`) there, `<key>` being the cache key.
 
+One compile option depends on the card: on H100/H200 (compute capability 9.x) the three-center
+second-derivative kernels of Hessians are built with ptxas `-O1`, because ptxas's default `-O3`
+(CUDA 13.0 and 13.1) builds four of their classes wrongly for sm_90 (wrong Hessians with
+f and g shells, such as def2-TZVP's C-F pairs with the def2-universal-jkfit g functions: 4.9e-4
+Eh/bohr^2 on a 39-atom molecule). It costs these kernels about a third of their time there
+(0.79 to 1.04 s of a 44 s def2-TZVP Hessian). linus-gpu's `compile_options` names the evidence.
+
 **Containers and cluster jobs: put the cache on persistent storage.** The default directory is
 inside the container's home, which is empty in every new container, so every pod of a cluster job
 compiles the kernels again while the GPU waits. Measured on an NVIDIA H200 (sm_90) with a
@@ -95,9 +102,9 @@ the same in every front end:
 - `fp32`: where FP32 may run outside the SCF loop. `off`: nowhere, FP64 throughout (VV10's pair
   sums in FP64 too, and `precision.response: auto` FP64). `auto` (the default): linus's validated
   uses: the single-precision response exchange of large RI Hessians (CPU and GPU), the GPU's CPKS
-  and VV10 kernels in FP32 with it, and VV10's pair sums in double-float. `on` (opt-in): also the
-  GPU's XC gradient, CPKS XC kernel, Hessian XC and VV10 gradient products in FP32, and the
-  stored FP32 response exchange operator where it pays.
+  and VV10 kernels in FP32 with it, and VV10's pair sums in double-float on FP64-poor cards (FP64
+  on FP64-rich ones). `on` (opt-in): also the GPU's XC gradient, CPKS XC kernel, Hessian XC and
+  VV10 gradient products in FP32, and the stored FP32 response exchange operator where it pays.
 - `response`: the arithmetic of the RI response exchange of Hessians: `fp32` (synonym
   `single`), `fp64` (synonym `double`) or `auto` (the default: as `fp32` says; with `fp32: off`
   FP64, else the CPU's single-precision rule, and on the GPU the card's rule, below).
@@ -136,9 +143,10 @@ the fit with the metric's factor.
 | Hessian, explicit XC terms (`hessian_xc`): the XC potential's derivatives, the XC energy's second derivative, the grid response | LDA, GGA and meta-GGA functionals (hybrids and range-separated hybrids included), closed and open shells; the grid response on any partition (the weight derivatives from linus-grid, as the CPU) | - |
 | CPHF/CPKS J/K of Hessians and polarizabilities (`response_jk`) | `jk: "df"`, range-separated hybrids included | `jk: "exact"` |
 | CPKS XC kernel (`response_xc`) | always | - |
-| VV10 in Hessians and polarizabilities (-V functionals, `vv10`): the CPKS kernel and the explicit terms, on the NLC grid | the pair sums (the O(n^2) part per perturbation; double-float by default, FP64 with `precision.fp32: "off"`, as the SCF's VV10; the CPKS kernel's in FP32 when the device's semilocal CPKS kernel runs FP32, `response` `xc: "fp32"`) | the NLC grid's passes (first-order densities, contractions) and the potential's own terms |
+| VV10 in Hessians and polarizabilities (-V functionals, `vv10`): the CPKS kernel and the explicit terms, on the NLC grid | the pair sums (the O(n^2) part per perturbation; in the SCF VV10's arithmetic: by default FP64 on FP64-rich cards and double-float on the others, FP64 with `precision.fp32: "off"`; the CPKS kernel's in FP32 when the device's semilocal CPKS kernel runs FP32, `response` `xc: "fp32"`) | the NLC grid's passes (first-order densities, contractions) and the potential's own terms |
 | implicit solvent: the surface terms of the SCF and of gradients (`pcm`) | `solvent.scf_terms` exact or predicted (the default with density fitting): the surface charges' integrals, the charge solve, the reaction field's Fock matrix and the gradient's integral derivatives | `solvent.df: true` |
-| one-electron integrals and their derivatives, ECPs, the cavity and SMD's CDS term (`solvent`), the PCM's Hessian terms (`solvent`), dispersion | - | always |
+| the SCF's nuclear attraction V (`nuclear_attraction`) | large molecules beside a device J/K: kept shell pairs x point charges at least 2e8 (ubiquitin, 1231 atoms; the device PCM engine's pair x point integrals; within 1e-15 of the CPU's, relative to its largest element) | below that, and on any device failure |
+| one-electron integrals (overlap, kinetic energy; the nuclear attraction of smaller molecules) and their derivatives, ECPs, the cavity and SMD's CDS term (`solvent`), the PCM's Hessian terms (`solvent`), dispersion | - | always |
 
 The SCF loop itself (DIIS, diagonalization) runs on the GPU by default, closed and open shells
 (`backend.scf_loop: "auto"`, decisions D27 and D31); `"host"` keeps it on the CPU, the matrices
@@ -160,7 +168,7 @@ negative probe and the analysis and steps that follow, the saddle check, `scf.st
 a two-cycle), continues on the host loop: the device loop stops at that iteration and the host
 loop redoes it from the device's state (its orbitals, the lowest-energy iterate, the history)
 and goes on as it would have from the start. When the escalation comes due on the device (DIIS
-stagnated, or 2/3 of `max_iter` spent), the device loop hands the state after that step to the
+stagnated or blew up, or 2/3 of `max_iter` spent), the device loop hands the state after that step to the
 host loop, which escalates (`scf.escalate`) from the lowest-energy iterate the device kept, for
 the rest of the same `max_iter`. The stability decisions, the records in
 `scf.stability` and the iteration counts are then those of the host loop.
@@ -252,7 +260,8 @@ else `mixed` with `precision.fp32: "on"`, else `double`. At the default `precisi
 `grad_2e`, `grad_xc`, `hess_cphf`, `vv10`, `grad_vv10`, ...); the GPU adds its setups (`jk_setup`,
 `xc_setup`, `vv10_setup`, `grad_2e_setup`, `grad_xc_setup`, `cphf_xc_setup`). A Hessian's explicit two-electron terms are
 `hess_2e` on the device (with `hess_2e_setup` and its phases `hess_2e_*`) in place of the CPU's
-`hess_df_*`.
+`hess_df_*`. With the grid's partition weights on the device (PySCF's Becke grids), `grid` has
+the parts `grid_partition` (the device's weights) and `grid_batches` (the batching).
 
 ## Precision
 
@@ -261,7 +270,8 @@ how the GPU reaches FP64 accuracy in the exchange GEMMs (native or emulated); `p
 where FP32 may run outside the SCF loop (`off`, linus's validated uses at `auto`, or the opt-in
 `on`); and `precision.response`, the arithmetic of the response exchange.
 
-- FP64 accuracy by default, everywhere (VV10's pair sums in double-float, below).
+- FP64 accuracy by default, everywhere (VV10's pair sums in double-float on FP64-poor cards,
+  below).
   `precision.fp64: "auto"` (the default) picks the card's faster FP64-quality arithmetic from its
   compute capability (decision D27), a fixed rule, so a card's results do not depend on a
   timing:
@@ -278,23 +288,24 @@ where FP32 may run outside the SCF loop (`off`, linus's validated uses at `auto`
     `native` and `emulated` set explicitly are used as set on every card. Energies of
     `emulated` stay within about 3e-12 Eh of `native` with the same iterations, so the defaults
     of two cards agree to round-off.
-- **VV10's pair sums** (-V functionals) run by default in double-float arithmetic: each value
-  the unevaluated sum of two FP32 numbers (about 46 bits), each point's sums added in FP64 in a
-  fixed order. A pair costs one division and about 25 operations, so on cards with little FP64
-  throughput the FP32 units do it several times faster (on the card below 6.5x native FP64,
-  which there runs slower than 8 CPU cores). A precision study found it FP64-equal: on 55 -V
-  cases (water, L-lactide, the 39-atom anion; ωB97M-V, ωB97X-V, B97M-V; closed and open shells;
-  energies, gradients, the device loop, C-PCM) the energies are within 2.7e-12 Eh of the CPU
-  backend with the same SCF iterations and within 4.3e-12 Eh of native FP64 pair sums (VV10's
-  energy within 2.3e-14 Eh), the gradients as close to the CPU's as with FP64.
-  `precision.fp32: "off"` (as in `precision: "fp64"`) runs them in native FP64;
-  `resolved.record.backend.vv10_arithmetic` reports which (`{"scf": "df64", "gradient": "df64"}`). The
-  arithmetic and the order of every sum are the same on every card (IEEE-rounded operations
-  only, no atomics), so results are meant to stay bitwise identical between GPUs (not yet
-  measured on a second card). On data-center cards with fast FP64 (H100, H200) native FP64 would
-  be about 1.3x faster than double-float (an estimate from the kernels' instruction counts);
-  `precision.fp32: "off"` selects it there, at the price of bits that differ from other cards'
-  default (VV10's pair sums follow `precision.fp32`, not the card).
+- **VV10's pair sums** (-V functionals) follow the card class, as the exchange does
+  (`precision.fp32: "auto"`, the default): native FP64 on FP64-rich cards (H100, H200, A100;
+  on an H200 3.2x faster than double-float: the u1an39/def2-TZVP ωB97M-V pair kernel 27 against
+  86 ms per SCF call), and on cards with little FP64 throughput double-float arithmetic: each
+  value the unevaluated sum of two FP32 numbers (about 46 bits), each point's sums added in FP64
+  in a fixed order. A pair costs one division and about 25 operations, so there the FP32 units
+  do it several times faster (on the card below 6.5x native FP64, which there runs slower than 8
+  CPU cores). A precision study found double-float FP64-equal: on 55 -V cases (water,
+  L-lactide, the 39-atom anion; ωB97M-V, ωB97X-V, B97M-V; closed and open shells; energies,
+  gradients, the device loop, C-PCM) the energies are within 2.7e-12 Eh of the CPU backend with
+  the same SCF iterations and within 4.3e-12 Eh of native FP64 pair sums (VV10's energy within
+  2.3e-14 Eh), the gradients as close to the CPU's as with FP64. `precision.fp32: "off"` (as in
+  `precision: "fp64"`) runs them in native FP64 on every card, `"on"` in double-float (the
+  gradient's in FP32); `resolved.record.backend.vv10_arithmetic` reports which (e.g.
+  `{"scf": "fp64", "gradient": "fp64"}` on an H200, `"df64"` on an RTX PRO 6000) and
+  `resolved.record.backend.arithmetic` why. Each arithmetic computes the same bits on every card
+  of its class (IEEE-rounded operations only, no atomics, a fixed order); see
+  [Reproducibility](#reproducibility).
 - `precision.fp64: "emulated"`: the density-fitted exchange GEMMs of the SCF, of the
   CPHF/CPKS responses and of a Hessian's explicit terms (the exchange part of the derivative
   Fock matrices) run in FP64 emulation on the card's INT8 tensor cores (the Ozaki scheme:
@@ -464,6 +475,10 @@ where FP32 may run outside the SCF loop (`off`, linus's validated uses at `auto`
   `operator_gib`, and `operator_host_gib` for its part in host memory) or `tensor` (with
   `operator_note` when the operator would have paid but did not fit), `estimate_s` the cost
   model's seconds where `auto` weighed the two paths, `xc` is `fp64`, `emulated` or `fp32`.
+  A Hessian's `solver` says where the CPHF/CPKS solver's own algebra ran: `gpu` (the subspace,
+  its products and the residuals on the device, beside the products) or `cpu` with the reason in
+  `solver_note` (its subspace would take more than a quarter of the device memory free at the
+  response's setup, or outgrew the device and was solved again on the host).
 
 ## Sharing a GPU
 
@@ -497,6 +512,21 @@ GPU results are bitwise identical run to run on one device with the same driver 
 and do not depend on the number of host threads: every device kernel has one writer per
 output or sums in fixed point, cuBLAS runs in a fixed configuration, and the host parts are
 order-independent. They are not bitwise equal to the CPU's: they agree to round-off.
+
+The grid is the CPU's: the device computes the partition weights of PySCF's (Becke) grids with
+the CPU's operations, but per point only for the atoms whose cell function can matter. The
+others, each below 2^-100 (8e-31) of the sum of the cell functions by a rigorous bound, are left
+out of that sum. A weight can therefore differ from the CPU's only where those terms change the
+sum's last bit (none did in the tests, up to 376 atoms); far inside every tolerance below.
+
+Across cards, the defaults (`precision: "auto"`) are chosen per card class, so bits are shared
+only within a class: FP64-rich cards (H100, H200, A100) run the exchange in native FP64 and
+VV10's pair sums in FP64, FP64-poor cards (RTX, RTX PRO, L40) the exchange in FP64 emulation
+and VV10 in double-float. Two cards of different classes agree to round-off (energies within
+about 3e-12 Eh with the same iterations), not bitwise. Within a class, two cards give the same
+bits only with the same architecture, driver and libraries (cuBLAS chooses its kernels per
+architecture; the generated kernels are compiled per architecture). `precision: "fp64"`
+(native FP64 everywhere) removes the class difference but not the architecture's.
 
 ## Validating
 

@@ -4,8 +4,7 @@
 //!
 //! On cards with little FP64 throughput (the FP64 pipe, not memory or issue, limits a GEMM)
 //! a plain shared-memory tiled kernel runs these products at the card's FP64 rate, where
-//! cuBLAS's grouped GEMM reaches about 70 % of it on such shapes (the XC section of
-//! docs/internal/gpu-spike.md). Every output element is computed by one thread in a fixed
+//! cuBLAS's grouped GEMM reaches about 70 % of it on such shapes. Every output element is computed by one thread in a fixed
 //! order over k: bitwise reproducible.
 //!
 //! Descriptor of product p (nine i64 at `desc[9 p]`): m, n, k, lda, ldb, ldc and the device

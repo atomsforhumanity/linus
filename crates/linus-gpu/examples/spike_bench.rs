@@ -7,7 +7,7 @@
 //! Defaults: u1an39 ts61, def2-TZVP, PySCF level-3 grid, (dd|d) with def2-universal-jkfit.
 
 mod common;
-use common::device_ms;
+use common::{device_ms, median};
 use linus_gpu::blas::{Blas, GemmDims, MatMut, MatRef, Op};
 use linus_gpu::cpu::{Collocator, GridSpec};
 use linus_gpu::harness::{self, compare};
@@ -18,11 +18,6 @@ use std::fmt::Write as _;
 use std::time::Instant;
 
 type R<T> = Result<T, GpuError>;
-
-fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    v[v.len() / 2]
-}
 
 /// FP64 FMA throughput (TFLOP/s) of eight independent FMA chains per thread.
 fn fp64_peak(gpu: &Gpu) -> R<f64> {

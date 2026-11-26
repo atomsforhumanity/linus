@@ -17,16 +17,18 @@
 //! 1. **Blocks** of grid batches with the shells that reach them ([`crate::xc::blocks`], the
 //!    CPU gradient's screening threshold 1e-15 at derivative order 2).
 //! 2. **Densities** per block from the density matrices (collocation, X = phi_0 D_sub by GEMM,
-//!    the XC engine's density kernel), the functional on the host (linus-xc, order 1), its
-//!    derivatives back to the device.
+//!    the XC engine's density kernel), the functional's first derivatives (on the device, or
+//!    libxc on the host: `crate::xc::functional`).
 //! 3. **Contraction** per block and spin: X, B and (meta-GGA) Y_k = d_k phi D_sub by GEMMs, then
 //!    one warp per function sums c_i over the block's points (fixed-point per function), and,
 //!    with the grid response, one thread per point sums it over the functions.
-//! 4. **Grid response:** the Becke weight derivatives on the device, one block of threads per
-//!    chunk of points and one thread per atom (the cell functions and their pair terms of
-//!    linus-grid's `weight_gradient_block`, without its screening of negligible atoms), the
-//!    point-motion term added there; atom sums in fixed point. Other partitions (SSF, LKO)
-//!    take the energy density to the host for linus-grid's own weight derivatives.
+//! 4. **Grid response:** the Becke weight derivatives on the device (the cell functions and their
+//!    pair terms of linus-grid's `weight_gradient_block`, atoms negligible at a point left out by
+//!    its criterion): each atom pair once per point, its values in shared memory
+//!    (`xg_becke_pairs`), where they fit (about 110 atoms), else one warp per point
+//!    (`xg_becke_warp`); the point-motion term added there; atom sums in fixed point. Other
+//!    partitions (SSF, LKO) take the energy density to the host for linus-grid's own weight
+//!    derivatives.
 //!
 //! LDA, GGA and meta-GGA (tau), closed and open shells. Not covered: Laplacian-dependent
 //! meta-GGAs. VV10's gradient (`crate::xc::vv10::GpuVv10Grad`) is this engine on the NLC grid
@@ -34,6 +36,11 @@
 //! to the point-motion term of step 4.
 
 use crate::cpu::{GridSpec, MolecularGrid, PartitionScheme, SizeAdjust};
+
+/// The weight derivatives' pair kernel's shared memory per block by default: 96 KiB (beyond the
+/// default 48 KiB, granted on request by NVIDIA devices since sm_70), one point's pair values up
+/// to about 110 atoms.
+const BECKE_PAIR_SHARED: usize = 96 << 10;
 
 /// Settings of a `GpuXcGrad` setup.
 #[derive(Clone, Debug)]
@@ -45,10 +52,8 @@ pub struct GpuXcGradOptions {
     /// Points per block of collocation (whole grid batches); with block screening also the
     /// points of the block's products.
     pub block_points: usize,
-    /// Points per block of threads of the weight-derivative kernel.
+    /// Points per block of threads of the weight derivatives' pair kernel.
     pub becke_chunk: usize,
-    /// Threads per block of that kernel (atoms times point slots; a multiple of the warp).
-    pub becke_threads: usize,
     /// Per grid batch (the CPU's value test, the default) or per block.
     pub screen: crate::xc::XcScreen,
     /// Device bytes for the per-batch path's workspaces of a chunk of batches.
@@ -62,11 +67,15 @@ pub struct GpuXcGradOptions {
     /// Leave out the Becke pair terms of atoms whose terms are negligible at a point (linus-
     /// grid's CPU criterion, per point: |c_B P_B / min_C s_BC| at most 1e-18 |f w| / N).
     pub becke_screen: bool,
-    /// The weight derivatives with each atom pair evaluated once per point (pair values in
-    /// shared memory), not once per atom of the pair.
-    pub becke_pairs: bool,
+    /// Shared memory per block the weight derivatives' pair kernel (each atom pair once per
+    /// point, its values in shared memory) may take for its points; where one point's values
+    /// do not fit (above about 110 atoms at the default), the warp kernel runs (one warp per
+    /// point, each pair evaluated from both of its atoms). 0: always the warp kernel.
+    pub becke_pair_shared: usize,
     /// What runs the FP64 per-batch products.
     pub products: crate::xc::ProductEngine,
+    /// Where the functional's derivatives are evaluated (`crate::xc::devfunc`).
+    pub functional: crate::xc::FunctionalPlace,
 }
 
 impl Default for GpuXcGradOptions {
@@ -75,14 +84,14 @@ impl Default for GpuXcGradOptions {
             func_thresh: 1e-15,
             block_points: 2048,
             becke_chunk: 128,
-            becke_threads: 256,
             screen: crate::xc::XcScreen::Batch,
             workspace: 1 << 30,
             x_store: 8 << 30,
             math: crate::xc::XcMath::Fp64,
             becke_screen: true,
-            becke_pairs: true,
+            becke_pair_shared: BECKE_PAIR_SHARED,
             products: crate::xc::ProductEngine::Vgemm,
+            functional: crate::xc::FunctionalPlace::Device,
         }
     }
 }
@@ -199,7 +208,16 @@ mod device {
     /// The XC gradient's module: the fixed-point accumulator, then its kernels.
     pub(crate) const MODULE: KernelModule = KernelModule::new(
         "xcgrad",
-        || Cow::Owned(format!("{}\n{}", crate::detsum::DEVICE_SRC, KERNELS)),
+        || {
+            Cow::Owned(
+                [
+                    crate::detsum::DEVICE_SRC,
+                    crate::kernels::registry::COMMON_H,
+                    KERNELS,
+                ]
+                .join("\n"),
+            )
+        },
         &[
             "xg_weights",
             "xg_contract_funcs",
@@ -208,8 +226,8 @@ mod device {
             "xgb_contract_funcs",
             "xgb_contract_points",
             "xg_energy_density",
-            "xg_becke",
             "xg_becke_pairs",
+            "xg_becke_warp",
         ],
     );
 
@@ -247,21 +265,24 @@ mod device {
         /// path), and the per-batch path's layout, workspaces and product plans.
         pub setup_blocks: f64,
         pub setup_layout: f64,
-        /// Of `setup_layout`: the blocks, the per-batch value test on the device, the
-        /// batches' lists and descriptors (`XcLayout`), and the product plans.
-        pub setup_layout_parts: [f64; 4],
+        /// Of `setup_layout`: the layout's parts, and the product plans.
+        pub setup_layout_parts: crate::xc::XcLayoutTimes,
+        pub setup_plans: f64,
     }
 
     struct Kernels {
         sigma: Kernel,
         energy_density: Kernel,
-        becke: Kernel,
         becke_pairs: Kernel,
+        becke_warp: Kernel,
     }
 
-    /// The most atoms of the weight-derivative kernel (its shared memory: 12 natom doubles per
-    /// point slot); larger molecules take the host path.
+    /// The most atoms of the weight-derivative kernels (the warp kernel's shared memory: 6
+    /// natom doubles per warp within the default 48 KiB); larger molecules take the host path.
     const BECKE_MAX_ATOMS: usize = 1000;
+
+    /// A block's dynamic shared memory without the opt-in (every CUDA and HIP device).
+    const SHARED_DEFAULT: usize = 48 << 10;
 
     /// The Becke parameters on the device.
     struct DevBecke {
@@ -292,9 +313,8 @@ mod device {
         /// The grid itself, for the host weight derivatives of other partitions.
         host_grid: Option<MolecularGrid>,
         becke_chunk: usize,
-        becke_threads: usize,
         becke_screen: bool,
-        becke_pairs: bool,
+        becke_pair_shared: usize,
         kernels: Kernels,
         /// The block path (block screening; feature `study`).
         #[cfg(feature = "study")]
@@ -328,11 +348,9 @@ mod device {
         contract_points: Kernel,
         /// Collocation kernels of the density pass (first order; values only for LDA) and
         /// its components.
-        colloc1: Vec<Kernel>,
-        nc1: usize,
+        colloc1: crate::xc::layout::OrderKernels,
         plans: Vec<GradPlans>,
         single: bool,
-        phi: DeviceBuf<f64>,
         phic: DeviceBuf<f64>,
         xw: DeviceBuf<f64>,
         ww: DeviceBuf<f64>,
@@ -374,7 +392,7 @@ mod device {
             };
             let nc2 = crate::cpu::ncomp(order);
             let mgga = kind.mgga;
-            // workspace doubles per compressed value: phi (nc2), X, W, B, Y (3), and the FP32
+            // workspace doubles per compressed value: phic (nc2), X, W, B, Y (3), and the FP32
             // copies
             let per_value = 8 * (nc2 + 6) + if single { 4 * (nc2 + 6) } else { 0 };
             let budget = (opts.workspace / per_value).max(1) * nc2;
@@ -395,7 +413,6 @@ mod device {
             let nc1 = crate::cpu::ncomp(ord1);
             let colloc1 = lay.kernels_of_order(gpu, basis, ord1)?;
             let sz = |n: usize, on: bool| if on { n.max(1) } else { 1 };
-            let phi = gpu.alloc_zeros::<f64>((lay.max_block_nf * nc2 * lay.max_block_np).max(1))?;
             let phic = gpu.alloc_zeros::<f64>((nc2 * lay.max_x).max(1))?;
             let xw = gpu.alloc_zeros::<f64>(sz(lay.max_x, !single))?;
             let ww = gpu.alloc_zeros::<f64>(sz(lay.max_x, !single))?;
@@ -488,11 +505,9 @@ mod device {
                 contract_funcs: k("xgb_contract_funcs")?,
                 contract_points: k("xgb_contract_points")?,
                 colloc1,
-                nc1,
                 plans,
                 single,
                 lay,
-                phi,
                 phic,
                 xw,
                 ww,
@@ -538,7 +553,7 @@ mod device {
             opts: &GpuXcGradOptions,
         ) -> Result<GpuXcGrad, GpuError> {
             let t0 = Instant::now();
-            let functional = HostFunctional::new(name, kind)?;
+            let functional = HostFunctional::new(name, kind)?.with_place(opts.functional);
             if functional.needs_lapl() && kind.is_none() {
                 return Err(GpuError::NotCovered(format!(
                     "{name}: Laplacian-dependent meta-GGAs are not implemented"
@@ -570,8 +585,8 @@ mod device {
             let kernels = Kernels {
                 sigma: gpu.kernel(xc.name, &xsrc, "xc_sigma")?,
                 energy_density: k("xg_energy_density")?,
-                becke: k("xg_becke")?,
                 becke_pairs: k("xg_becke_pairs")?,
+                becke_warp: k("xg_becke_warp")?,
             };
             let natom = grid.atom_z.len();
             let becke = match BeckeParams::of(grid, spec).filter(|p| p.natom <= BECKE_MAX_ATOMS) {
@@ -624,10 +639,10 @@ mod device {
                 setup_seconds: t0.elapsed().as_secs_f64(),
                 setup_blocks,
                 setup_layout,
-                setup_layout_parts: bat.as_ref().map_or([0.0; 4], |b| {
-                    let [x, y, z] = b.lay.setup_times;
-                    [x, y, z, b.plans_seconds]
-                }),
+                setup_layout_parts: bat
+                    .as_ref()
+                    .map_or(Default::default(), |b| b.lay.setup_times),
+                setup_plans: bat.as_ref().map_or(0.0, |b| b.plans_seconds),
             };
             Ok(GpuXcGrad {
                 nbf: basis.nbf,
@@ -645,9 +660,8 @@ mod device {
                 becke,
                 host_grid,
                 becke_chunk: opts.becke_chunk.max(1),
-                becke_threads: opts.becke_threads.max(gpu.warp_size() as usize),
                 becke_screen: opts.becke_screen,
-                becke_pairs: opts.becke_pairs,
+                becke_pair_shared: opts.becke_pair_shared,
                 kernels,
                 #[cfg(feature = "study")]
                 blk,
@@ -718,6 +732,11 @@ mod device {
             &self.stats
         }
 
+        /// As [`crate::xc::GpuXc::prepare_functional`].
+        pub fn prepare_functional(&self, gpu: &Gpu, nsp: usize) -> Result<(), String> {
+            crate::xc::prepare(&self.functional, gpu, nsp)
+        }
+
         pub fn kind(&self) -> XcKind {
             self.functional.kind()
         }
@@ -766,7 +785,7 @@ mod device {
             let xyz = [&self.x, &self.y, &self.z];
             let bat = self.bat.as_mut().expect("per-batch path");
             let single = bat.single;
-            let (nc1, nc2) = (bat.nc1, bat.lay.ncomp);
+            let nc2 = bat.lay.ncomp;
             let nchunks = bat.lay.chunks.len();
             let a64 = |b: &DeviceBuf<f64>, on: bool| if on { Arg::buf(b) } else { Arg::Ptr(0) };
             let a32 = |b: &DeviceBuf<f32>, on: bool| if on { Arg::buf(b) } else { Arg::Ptr(0) };
@@ -787,7 +806,7 @@ mod device {
             // pass 1: densities
             let pass = DensityPass {
                 lay: &bat.lay,
-                colloc: Collocation::With(&bat.colloc1, nc1),
+                colloc: Collocation::With(&bat.colloc1),
                 xyz,
                 d: Some(dens),
                 nbf,
@@ -797,7 +816,6 @@ mod device {
                 gemm: &bat.gemm,
             };
             let mut work = DensityWork {
-                phi: &mut bat.phi,
                 phic: &mut bat.phic,
                 phic32: if single { Some(&mut bat.phic32) } else { None },
                 ops: if single {
@@ -884,7 +902,6 @@ mod device {
                     &c,
                     Collocation::Own,
                     xyz,
-                    &mut bat.phi,
                     Some(&mut bat.phic),
                     if single { Some(&mut bat.phic32) } else { None },
                 )?;
@@ -1031,9 +1048,126 @@ mod device {
             Ok(g)
         }
 
+        /// The weight derivatives' sums per atom (fixed point, natom x 3) at the energy density
+        /// `eps` with the point motion `tp`: the pair kernel where one point's pair values fit
+        /// `becke_pair_shared` (each pair once per point), else the warp kernel (each pair from
+        /// both of its atoms, no block barriers).
+        fn becke_terms(
+            &self,
+            gpu: &Gpu,
+            bk: &DevBecke,
+            eps: &DeviceBuf<f64>,
+            tp: &DeviceBuf<f64>,
+        ) -> Result<DetAcc, GpuError> {
+            let npts = self.npts;
+            let mut acc = DetAcc::new(gpu, bk.natom * 3)?;
+            let ws = gpu.warp_size() as usize;
+            let nat = bk.natom;
+            // the pair kernel's shared memory per point: d, u, P, v, the atoms' sums, the
+            // activities and coefficients, and two values per pair
+            let pair_slot = 8 * (12 * nat + 2 + nat * (nat - 1));
+            if pair_slot <= self.becke_pair_shared {
+                // up to 4 points per block, 256 threads shared out among them
+                let nslot = (self.becke_pair_shared / pair_slot)
+                    .clamp(1, 4)
+                    .min(self.becke_chunk);
+                let tps = (256 / nslot / ws).max(1) * ws;
+                let shared = nslot * pair_slot;
+                if shared > SHARED_DEFAULT {
+                    self.kernels
+                        .becke_pairs
+                        .set_max_dynamic_shared(shared as u32)?;
+                }
+                let ch = self.becke_chunk;
+                let cfg = Launch {
+                    grid: (npts.div_ceil(ch) as u32, 1, 1),
+                    block: ((tps * nslot) as u32, 1, 1),
+                    shared_bytes: shared as u32,
+                };
+                // SAFETY: matches xg_becke_pairs; reads npts points of the grid arrays, eps and
+                // tp, the natom^2 tables and the pair list; writes nslot pair_slot bytes of
+                // dynamic shared memory and natom 3 accumulators.
+                unsafe {
+                    gpu.launch(
+                        &self.kernels.becke_pairs,
+                        cfg,
+                        &[
+                            Arg::I64(npts as i64),
+                            Arg::I32(nat as i32),
+                            Arg::I32(nslot as i32),
+                            Arg::I32(ch as i32),
+                            Arg::buf(&self.x),
+                            Arg::buf(&self.y),
+                            Arg::buf(&self.z),
+                            Arg::buf(&self.owner),
+                            Arg::buf(&self.vol),
+                            Arg::buf(eps),
+                            Arg::I32(1),
+                            Arg::buf(tp),
+                            Arg::buf(&bk.xyz),
+                            Arg::buf(&bk.inv_r),
+                            Arg::buf(&bk.aij),
+                            acc.arg(),
+                            Arg::I64((nat * 3) as i64),
+                            Arg::I32(self.becke_screen as i32),
+                            Arg::buf(&bk.pairs),
+                        ],
+                    )
+                }?;
+            } else {
+                // warps per block within the default shared memory (6 natom doubles each), at
+                // most 8; blocks for every warp to take a few points
+                let per_warp = 6 * nat * 8;
+                let wpb = (SHARED_DEFAULT / per_warp).clamp(1, 8);
+                let shared = wpb * per_warp;
+                if shared > SHARED_DEFAULT {
+                    self.kernels
+                        .becke_warp
+                        .set_max_dynamic_shared(shared as u32)?;
+                }
+                let blocks = npts.div_ceil(4 * wpb).clamp(1, 8192);
+                let cfg = Launch {
+                    grid: (blocks as u32, 1, 1),
+                    block: ((wpb * ws) as u32, 1, 1),
+                    shared_bytes: shared as u32,
+                };
+                // SAFETY: matches xg_becke_warp; reads npts points of the grid arrays, eps and
+                // tp, the natom^2 tables; writes 6 natom doubles of dynamic shared memory per
+                // warp and natom 3 accumulators.
+                unsafe {
+                    gpu.launch(
+                        &self.kernels.becke_warp,
+                        cfg,
+                        &[
+                            Arg::I64(npts as i64),
+                            Arg::I32(nat as i32),
+                            Arg::buf(&self.x),
+                            Arg::buf(&self.y),
+                            Arg::buf(&self.z),
+                            Arg::buf(&self.owner),
+                            Arg::buf(&self.vol),
+                            Arg::buf(eps),
+                            Arg::I32(1),
+                            Arg::buf(tp),
+                            Arg::buf(&bk.xyz),
+                            Arg::buf(&bk.inv_r),
+                            Arg::buf(&bk.aij),
+                            acc.arg(),
+                            Arg::I64((nat * 3) as i64),
+                            Arg::I32(self.becke_screen as i32),
+                        ],
+                    )
+                }?;
+            }
+            Ok(acc)
+        }
+
         /// The grid response (the weight derivatives with the point motion `tp`, from the
         /// energy density rho zk) and the atoms' sums of the function terms in `facc`.
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "the call's grid arrays and accumulators"
+        )]
         fn tail(
             &self,
             gpu: &Gpu,
@@ -1067,79 +1201,7 @@ mod device {
                 }?;
                 match &self.becke {
                     Some(bk) => {
-                        let mut acc = DetAcc::new(gpu, bk.natom * 3)?;
-                        let ws = gpu.warp_size() as usize;
-                        let nat = bk.natom;
-                        let becke_screen = self.becke_screen;
-                        // the pair kernel while a slot's pair values fit 96 KiB of shared
-                        // memory (about 110 atoms)
-                        let pair_slot = 8 * (12 * nat + 2 + nat * (nat - 1));
-                        let pairs = self.becke_pairs && pair_slot <= 96 << 10;
-                        let (kernel, nslot, threads, shared) = if pairs {
-                            // up to 4 points per block, 256 threads shared out among them
-                            let nslot = ((96 << 10) / pair_slot).clamp(1, 4).min(self.becke_chunk);
-                            let tps = (256 / nslot / ws).max(1) * ws;
-                            (
-                                &self.kernels.becke_pairs,
-                                nslot,
-                                tps * nslot,
-                                nslot * pair_slot,
-                            )
-                        } else {
-                            // several points per block when the atoms fill fewer than 256 threads
-                            let nslot = (self.becke_threads / nat).clamp(1, self.becke_chunk);
-                            let threads = if nslot > 1 {
-                                (nslot * nat).div_ceil(ws) * ws
-                            } else {
-                                nat.div_ceil(ws).clamp(1, self.becke_threads / ws) * ws
-                            };
-                            (
-                                &self.kernels.becke,
-                                nslot,
-                                threads,
-                                nslot * (12 * nat + 2) * 8,
-                            )
-                        };
-                        if shared > 48 * 1024 {
-                            kernel.set_max_dynamic_shared(shared as u32)?;
-                        }
-                        let ch = self.becke_chunk;
-                        let cfg = Launch {
-                            grid: (npts.div_ceil(ch) as u32, 1, 1),
-                            block: (threads as u32, 1, 1),
-                            shared_bytes: shared as u32,
-                        };
-                        // SAFETY: matches xg_becke (xg_becke_pairs); reads npts points of the
-                        // grid arrays, eps and tp, the natom^2 tables; writes the dynamic shared
-                        // memory of nslot (12 natom + 2) (12 natom + 2 + natom (natom - 1))
-                        // doubles and natom 3 accumulators.
-                        unsafe {
-                            gpu.launch(
-                                kernel,
-                                cfg,
-                                &[
-                                    Arg::I64(npts as i64),
-                                    Arg::I32(nat as i32),
-                                    Arg::I32(nslot as i32),
-                                    Arg::I32(ch as i32),
-                                    Arg::buf(&self.x),
-                                    Arg::buf(&self.y),
-                                    Arg::buf(&self.z),
-                                    Arg::buf(&self.owner),
-                                    Arg::buf(&self.vol),
-                                    Arg::buf(&eps),
-                                    Arg::I32(1),
-                                    Arg::buf(tp),
-                                    Arg::buf(&bk.xyz),
-                                    Arg::buf(&bk.inv_r),
-                                    Arg::buf(&bk.aij),
-                                    acc.arg(),
-                                    Arg::I64((bk.natom * 3) as i64),
-                                    Arg::I32(becke_screen as i32),
-                                    Arg::buf(&bk.pairs),
-                                ],
-                            )
-                        }?;
+                        let acc = self.becke_terms(gpu, bk, &eps, tp)?;
                         let h = acc.to_f64(gpu)?;
                         for (a, ga) in g.iter_mut().enumerate().take(bk.natom) {
                             for k in 0..3 {

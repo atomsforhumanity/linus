@@ -11,7 +11,7 @@ use crate::derivatives::hessian::{HessianOptions, HessianResult};
 use crate::driver::Session;
 use crate::properties::dipole::DipoleDerivatives;
 use crate::Structure;
-use linus_base::error::LinusError;
+use linus_base::error::{LinusError, ResponseFailure};
 
 /// Everything a Hessian with its analysis produces.
 #[derive(Clone, Debug)]
@@ -19,6 +19,11 @@ pub struct FrequencyResult {
     /// Energy, gradient and Hessian.
     pub hessian: HessianResult,
     pub dipole_derivatives: Option<DipoleDerivatives>,
+    /// With `ir`: the electric-field CPHF/CPKS that stopped above `response.field_tol` (its end
+    /// says why: a singular or indefinite response, or its iterations), whereupon the IR
+    /// intensities, dipole derivatives and polarizability are declined and the Hessian, the
+    /// frequencies and the thermochemistry kept (None: no IR, or IR computed).
+    pub ir_declined: Option<ResponseFailure>,
     /// The harmonic analysis (None: `freq.analysis: off`).
     pub vib: Option<VibrationalAnalysis>,
     /// One thermochemistry per temperature (empty: `freq.thermo: off`).
@@ -39,7 +44,10 @@ impl FrequencyResult {
 impl Session {
     /// Analytic Hessian at the current geometry (with `opts.ir` also its dipole derivatives and
     /// the polarizability), then the harmonic analysis and thermochemistry at the SCF energy, as
-    /// `opts` asks.
+    /// `opts` asks. The Hessian and the frequencies do not depend on the electric-field
+    /// response: when it stops above `response.field_tol` (a broken-symmetry state that rotates
+    /// freely has no finite polarizability), the IR part is declined with that failure
+    /// ([`FrequencyResult::ir_declined`]) and the rest returned.
     pub fn hessian_analysis(
         &mut self,
         opts: &FrequencyOptions,
@@ -49,19 +57,25 @@ impl Session {
         let hessian = self.hessian_with(&HessianOptions {
             dipole_derivatives: opts.ir,
         })?;
-        let dipole_derivatives = if opts.ir {
+        let (mut dipole_derivatives, mut ir_declined) = (None, None);
+        if opts.ir {
             let t = std::time::Instant::now();
             let progress = self.cx.progress.clone();
-            let d = progress
-                .stage("polarizability", || self.ir_properties(&hessian))
+            match progress.stage("polarizability", || self.ir_properties(&hessian)) {
+                Ok(d) => dipole_derivatives = Some(d),
+                // the electric-field response missed its tolerance: the IR part is declined
+                Err(LinusError::ResponseNotConverged(f)) if f.what == "polarizability" => {
+                    self.unconverged_response = None;
+                    ir_declined = Some(*f);
+                }
                 // stopped on request: with the gradient and Hessian it reached
-                .map_err(|e| e.reached(Some(&hessian.gradient), Some(&hessian.hessian)))?;
+                Err(e) => return Err(e.reached(Some(&hessian.gradient), Some(&hessian.hessian))),
+            }
             self.timers.add("polarizability", t.elapsed().as_secs_f64());
-            Some(d)
-        } else {
-            None
-        };
-        FrequencyResult::from_hessian(&self.cx.mol, hessian, dipole_derivatives, opts)
+        }
+        let mut f = FrequencyResult::from_hessian(&self.cx.mol, hessian, dipole_derivatives, opts)?;
+        f.ir_declined = ir_declined;
+        Ok(f)
     }
 }
 
@@ -99,6 +113,7 @@ impl FrequencyResult {
         Ok(FrequencyResult {
             hessian,
             dipole_derivatives,
+            ir_declined: None,
             vib,
             thermo,
         })

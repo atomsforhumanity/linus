@@ -39,7 +39,7 @@ use crate::driver::{CalcContext, CalcOptions, GridChoice, Purpose, Session};
 use faer::Mat;
 use linus_base::convergence::Convergence;
 use linus_base::error::LinusError;
-use linus_base::error::ResponseFailure;
+use linus_base::error::{ResponseEnd, ResponseFailure};
 use linus_core::timing::Timers;
 use linus_jk::df::ResolvedDf;
 use linus_scf::{
@@ -268,8 +268,8 @@ pub struct Report {
     pub basis: String,
     /// What the user should know about a calculation that succeeded (`{code, message, path}`;
     /// the CLI prints them on stderr): `backend_fallback`, `df_storage_by_free_memory`,
-    /// `closed_shell_unstable`, `mode_check_flagged`, `plan_violation`,
-    /// `convergence_looser_than_default`.
+    /// `closed_shell_unstable`, `non_aufbau`, `mode_check_flagged`, `ir_declined`,
+    /// `plan_violation`, `convergence_looser_than_default`.
     pub warnings: Vec<linus_core::Warning>,
     /// Wall-clock seconds per phase; `total` the whole call, `energy` its SCF stage.
     pub timings: BTreeMap<String, f64>,
@@ -424,6 +424,33 @@ pub struct RunRecordOut {
     pub accuracy: Option<crate::driver::accuracy::AccuracyRecord>,
 }
 
+/// The warning of a converged SCF whose occupied set is not the aufbau set of its final Fock
+/// matrix (`non_aufbau`; `resolved.record.scf.non_aufbau`): the result is consistent (the energy,
+/// orbitals and derivatives are those of the converged determinant), but a lower aufbau solution
+/// may exist.
+fn non_aufbau_warning(r: &ScfResult) -> Option<linus_core::Warning> {
+    let worst = r
+        .non_aufbau
+        .iter()
+        .max_by(|a, b| a.inversion.total_cmp(&b.inversion))?;
+    let channel = match worst.spin {
+        "restricted" => String::new(),
+        s => format!(" {s}"),
+    };
+    Some(linus_core::Warning {
+        code: "non_aufbau",
+        message: format!(
+            "the converged SCF state does not follow aufbau: {} empty{channel} orbital(s) lie below \
+             occupied ones (the highest occupied orbital energy is {:.1e} Eh above the lowest \
+             empty one); it is a stationary point, and a lower aufbau solution may exist \
+             (resolved.record.scf.non_aufbau)",
+            worst.holes.len(),
+            worst.inversion
+        ),
+        path: "resolved.record.scf.non_aufbau",
+    })
+}
+
 /// The warning of an SCF accepted on a soft-mode plateau, when its escalation came due or at
 /// `max_iter`: qcdata's shared `loosely_converged` (its thresholds missed, accepted under a
 /// relaxed rule), with the residual reached and the rule in the message and the threshold missed
@@ -464,7 +491,7 @@ pub struct ResolvedScf {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plateau: Option<Plateau>,
     /// The escalation (`scf.escalate`), when it ran: `{"ran": true}`, its `trigger`
-    /// (`stagnation` or `two_thirds`), the iteration `at` which it started, the iteration
+    /// (`stagnation`, `blowup` or `two_thirds`), the iteration `at` which it started, the iteration
     /// (`from_iter`) and energy of the lowest-energy orbitals it restarted from, the
     /// `iterations` it ran and whether it `converged`; when the SCF used `max_iter` without it,
     /// `{"ran": false, "reason"}` (`off`, or `max_iter`: too few iterations left for it).
@@ -490,6 +517,13 @@ pub struct ResolvedScf {
     /// 0.02 Eh below its gap there: the probes then ran. Absent where the trigger was not armed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe_trigger: Option<TriggerRecord>,
+    /// The spin channels whose converged occupied set is not the aufbau set of the final Fock
+    /// matrix (with the warning `non_aufbau`): `spin` (`restricted`, `alpha` or `beta`), the
+    /// `holes` (empty orbitals aufbau would occupy) and `particles` (occupied ones it would leave
+    /// empty) by their 0-based positions in ascending energy, and the `inversion` (Eh: the highest
+    /// occupied orbital energy less the lowest empty one). Absent for aufbau solutions.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub non_aufbau: Vec<linus_scf::NonAufbau>,
 }
 
 /// The memory limit and the budgets derived from it (GiB).
@@ -531,6 +565,11 @@ pub struct ResolvedResponse {
     /// The max-abs residual the electric-field CPHF of the polarizability reached (frequencies
     /// with `ir`).
     pub pol_max_residual: Option<f64>,
+    /// With `ir`: the electric-field CPHF/CPKS that stopped above `response.field_tol`, as a
+    /// failure's `response` (`what`, `iterations`, `max_residual`, `tol`, `end`), the IR part
+    /// declined (warning `ir_declined`); absent when the IR part was computed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ir_declined: Option<ResponseFailureOut>,
     /// The zero-mode check of open-shell Hessians (`scf.stability_hessian_check`; absent when it did
     /// not run: closed shells, atoms, off).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -587,7 +626,18 @@ pub struct ResolvedBackend {
     /// why, from the device policy (`crate::driver::policy`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arithmetic: Option<BTreeMap<&'static str, FamilyArith>>,
+    /// The overlap, kinetic energy and ECP integrals (and the nuclear attraction unless
+    /// `nuclear_attraction` says otherwise).
     pub one_electron: &'static str,
+    /// Where the SCF's nuclear attraction V ran (`gpu` or `cpu`) and why, when a device J/K's
+    /// setup decided it (large molecules: the device PCM engine's pair x point integrals).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nuclear_attraction: Option<PlaceRecord>,
+    /// Where the last grid built with a device partition (an unscreened partition: PySCF's Becke
+    /// grids) took its partition weights (`gpu`, or `cpu` when the device declined) and why;
+    /// absent when no grid asked the device (screened partitions are the host's own).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid_partition: Option<PlaceRecord>,
     /// The SCF's J/K builds.
     pub jk: &'static str,
     /// The SCF's XC energy and potential (DFT).
@@ -596,6 +646,11 @@ pub struct ResolvedBackend {
     pub vv10: Option<&'static str>,
     /// The two-electron term of gradients.
     pub gradient_jk: &'static str,
+    /// The kernels of a device two-electron gradient and why (`{"kernels", "reason"}`:
+    /// `hermite_j`, the J-only gradient in Hermite space; `stored_planes`; `fused`); absent
+    /// without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gradient_jk_kernels: Option<KernelsRecord>,
     /// The XC term of gradients (DFT).
     pub gradient_xc: Option<&'static str>,
     /// The explicit two-electron terms of Hessians (the second derivatives at fixed orbitals and
@@ -610,6 +665,11 @@ pub struct ResolvedBackend {
     pub response_xc: Option<&'static str>,
     /// Where the SCF loop's own work ran: host or device.
     pub scf_loop: &'static str,
+    /// The SCF's density-fitted J when it ran on the device without a stored three-index
+    /// tensor (`{"engine": "direct", "reason", "kernels", "kernels_reason"}`: the tensor does
+    /// not fit the device beside the other engines); absent on the DF engine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub j: Option<JEngine>,
     /// An implicit solvent's surface terms in the SCF and gradients (the surface charges'
     /// integrals and the charge solve).
     pub pcm: Option<&'static str>,
@@ -635,6 +695,21 @@ pub struct ResolvedBackend {
     /// The arithmetic of VV10's pair sums when VV10 ran on the device.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vv10_arithmetic: Option<Vv10Arithmetic>,
+    /// Where each device XC family evaluated the functional's derivatives: `gpu` (libxc's code
+    /// compiled for the device) or `cpu` (libxc on the host, with the reason); absent without
+    /// device XC.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub functional: Vec<FunctionalRecord>,
+}
+
+/// Where a device XC family evaluated the functional ([`ResolvedBackend::functional`]).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FunctionalRecord {
+    pub kernel: &'static str,
+    /// `gpu` or `cpu`.
+    pub place: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// A kernel family's arithmetic and why (`resolved.record.backend.arithmetic`).
@@ -692,6 +767,15 @@ pub struct ResponseArithmetic {
     /// of which ran (`exchange`; `reason` says so).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimate_s: Option<ExchangeEstimate>,
+    /// Where the CPHF/CPKS solver's own algebra ran (a Hessian's, with its products on the
+    /// device): `gpu` (the subspace, its products and the residuals resident on the device) or
+    /// `cpu`, with the reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub solver: Option<PlaceRecord>,
+    /// Where the second-order assembly's stacked GEMMs ran (a Hessian's, with its products on
+    /// the device): `gpu`, or `cpu` with the reason (the device's memory).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assembly: Option<PlaceRecord>,
     /// The CPKS XC kernel when `response_xc` ran on the device: `fp64`; `emulated` (its two
     /// large GEMMs per block in the Ozaki scheme) with `precision.fp64: "emulated"`; or
     /// `fp32` (products in FP32 per grid batch, summed in FP64) when `precision.response` is
@@ -752,6 +836,56 @@ pub struct FitEmulation {
     /// Why the fit ran in FP64.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// The engine of the SCF's density-fitted J ([`ResolvedBackend::j`]) and why: `direct` (no
+/// stored tensor) on its `kernels`, `hermite` (the J-engine contractions, FP64-rich cards) or
+/// `eri3c` (recomputed three-center integrals), and why those; or `stored` where the direct
+/// engine was chosen and its setup `declined` (why).
+#[derive(Clone, Debug, Serialize)]
+pub struct JEngine {
+    pub engine: &'static str,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kernels: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kernels_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declined: Option<String>,
+}
+
+/// The kernels a device family ran, and why ([`ResolvedBackend::gradient_jk_kernels`]).
+#[derive(Clone, Debug, Serialize)]
+pub struct KernelsRecord {
+    pub kernels: &'static str,
+    pub reason: String,
+}
+
+/// Where a part of a calculation ran, `gpu` or `cpu`, and why (`resolved.record.backend`'s
+/// `nuclear_attraction` and `grid_partition`, a response's `solver` and `assembly`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PlaceRecord {
+    pub place: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl PlaceRecord {
+    /// On the GPU (no reason).
+    pub(crate) fn gpu() -> Self {
+        PlaceRecord {
+            place: "gpu",
+            reason: None,
+        }
+    }
+
+    /// On the CPU, and why.
+    pub(crate) fn cpu(reason: String) -> Self {
+        PlaceRecord {
+            place: "cpu",
+            reason: Some(reason),
+        }
+    }
 }
 
 /// A family of kernels a GPU backend runs on the CPU, and why.
@@ -821,6 +955,10 @@ pub struct ResponseFailureOut {
     pub iterations: usize,
     pub max_residual: f64,
     pub tol: f64,
+    /// How the solve ended: `iterations` (at the limit), `exhausted` (no direction left to add:
+    /// a singular operator), `indefinite` (the orbital Hessian has an eigenvalue at or below
+    /// zero) or `non_finite` (a NaN residual).
+    pub end: ResponseEnd,
 }
 
 impl From<&ResponseFailure> for ResponseFailureOut {
@@ -830,6 +968,7 @@ impl From<&ResponseFailure> for ResponseFailureOut {
             iterations: f.iterations,
             max_residual: f.max_residual,
             tol: f.tol,
+            end: f.end,
         }
     }
 }
@@ -892,6 +1031,8 @@ struct Derivatives {
     frequencies: Option<FrequencyOut>,
     response: Option<ResolvedCphf>,
     pol_max_residual: Option<f64>,
+    /// The electric-field response that missed its tolerance, the IR part declined.
+    ir_declined: Option<ResponseFailure>,
 }
 
 impl Session {
@@ -956,7 +1097,10 @@ impl Session {
                     vibrational_analysis: f.vib,
                     thermochemistry: f.thermo,
                 });
-                d.pol_max_residual = dd.map(|x| x.max_residual);
+                d.pol_max_residual = dd
+                    .map(|x| x.max_residual)
+                    .or(f.ir_declined.as_ref().map(|x| x.max_residual));
+                d.ir_declined = f.ir_declined;
                 d.gradient = Some(f.hessian.gradient);
                 d.cphf_iterations = Some(f.hessian.cphf_iterations);
                 d.response = Some(f.hessian.response);
@@ -1033,7 +1177,13 @@ impl Session {
             hessian: calctype == CalcType::Hessian,
             ir: d.pol_max_residual.is_some(),
         };
-        let resolved = self.resolved(gs, calctypes, d.response.as_ref(), d.pol_max_residual);
+        let resolved = self.resolved(
+            gs,
+            calctypes,
+            d.response.as_ref(),
+            d.pol_max_residual,
+            d.ir_declined.as_ref(),
+        );
         // what the user should know: the device's main families on the CPU, a DF storage the
         // node's free memory lowered, an unstable closed shell, a flagged open-shell Hessian
         let mut warnings = self.cx.cpu_fallback_warnings();
@@ -1056,7 +1206,16 @@ impl Session {
                     path: "backend",
                 }),
         );
+        warnings.extend(d.ir_declined.as_ref().map(|f| linus_core::Warning {
+            code: "ir_declined",
+            message: format!(
+                "the IR intensities, dipole derivatives and polarizability were declined; the \
+                 Hessian and frequencies are unaffected (resolved.record.response.ir_declined): {f}"
+            ),
+            path: "freq.ir",
+        }));
         warnings.extend(self.closed_shell_warning(r));
+        warnings.extend(non_aufbau_warning(r));
         warnings.extend(plateau_warning(r));
         warnings.extend(self.cx.plan.convergence_warning(gs.purpose()));
         if let Some(m) = resolved
@@ -1218,6 +1377,7 @@ impl Session {
         calctypes: CalcTypes,
         response: Option<&ResolvedCphf>,
         pol_max_residual: Option<f64>,
+        ir_declined: Option<&ResponseFailure>,
     ) -> Resolved {
         const GIB: f64 = 1073741824.0;
         let resource = |k: &str| self.timers.resources.iter().find(|n| n.0 == k).map(|n| n.1);
@@ -1236,6 +1396,8 @@ impl Session {
             df: df.as_ref(),
             response,
             solvent_scf: gs.solvation.as_ref().map(|s| s.scf),
+            df_j: self.cx.record.scf_df_j().map(|c| (c.engine, c.reason)),
+            nuclear_attraction: self.cx.record.nuclear_attraction(),
         });
         let targets = self.cx.plan.targets();
         let accuracy = targets.any().then(|| {
@@ -1260,6 +1422,7 @@ impl Session {
             single_precision: h.single_precision,
             two_level: h.two_level,
             pol_max_residual,
+            ir_declined: ir_declined.map(ResponseFailureOut::from),
             mode_check: r.mode_check.map(|m| ResolvedModeCheck {
                 eigenvalue: m.eigenvalue,
                 residual: m.residual,
@@ -1305,6 +1468,7 @@ impl Session {
                         }
                         p
                     }),
+                    non_aufbau: r.non_aufbau.clone(),
                 },
                 memory: ResolvedMemory {
                     source: mem.source(),
@@ -1583,5 +1747,42 @@ mod tests {
         let rep = f.result.expect("the report of the unconverged response");
         assert!(rep.success && rep.hessian.is_some());
         assert!(rep.resolved.record.response.unwrap().max_residual > 1e-11);
+    }
+
+    /// An IR run whose electric-field response has no finite value keeps its Hessian and
+    /// frequencies and declines the IR part: the CH radical (UHF/def2-SVP, `extreme`) steps from
+    /// its symmetric solution to a lower broken-symmetry one, whose rotation about the axis is a
+    /// zero mode the field couples to, so the field CPHF ends `exhausted` or `indefinite`. The
+    /// result has the frequencies, no IR intensities, dipole derivatives or polarizability, the
+    /// warning `ir_declined` and the failure in `resolved.record.response.ir_declined`.
+    #[test]
+    fn a_singular_field_response_declines_only_the_ir_part() {
+        let mol = Structure::from_xyz_str("2\n\nC 0 0 0\nH 0 0 1.12\n", 0, 2).unwrap();
+        let opts = CalcOptions::from_json(json!({"method": "hf", "basis": "def2-svp",
+            "jk": "exact", "scf": {"convergence": "extreme"}, "response": {"tol": 1e-9},
+            "freq": {"ir": true}, "threads": 4}))
+        .unwrap();
+        let mut c = Session::new(mol, opts).unwrap();
+        let rep = c.run(CalcType::Hessian).unwrap();
+        let j = serde_json::to_value(&rep).unwrap();
+        assert!(rep.success && rep.hessian.is_some());
+        let va = &j["vibrational_analysis"];
+        assert_eq!(
+            va["frequencies"].as_array().map(|f| f.len()),
+            Some(1),
+            "{va}"
+        );
+        assert!(va["ir_intensities"].is_null(), "{va}");
+        assert!(j.get("dipole_derivatives").is_none() && j.get("polarizability").is_none());
+        let w: Vec<&str> = rep.warnings.iter().map(|w| w.code).collect();
+        assert!(w.contains(&"ir_declined"), "{w:?}");
+        let d = &j["resolved"]["record"]["response"]["ir_declined"];
+        assert_eq!(d["what"], "polarizability");
+        assert!(
+            d["end"] == "exhausted" || d["end"] == "indefinite",
+            "a singular or indefinite response: {d}"
+        );
+        assert!(d["max_residual"].as_f64().unwrap() > d["tol"].as_f64().unwrap());
+        assert!(c.unconverged_response().is_none());
     }
 }

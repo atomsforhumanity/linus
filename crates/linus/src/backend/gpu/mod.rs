@@ -11,12 +11,18 @@
 //! [`Backend::emulation`] and [`Backend::grant_violations`]). The device loop is
 //! [`scf_loop`]'s; its controls stay the SCF's own (`crate::backend::gpu::scf_control`).
 
+pub(crate) mod assembly;
 pub(crate) mod costing;
+pub(crate) mod device_jk;
 pub(crate) mod df;
+pub(crate) mod gridk;
+pub(crate) mod jdirect;
+pub(crate) mod krylov;
 pub(crate) mod pcm;
 pub(crate) mod scf_control;
 pub(crate) mod scf_loop;
 pub(crate) mod session;
+pub(crate) mod vnuc;
 pub(crate) mod xc;
 
 use super::scf::{ScfJkBuilt, ScfRun, ScfTerms, ScfXc};
@@ -29,7 +35,7 @@ use crate::driver::{CalcContext, JkMethod};
 use crate::solvent::derivatives::SolventGradient;
 use crate::solvent::scf::{PcmSetup, ScfEnvironment};
 use crate::solvent::SolventSettings;
-use crate::two_electron::{KernelUse, ResponseRequest, ResponseSetup};
+use crate::two_electron::{KernelUse, ResponseRequest, ResponseSetup, ResponseUse};
 use faer::{MatRef, Par};
 use linus_base::error::{LinusError, MemoryNeed};
 use linus_base::terms::ResponseKernel;
@@ -64,6 +70,12 @@ pub(crate) struct DeviceDecisions {
     /// Each family's last workspace grant (the device memory plan): its first draw beyond it (a
     /// plan violation), None when the engine stayed within it.
     grants: Vec<(Family, Option<String>)>,
+    /// Where each XC family's last setup evaluates the functional: None on the device, else why
+    /// on the host.
+    functional: Vec<(Family, Option<String>)>,
+    /// Where the last grid built with the device partition took its weights (`gpu`, `cpu`), and
+    /// why.
+    grid_partition: Option<(&'static str, String)>,
 }
 
 /// Records `x` for the family `k` in `v`, superseding its earlier one.
@@ -81,6 +93,12 @@ impl GpuBackend {
 
     fn decisions(&self) -> MutexGuard<'_, DeviceDecisions> {
         self.decisions.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Records where the last grid's partition weights were computed (`place`: `gpu` or `cpu`)
+    /// and why ([`xc::GridPartition`]).
+    pub(crate) fn note_grid_partition(&self, place: &'static str, reason: String) {
+        self.decisions().grid_partition = Some((place, reason));
     }
 }
 
@@ -144,13 +162,19 @@ pub(crate) fn open(
 /// out of device memory a resource error of code `device_memory` (page-locked host memory that
 /// cannot be pinned: `host_memory`), every other one [`LinusError::Backend`].
 pub(crate) fn device_error(k: Family, e: GpuError) -> LinusError {
+    device_error_in(k.name(), e)
+}
+
+/// [`device_error`] of the device work `what` that is no kernel family of its own (the SCF's
+/// nuclear attraction, a response's assembly GEMMs).
+pub(crate) fn device_error_in(what: &'static str, e: GpuError) -> LinusError {
     match e.kind().calculation_kind() {
         linus_core::ErrorKind::Resource => match e {
             GpuError::HostMemory { bytes, .. } => LinusError::host_memory(
                 format!(
                     "GPU backend, {}: {e}; give the process more memory (memory_gib, or a larger memory cap) \
                      or run backend \"cpu\"",
-                    k.name()
+                    what
                 ),
                 MemoryNeed::required_bytes(bytes as f64),
             ),
@@ -158,19 +182,19 @@ pub(crate) fn device_error(k: Family, e: GpuError) -> LinusError {
                 format!(
                     "GPU backend, {}: {e}; give the process more device memory (device_memory_gib, or a less \
                      busy card) or run backend \"cpu\"",
-                    k.name()
+                    what
                 ),
                 device_need(&e),
             ),
         },
         linus_core::ErrorKind::Numerical => {
-            LinusError::Numerical(format!("GPU backend, {}: {e}", k.name()))
+            LinusError::Numerical(format!("GPU backend, {}: {e}", what))
         }
         linus_core::ErrorKind::Internal => {
-            LinusError::Internal(format!("GPU backend, {}: {e}", k.name()))
+            LinusError::Internal(format!("GPU backend, {}: {e}", what))
         }
         _ => LinusError::Backend {
-            kernel: k.name(),
+            kernel: what,
             message: e.to_string(),
         },
     }
@@ -232,6 +256,14 @@ impl CalcContext {
     pub(crate) fn note_emulation(&self, k: Family, used: Option<EmulationUsed>) {
         if let Some(d) = GpuBackend::of(self) {
             supersede(&mut d.decisions().emulation, k, used);
+        }
+    }
+
+    /// Records where the XC engine of `k` evaluates the functional's derivatives (`place`: Ok
+    /// on the device, Err with the reason on the host; `xc::GpuXc::prepare_functional`).
+    pub(crate) fn note_functional(&self, k: Family, place: Result<(), String>) {
+        if let Some(d) = GpuBackend::of(self) {
+            supersede(&mut d.decisions().functional, k, place.err());
         }
     }
 
@@ -317,6 +349,21 @@ fn not_df(cx: &CalcContext) -> String {
 }
 
 impl Backend for GpuBackend {
+    fn df_on_device(
+        &self,
+        cx: &CalcContext,
+        aux: &linus_ints::BasisSet,
+        rows: linus_ints::eri3c::DfRows,
+    ) -> Option<bool> {
+        let sizes = linus_gpu::df::plan::DfSizes {
+            nbf: cx.basis.nbf,
+            naux: aux.nbf,
+            rows,
+        };
+        // the device alone (no streaming): the plan on any device rung
+        Some(df::scf_df_plan(cx, sizes, cx.method.omega(), 0).is_ok_and(|p| p.is_ok()))
+    }
+
     fn clear_session(&self) {
         self.session.clear();
     }
@@ -331,6 +378,24 @@ impl Backend for GpuBackend {
             .iter()
             .find(|e| e.0 == k)
             .and_then(|e| e.1.clone())
+    }
+
+    fn grid_partition(
+        &self,
+        allowance: Option<usize>,
+    ) -> Option<Box<dyn linus_grid::DevicePartition + '_>> {
+        Some(Box::new(xc::GridPartition {
+            backend: self,
+            allowance,
+        }))
+    }
+
+    fn grid_partition_place(&self) -> Option<(&'static str, String)> {
+        self.decisions().grid_partition.clone()
+    }
+
+    fn functional_places(&self) -> Vec<(Family, Option<String>)> {
+        self.decisions().functional.clone()
     }
 
     fn grant_violations(&self) -> Vec<(Family, String)> {
@@ -380,11 +445,25 @@ impl Backend for GpuBackend {
         setup: &ScfSetup,
         timers: &mut Timers,
     ) -> Result<Setup<ScfJkBuilt>, LinusError> {
-        let JkMethod::Df { aux } = cx.plan.jk() else {
-            return Ok(Setup::Declined(not_df(cx)));
-        };
-        let aux = cx.aux_set(aux, setup.purpose)?;
-        crate::backend::gpu::df::scf_jk(cx, &self.gpu, setup, &aux, timers)
+        match cx.plan.jk() {
+            JkMethod::Df { aux } => {
+                let aux = cx.aux_set(aux, setup.purpose)?;
+                // the engine of the J (backend.df_j): the memory-lean device J where J alone
+                // needs no tensor and the DF engine's would not stay on the device
+                use crate::backend::gpu::jdirect::{df_j_for, DfJ};
+                match df_j_for(cx, &self.gpu, &aux, setup.purpose, timers)? {
+                    DfJ::Direct(j) => Ok(Setup::Ready((j, None))),
+                    DfJ::Stored(shared) => {
+                        crate::backend::gpu::df::scf_jk(cx, &self.gpu, setup, &aux, shared, timers)
+                    }
+                }
+            }
+            JkMethod::RijCgk { aux, k_grid } => {
+                let aux = cx.aux_set(aux, setup.purpose)?;
+                crate::backend::gpu::gridk::scf_jk(cx, &self.gpu, setup, &aux, k_grid, timers)
+            }
+            _ => Ok(Setup::Declined(not_df(cx))),
+        }
     }
 
     fn scf_xc(
@@ -518,6 +597,50 @@ impl Backend for GpuBackend {
             cx.integrals.release_metrics();
         }
         Ok(setup)
+    }
+
+    fn response_solver(
+        &self,
+        cx: &CalcContext,
+        purpose: ResponseUse,
+        shape: crate::backend::SolverShape,
+    ) -> Setup<Box<dyn linus_scf::response::solver::SubspaceSolver>> {
+        // what the products take per call beside their engines: the CPKS kernel's workspace
+        // (the stored operator's reserve) and the exchange's through the tensor
+        let reserve = cx
+            .device_memory()
+            .map_or(0, |m| m.k_operator_reserve + m.response_workspace);
+        crate::backend::gpu::krylov::setup(
+            &self.gpu,
+            shape,
+            reserve,
+            (cx.backend.responses().clone(), purpose.name()),
+        )
+    }
+
+    fn gram(
+        &self,
+        cx: &CalcContext,
+        purpose: ResponseUse,
+    ) -> Option<Box<dyn linus_scf::response::second_order::Gram>> {
+        Some(Box::new(crate::backend::gpu::assembly::DeviceGram::new(
+            self.gpu.clone(),
+            (cx.backend.responses().clone(), purpose.name()),
+        )))
+    }
+
+    fn nuclear_attraction(
+        &self,
+        cx: &CalcContext,
+        pairs: &PairSet,
+        charges: &[(f64, [f64; 3])],
+    ) -> Result<Setup<Box<dyn crate::backend::NuclearAttraction>>, LinusError> {
+        Ok(
+            match crate::backend::gpu::vnuc::device_job(&self.gpu, &cx.basis, pairs, charges)? {
+                Setup::Ready(job) => Setup::Ready(Box::new(job)),
+                Setup::Declined(why) => Setup::Declined(why),
+            },
+        )
     }
 
     fn response_kernel<'a>(

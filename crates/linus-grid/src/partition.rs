@@ -102,6 +102,27 @@ pub struct Partitioner {
     nbr: Vec<[u32; NBR]>,
 }
 
+/// The cell factors of an unscreened partition ([`Partitioner::pair_tables`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PairScheme {
+    /// Becke's s(nu) of the (size-adjusted) nu.
+    Becke,
+    /// Becke's s(nu) of nu clamped to [-1, 1] before the size adjustment (LKO).
+    Lko,
+    /// SSF's z(nu / half), -1 and 1 outside (-half, half).
+    Ssf { half: f64 },
+}
+
+/// The atoms and per-pair factors of an unscreened partition, row-major n x n: `inv_r[i n + j]`
+/// = 1/R_ij (1/f(R_ij) for LKO), `a[i n + j]` the size adjustment a_ij (empty: none).
+#[derive(Clone, Debug)]
+pub struct PairTables {
+    pub scheme: PairScheme,
+    pub xyz: Vec<[f64; 3]>,
+    pub inv_r: Vec<f64>,
+    pub a: Vec<f64>,
+}
+
 /// Number of nearest neighbours tabulated per atom.
 const NBR: usize = 6;
 
@@ -408,6 +429,40 @@ impl Partitioner {
     /// Whether this partitioner uses exact distance screening.
     pub fn is_screened(&self) -> bool {
         self.screened
+    }
+
+    /// What [`Self::weights_block`] computes with when it is not screened and has two atoms or
+    /// more (None otherwise): the scheme and the per-pair factors exactly as it reads them, for an
+    /// evaluation elsewhere (a device) that repeats it operation for operation.
+    pub fn pair_tables(&self) -> Option<PairTables> {
+        let n = self.natm();
+        if self.screened || n < 2 || self.kind == Kind::None {
+            return None;
+        }
+        let scheme = match self.kind {
+            Kind::Becke => PairScheme::Becke,
+            Kind::Lko { .. } => PairScheme::Lko,
+            Kind::Ssf { a } => PairScheme::Ssf { half: a },
+            Kind::None => return None,
+        };
+        let mut inv_r = vec![0.0; n * n];
+        let mut a = vec![0.0; if self.adjust { n * n } else { 0 }];
+        for i in 0..n {
+            for j in 0..n {
+                if i != j {
+                    inv_r[i * n + j] = self.inv_r(i, j);
+                    if self.adjust {
+                        a[i * n + j] = self.a_ij(i, j);
+                    }
+                }
+            }
+        }
+        Some(PairTables {
+            scheme,
+            xyz: self.xyz.clone(),
+            inv_r,
+            a,
+        })
     }
 
     #[inline]
@@ -926,7 +981,7 @@ impl Partitioner {
     /// owner's derivative is minus the sum over all other atoms (translational invariance).
     /// As in [`Self::weight_gradient`], points with P_A = 0 and cell functions that are exactly
     /// zero contribute nothing.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, reason = "a kernel's arrays and sizes")]
     pub fn weight_gradient_block(
         &self,
         px: &[f64],
@@ -947,7 +1002,7 @@ impl Partitioner {
     /// 1e-18 sum |f vol| / N, which bounds every derivative term of the atom's cell function)
     /// are left out of the pair loop unless their partner is active.
     #[inline(always)]
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, reason = "a kernel's arrays and sizes")]
     fn wgb_body(
         &self,
         px: &[f64],
@@ -1119,7 +1174,10 @@ impl Partitioner {
     }
 
     /// Accumulates d P_b / d R_D (point fixed) into `acc` (indexed by atom), marking touched atoms.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the point, its atoms and their outputs"
+    )]
     fn cell_product_grad(
         &self,
         p: &[f64; 3],
@@ -1345,7 +1403,7 @@ impl Partitioner {
 /// [`Partitioner::wgb_body`] as a function of the partitioner, compiled per instruction set by
 /// `weight_gradient_block_isa` (linus-num's `multiversion!`).
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, reason = "a kernel's arrays and sizes")]
 fn wgb_isa_body(
     p: &Partitioner,
     px: &[f64],

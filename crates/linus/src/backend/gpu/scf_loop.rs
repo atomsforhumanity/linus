@@ -9,7 +9,8 @@
 //! iteration from its state on the same engines and continues.
 
 use crate::backend::gpu::device_error;
-use crate::backend::gpu::df::{scf_build_error, GpuDfJkBuilder, GpuScfJk};
+use crate::backend::gpu::device_jk::{self, DeviceJk};
+use crate::backend::gpu::df::scf_build_error;
 use crate::backend::gpu::scf_control::{DeviceEnv, DeviceFock, DeviceRun};
 use crate::backend::gpu::xc::GpuXcPotential;
 use crate::backend::scf::{ScfRun, ScfTerms, ScfXc};
@@ -18,7 +19,7 @@ use crate::driver::backend::Family;
 use linus_base::error::LinusError;
 use linus_base::terms::HookOutcome;
 use linus_base::terms::{EnvironmentTerm, XcPotential};
-use linus_gpu::scf::DeviceTerms;
+use linus_gpu::scf::{DeviceJ, DeviceTerms};
 use linus_scf::{ScfLoop, ScfResult};
 use std::any::Any;
 
@@ -30,8 +31,7 @@ pub(crate) fn takes(terms: &ScfTerms) -> Setup<()> {
     if let Some(why) = &terms.loop_declined {
         return Setup::Declined(why.clone());
     }
-    let jk: &dyn Any = &*terms.jk;
-    if !jk.is::<GpuScfJk>() {
+    if !device_jk::is_device(&*terms.jk) {
         return Setup::Declined("the J/K setup fell back to the CPU, so the host loop ran".into());
     }
     let Some(xc) = &terms.xc else {
@@ -72,26 +72,41 @@ impl ScfLoop for DeviceScf<'_> {
         &mut self,
         hook: Option<Box<dyn linus_base::terms::CoulombHook>>,
     ) -> Result<HookOutcome, LinusError> {
+        // the hook rides on the DF engine's J builds: the memory-lean J has no fit to hand over
+        let fit = device_jk::of(&mut *self.terms.jk).is_some_and(|b| b.coulomb_fit());
+        if hook.is_some() && !fit {
+            return Ok(HookOutcome::FellBack {
+                reason: "the memory-lean J (no stored DF tensor) does not hand over its fit".into(),
+            });
+        }
         self.hook = hook;
         Ok(HookOutcome::Installed)
     }
 
     fn run(&mut self, env: Option<&mut dyn EnvironmentTerm>) -> Result<ScfResult, LinusError> {
         let ScfRun { inp, opts, par } = self.run;
-        let jk: &mut dyn Any = &mut *self.terms.jk;
-        let (gpu, mut jk, aux) = jk
-            .downcast_mut::<GpuScfJk>()
-            .and_then(GpuScfJk::take)
-            .ok_or_else(|| LinusError::Internal("the device SCF ran twice".into()))?
-            .into_parts();
-        let hook = match self.hook.take() {
-            Some(h) => {
-                let fit = crate::backend::gpu::df::CoulombFit::new(&gpu, &aux)
+        let twice = || LinusError::Internal("the device SCF ran twice".into());
+        let builder = device_jk::of(&mut *self.terms.jk)
+            .ok_or_else(|| LinusError::Internal("the device loop with the CPU's J/K".into()))?;
+        let DeviceJk {
+            gpu,
+            mut j,
+            aux,
+            gridk,
+        } = builder.take_device(par)?.ok_or_else(twice)?;
+        let hook = match (self.hook.take(), &mut j, &aux) {
+            (Some(h), DeviceJ::Df(jk), Some(aux)) => {
+                let fit = crate::backend::gpu::df::CoulombFit::new(&gpu, aux)
                     .map_err(|e| device_error(Family::Jk, e))?;
                 jk.set_keep_coulomb_fit(true);
                 Some((fit, h))
             }
-            None => None,
+            (Some(_), ..) => {
+                return Err(LinusError::Internal(
+                    "a Coulomb hook on the device loop's memory-lean J".into(),
+                ))
+            }
+            (None, ..) => None,
         };
         let (xc, nl, cpu) = match self.terms.xc.take() {
             Some(x) => {
@@ -106,7 +121,7 @@ impl ScfLoop for DeviceScf<'_> {
         };
         let env_name = env.as_ref().map(|e| e.name());
         let mut terms = DeviceFock {
-            dev: DeviceTerms::new(jk, xc).with_vv10(nl),
+            dev: DeviceTerms::new(j, xc).with_vv10(nl).with_gridk(gridk),
             env: env.map(|term| DeviceEnv::of(term, par)),
             hook,
         };
@@ -124,48 +139,46 @@ impl ScfLoop for DeviceScf<'_> {
                         e => scf_build_error(Family::ScfLoop, e),
                     })
             })?;
+        // the engines back into the SCF's builders: the J/K's (the host loop continues on them,
+        // their timers read them) and the XC term
+        let DeviceFock { dev, env, hook, .. } = terms;
+        let DeviceTerms {
+            j, gridk, xc, vv10, ..
+        } = dev;
+        device_jk::of(&mut *self.terms.jk)
+            .ok_or_else(|| LinusError::Internal("the device loop with the CPU's J/K".into()))?
+            .put_device(DeviceJk {
+                gpu: gpu.clone(),
+                j,
+                aux,
+                gridk,
+            })?;
+        let hxc = match (xc, cpu) {
+            (Some(e), Some(c)) => Some(GpuXcPotential::from_parts(gpu.clone(), e, vv10, c)),
+            _ => None,
+        };
         let (resume, device_timers) = match run {
             DeviceRun::Done(r) => {
-                let DeviceTerms { xc, vv10, .. } = terms.dev;
-                if let (Some(e), Some(c)) = (xc, cpu) {
-                    self.terms.xc = Some(Box::new(GpuXcPotential::from_parts(
-                        gpu.clone(),
-                        e,
-                        vv10,
-                        c,
-                    )));
-                }
+                self.terms.xc = hxc.map(|x| Box::new(x) as Box<dyn ScfXc>);
                 return Ok(*r);
             }
             DeviceRun::HandOver(resume, timers) => (resume, timers),
         };
         // what the host loop does beyond plain DIIS (a stability analysis, a two-cycle): it
         // redoes the device's last iteration from its state on the same engines and continues
-        let DeviceFock { dev, env, hook } = terms;
-        let DeviceTerms { jk, xc, vv10, .. } = dev;
-        let mut hjk = GpuDfJkBuilder::from_parts(gpu.clone(), jk, aux);
+        let jk = self.terms.jk.builder();
         if let Some((_, h)) = hook {
-            use linus_base::terms::JkBuilder;
-            if let HookOutcome::FellBack { reason } = hjk.set_coulomb_hook(Some(h))? {
+            if let HookOutcome::FellBack { reason } = jk.set_coulomb_hook(Some(h))? {
                 return Err(LinusError::Unsupported(format!(
                     "the host loop after the device loop could not take the PCM's Coulomb hook: \
                      {reason}"
                 )));
             }
         }
-        let mut hxc = match (xc, cpu) {
-            (Some(e), Some(c)) => Some(GpuXcPotential::from_parts(gpu.clone(), e, vv10, c)),
-            _ => None,
-        };
-        let mut host = linus_scf::run_scf_resumed(
-            inp,
-            &mut hjk,
-            hxc.as_mut().map(|x| x as &mut dyn XcPotential),
-            env.map(|e| e.into_term()),
-            opts,
-            par,
-            resume,
-        )?;
+        let mut hxc = hxc;
+        let xcp = hxc.as_mut().map(|x| x as &mut dyn XcPotential);
+        let envt = env.map(|e| e.into_term());
+        let mut host = linus_scf::run_scf_resumed(inp, jk, xcp, envt, opts, par, resume)?;
         host.timers.merge(&device_timers);
         self.terms.xc = hxc.map(|x| Box::new(x) as Box<dyn ScfXc>);
         Ok(host)

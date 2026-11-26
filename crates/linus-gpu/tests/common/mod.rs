@@ -4,14 +4,7 @@
 /// LINUS_GPU_REQUIRED=1 a missing GPU fails the test instead.
 #[cfg(feature = "gpu")]
 pub fn gpu() -> Option<linus_gpu::Gpu> {
-    match linus_gpu::Gpu::new(0) {
-        Ok(g) => Some(g),
-        Err(e) if std::env::var("LINUS_GPU_REQUIRED").as_deref() != Ok("1") => {
-            eprintln!("skipped, no GPU: {e}");
-            None
-        }
-        Err(e) => panic!("LINUS_GPU_REQUIRED=1 but no GPU: {e}"),
-    }
+    linus_gpu::harness::gpu()
 }
 
 /// Deterministic pseudo-random numbers (xorshift64*).

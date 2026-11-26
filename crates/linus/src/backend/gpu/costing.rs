@@ -4,10 +4,8 @@
 //!   the tensor, from the operator's plan as linus-gpu's response engine gives it
 //!   (`linus_gpu::response::df::KOperatorPlan`) and the device's rates in the device policy
 //!   ([`ExchangeCosting`], set up for the plan's `auto` mode by the response's recipe,
-//!   `crate::backend::gpu::df::ResponseRecipe`);
-//! - the DF-J/K storage ladder's rungs below the device-resident tensor with the automatic K block
-//!   ([`df_shrunk_cost`], [`df_stream_cost`]): the tensor kept on the device with a smaller K block,
-//!   or streamed from page-locked host memory.
+//!   `crate::backend::gpu::df::ResponseRecipe`). The DF-J/K storage ladder's costs (decision D11)
+//!   are its plan's, `linus_gpu::df::plan`.
 
 use crate::driver::policy::ExchangeRates;
 use crate::driver::report::ExchangeEstimate;
@@ -103,34 +101,6 @@ fn secs(x: f64) -> String {
     } else {
         format!("{x:.3} s")
     }
-}
-
-/// What one more K block of a DF-J/K build costs (seconds per build): the exchange's GEMMs over
-/// smaller blocks run less efficiently and launch more often. Measured (u1an39 B3LYP/def2-TZVP,
-/// nbf 1034, naux 2556, the 5.49 GiB tensor on the device of an RTX PRO 6000; 16 builds per SCF):
-/// K blocks of 496 (the automatic block, 6 blocks), 136 (19) and 40 (64) functions took 0.1537,
-/// 0.1554 and 0.1656 s per build, 0.13 and 0.21 ms per extra block; the larger is taken.
-pub(crate) const DF_K_BLOCK_S: f64 = 2.1e-4;
-
-/// The rate at which a build streams the tensor from page-locked host memory (bytes per second,
-/// the copies partly behind the exchange's GEMMs). Measured (as [`DF_K_BLOCK_S`]): streamed with
-/// the automatic block, 0.2404 s per build, 0.0867 s more than on the device for 5.90e9 bytes,
-/// 68 GB/s.
-pub(crate) const DF_STREAM_RATE: f64 = 68e9;
-
-/// The seconds per build a device-resident DF tensor with K blocks of `nq` auxiliary functions
-/// costs beyond the automatic block `nq_auto` (`naux` auxiliary functions).
-pub(crate) fn df_shrunk_cost(naux: usize, nq_auto: usize, nq: usize) -> f64 {
-    let extra = naux
-        .div_ceil(nq.max(1))
-        .saturating_sub(naux.div_ceil(nq_auto.max(1)));
-    DF_K_BLOCK_S * extra as f64
-}
-
-/// The seconds per build streaming a DF tensor of `bytes` from host memory costs beyond keeping
-/// it on the device.
-pub(crate) fn df_stream_cost(bytes: usize) -> f64 {
-    bytes as f64 / DF_STREAM_RATE
 }
 
 /// `auto`'s path ([`ExchangeCosting`]) for the operator `plan` of `nd` perturbations

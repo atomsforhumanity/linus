@@ -1,6 +1,7 @@
-//! linus-gpu's own engines as the loop's Fock terms: [`DeviceTerms`] runs J/K on
-//! [`GpuDfJk`], XC on [`GpuXc`] and the VV10 term of -V functionals on [`GpuVv10`] with every
-//! matrix on the device.
+//! linus-gpu's own engines as the loop's Fock terms: [`DeviceTerms`] runs J on [`DeviceJ`]
+//! (the DF engine [`GpuDfJk`], or the memory-lean [`GpuDfJDirect`] without a stored tensor),
+//! K on the DF engine or on compensated grid-K ([`GridKTerm`]), XC on [`GpuXc`] and the VV10
+//! term of -V functionals on [`GpuVv10`], with every matrix on the device.
 //!
 //! A density without orbitals (the guess) is factored on the device as linus's
 //! `factor_symmetric` does: D = U w U^T, P = U_+ w_+^1/2 and N = U_- (-w_-)^1/2 over the
@@ -11,6 +12,8 @@ use super::kernels::Ops;
 use super::{FockState, FockTerms};
 use crate::df::{GpuDfJk, GpuJkDeviceRequest};
 use crate::error::GpuError;
+use crate::gridk::GridKTerm;
+use crate::jdirect::GpuDfJDirect;
 use crate::solver::Solver;
 use crate::xc::vv10::GpuVv10;
 use crate::xc::GpuXc;
@@ -26,10 +29,30 @@ struct GuessFactors {
     occ: DeviceBuf<f64>,
 }
 
-/// J/K on a [`GpuDfJk`] and, for Kohn-Sham, XC on a [`GpuXc`] plus, for -V functionals,
-/// VV10 on a [`GpuVv10`] (see the module docs).
+/// The engine of the loop's J.
+pub enum DeviceJ {
+    /// The DF engine: J, and K when the terms have no other exchange engine.
+    Df(Box<GpuDfJk>),
+    /// The memory-lean DF-J (no stored tensor): J alone.
+    Direct(Box<GpuDfJDirect>),
+}
+
+impl DeviceJ {
+    /// The DF engine, if J runs on it.
+    pub fn df(&self) -> Option<&GpuDfJk> {
+        match self {
+            DeviceJ::Df(jk) => Some(jk.as_ref()),
+            DeviceJ::Direct(_) => None,
+        }
+    }
+}
+
+/// J on a [`DeviceJ`], K on the DF engine or a [`GridKTerm`] and, for Kohn-Sham, XC on a
+/// [`GpuXc`] plus, for -V functionals, VV10 on a [`GpuVv10`] (see the module docs).
 pub struct DeviceTerms {
-    pub jk: GpuDfJk,
+    pub j: DeviceJ,
+    /// rij_cgk's exchange: K and E_K of compensated grid-K; None: the DF engine's K.
+    pub gridk: Option<GridKTerm>,
     pub xc: Option<GpuXc>,
     /// VV10 of a -V functional: its energy joins E_xc, its potential both spins' V_xc.
     pub vv10: Option<GpuVv10>,
@@ -38,9 +61,10 @@ pub struct DeviceTerms {
 }
 
 impl DeviceTerms {
-    pub fn new(jk: GpuDfJk, xc: Option<GpuXc>) -> Self {
+    pub fn new(j: DeviceJ, xc: Option<GpuXc>) -> Self {
         DeviceTerms {
-            jk,
+            j,
+            gridk: None,
             xc,
             vv10: None,
             ops: None,
@@ -48,25 +72,44 @@ impl DeviceTerms {
         }
     }
 
+    /// With compensated grid-K's exchange `gridk` (rij_cgk's; None: the DF engine's K).
+    pub fn with_gridk(mut self, gridk: Option<GridKTerm>) -> Self {
+        self.gridk = gridk;
+        self
+    }
+
     /// With the VV10 term `vv10` (a -V functional's; None: none).
     pub fn with_vv10(mut self, vv10: Option<GpuVv10>) -> Self {
         self.vv10 = vv10;
         self
     }
+}
 
-    /// The factors of the state's densities (computed once per state).
-    fn factors(&mut self, gpu: &Gpu, st: &FockState<'_>) -> Result<&GuessFactors, GpuError> {
-        if self
-            .guess
-            .as_ref()
-            .is_some_and(|g| g.generation == st.generation)
-        {
-            return Ok(self.guess.as_ref().unwrap());
-        }
-        if self.ops.is_none() {
-            self.ops = Some(Ops::new(gpu, 1, 1)?);
-        }
-        let ops = self.ops.as_ref().unwrap();
+/// The loop's kernels in `slot` (compiled on first use).
+fn ops<'a>(slot: &'a mut Option<Ops>, gpu: &Gpu) -> Result<&'a Ops, GpuError> {
+    if slot.is_none() {
+        *slot = Some(Ops::new(gpu, 1, 1)?);
+    }
+    slot.as_ref()
+        .ok_or_else(|| GpuError::Contract("the loop's kernels".into()))
+}
+
+/// The factors of the state's densities in `guess` (computed once per state), with the loop's
+/// kernels in `ops_slot`.
+fn factors<'a>(
+    guess: &'a mut Option<GuessFactors>,
+    ops_slot: &mut Option<Ops>,
+    gpu: &Gpu,
+    st: &FockState<'_>,
+) -> Result<&'a GuessFactors, GpuError> {
+    if guess
+        .as_ref()
+        .is_some_and(|g| g.generation != st.generation)
+    {
+        *guess = None;
+    }
+    if guess.is_none() {
+        let ops = ops(ops_slot, gpu)?;
         let n = st.nbf;
         let n2 = n * n;
         let solver = Solver::new(gpu)?;
@@ -97,14 +140,16 @@ impl DeviceTerms {
             occ.extend(std::iter::repeat_n(1.0, *npos));
             occ.extend(std::iter::repeat_n(-1.0, *nneg));
         }
-        self.guess = Some(GuessFactors {
+        *guess = Some(GuessFactors {
             generation: st.generation,
             c,
             ncols,
             occ: gpu.upload(&occ)?,
         });
-        Ok(self.guess.as_ref().unwrap())
     }
+    guess
+        .as_ref()
+        .ok_or_else(|| GpuError::Contract("the guess density's factors".into()))
 }
 
 impl FockTerms for DeviceTerms {
@@ -122,21 +167,34 @@ impl FockTerms for DeviceTerms {
             factors,
             ncols,
         };
-        match (k, st.orbitals) {
-            (None, _) => self.jk.compute_device(gpu, &req(None, &[]), Some(j), None),
-            (Some(k), Some(c)) => {
-                self.jk
-                    .compute_device(gpu, &req(Some(c), st.nocc), Some(j), Some(k))
+        let df_k = self.gridk.is_none() && k.is_some();
+        let jk = match &mut self.j {
+            DeviceJ::Df(jk) if df_k => jk,
+            // J alone on its engine (of the densities, no factors); K on grid-K
+            j_eng => {
+                match j_eng {
+                    DeviceJ::Df(jk) => jk.compute_device(gpu, &req(None, &[]), Some(j), None)?,
+                    DeviceJ::Direct(e) => e.coulomb(st.densities, nsp, j)?,
+                }
+                return match (self.gridk.as_mut(), k) {
+                    (Some(g), Some(k)) => g.exchange(st.densities, nsp, k),
+                    (None, Some(_)) => Err(GpuError::Contract(
+                        "the memory-lean J has no exchange: K needs the DF engine or grid-K".into(),
+                    )),
+                    (_, None) => Ok(()),
+                };
             }
+        };
+        match (k, st.orbitals) {
+            (None, _) => jk.compute_device(gpu, &req(None, &[]), Some(j), None),
+            (Some(k), Some(c)) => jk.compute_device(gpu, &req(Some(c), st.nocc), Some(j), Some(k)),
             (Some(k), None) => {
                 // K[D_s] = K[P_s P_s^T] - K[N_s N_s^T]
                 let n2 = st.nbf * st.nbf;
-                self.factors(gpu, st)?;
-                let g = self.guess.as_ref().unwrap();
+                let g = factors(&mut self.guess, &mut self.ops, gpu, st)?;
                 let mut kk = gpu.alloc_zeros::<f64>(2 * nsp * n2)?;
-                self.jk
-                    .compute_device(gpu, &req(Some(&g.c), &g.ncols), Some(j), Some(&mut kk))?;
-                let ops = self.ops.as_ref().unwrap();
+                jk.compute_device(gpu, &req(Some(&g.c), &g.ncols), Some(j), Some(&mut kk))?;
+                let ops = ops(&mut self.ops, gpu)?;
                 for s in 0..nsp {
                     ops.add(
                         gpu,
@@ -150,6 +208,11 @@ impl FockTerms for DeviceTerms {
                 Ok(())
             }
         }
+    }
+
+    /// Compensated grid-K's E_K (its K is affine in D); None for the DF engine's K.
+    fn exchange_energy(&self) -> Option<f64> {
+        self.gridk.as_ref().and_then(GridKTerm::energy)
     }
 
     fn exchange_correlation(
@@ -192,8 +255,7 @@ impl FockTerms for DeviceTerms {
                 (e, enl)
             }
             None => {
-                self.factors(gpu, st)?;
-                let g = self.guess.as_ref().unwrap();
+                let g = factors(&mut self.guess, &mut self.ops, gpu, st)?;
                 // one channel per spin: [P_s N_s] with occupations +1, -1
                 let per: Vec<usize> = g.ncols.chunks(2).map(|p| p[0] + p[1]).collect();
                 let out = vx.as_mut().unwrap_or(&mut *v);
@@ -217,10 +279,7 @@ impl FockTerms for DeviceTerms {
         let Some(e_nl) = e_nl else {
             return Ok(Some(exc));
         };
-        if self.ops.is_none() {
-            self.ops = Some(Ops::new(gpu, 1, 1)?);
-        }
-        let ops = self.ops.as_ref().unwrap();
+        let ops = ops(&mut self.ops, gpu)?;
         let (vx, vnl) = (vx.unwrap(), vnl.unwrap());
         for s in 0..nsp {
             ops.add(gpu, n2, (&vx, s * n2), (&vnl, 0), 1.0, (&mut *v, s * n2))?;

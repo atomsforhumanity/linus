@@ -57,6 +57,13 @@ impl DerivSource<'_> {
     /// The integral builder of the layout's pairs (the shared packed data, or packed here, at
     /// the primitive threshold) and the seconds of the packing (CPU).
     pub(crate) fn integrals(&self, gpu: &Gpu) -> Result<(Eri3c, f64), GpuError> {
+        let (mut b, pack) = self.integral_records(gpu)?;
+        b.ensure_kernels(gpu)?;
+        Ok((b, pack))
+    }
+
+    /// As [`DerivSource::integrals`] without the kernels ([`Eri3c::records_only`]).
+    pub(crate) fn integral_records(&self, gpu: &Gpu) -> Result<(Eri3c, f64), GpuError> {
         let t = Instant::now();
         let prim = self.thresholds.prim;
         let host: Arc<Eri3cHost> = match self.shared.map(|s| &s.ints) {
@@ -72,13 +79,24 @@ impl DerivSource<'_> {
         let staged = self
             .shared
             .and_then(|s| s.staged_records(Eri3cKind::Integrals, prim));
-        Ok((Eri3c::with_staged(gpu, host, staged.as_deref())?, pack))
+        Ok((Eri3c::records_only(gpu, host, staged.as_deref())?, pack))
     }
 
     /// The `kind` derivative builder of the layout's pairs (the shared records, built there
     /// once, or built here, at the derivative primitive threshold) and the seconds of its
     /// records (CPU).
     pub(crate) fn derivatives(&self, gpu: &Gpu, kind: Eri3cKind) -> Result<(Eri3c, f64), GpuError> {
+        let (mut b, pack) = self.derivative_records(gpu, kind)?;
+        b.ensure_kernels(gpu)?;
+        Ok((b, pack))
+    }
+
+    /// As [`DerivSource::derivatives`] without the kernels ([`Eri3c::records_only`]).
+    pub(crate) fn derivative_records(
+        &self,
+        gpu: &Gpu,
+        kind: Eri3cKind,
+    ) -> Result<(Eri3c, f64), GpuError> {
         let t = Instant::now();
         let thresh = self.thresholds.deriv_prim;
         let host: Arc<Eri3cHost> = match self.shared {
@@ -90,7 +108,7 @@ impl DerivSource<'_> {
         };
         let pack = t.elapsed().as_secs_f64();
         let staged = self.shared.and_then(|s| s.staged_records(kind, thresh));
-        Ok((Eri3c::with_staged(gpu, host, staged.as_deref())?, pack))
+        Ok((Eri3c::records_only(gpu, host, staged.as_deref())?, pack))
     }
 
     /// The Coulomb metric (P|Q) on the device (the shared one, from its page-locked copy when
@@ -116,10 +134,64 @@ pub(crate) enum Metric<'a> {
     Staged(&'a DfShared),
     /// Formed here on the CPU from the auxiliary basis.
     Formed(&'a Aux3c),
+    /// Formed on the device from the auxiliary basis by the three-center kernels
+    /// ([`device_metric`]); the [`DfShared`]'s where the kernels do not cover the basis.
+    Device(&'a BasisSet, &'a DfShared),
+}
+
+/// The Coulomb metric (P|Q) of `aux` (naux x naux) on the device by the three-center kernels,
+/// each auxiliary shell paired with a unit s function at its centre (the CPU's `metric` the
+/// same way); None where the kernels do not cover the auxiliary basis (l > 4 or Cartesian d and
+/// beyond).
+fn device_metric(
+    gpu: &Gpu,
+    aux: &BasisSet,
+    naux: usize,
+) -> Result<Option<DeviceBuf<f64>>, GpuError> {
+    use crate::cpu::{build_pair, Pair3c, Shell, ShellView};
+    if aux.nbf != naux || aux.shells.iter().any(|s| s.l > 4 || (s.l >= 2 && !s.pure)) {
+        return Ok(None);
+    }
+    // the auxiliary shells and one unit s function, as the pairs' basis
+    let mut pb = aux.clone();
+    let unit = pb.shells.len();
+    pb.shells.push(Shell {
+        l: 0,
+        pure: true,
+        atom: 0,
+        center: [0.0; 3],
+        exps: vec![0.0],
+        coefs: vec![1.0],
+        ao_start: aux.nbf,
+    });
+    pb.nbf += 1;
+    let pairs: Vec<Pair3c> = aux
+        .shells
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            Pair3c::from_shell_pair(&build_pair(
+                &ShellView::from_shell(s),
+                &ShellView::unit(s.center),
+                i,
+                unit,
+            ))
+        })
+        .collect();
+    let rows: Vec<usize> = aux.shells.iter().map(|s| s.ao_start).collect();
+    let host = match Eri3cHost::from_pair3c(&pb, aux, &pairs, &rows, 0.0) {
+        Ok(h) => h,
+        Err(GpuError::Contract(_)) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let eri = Eri3c::new(gpu, host)?;
+    let mut v = gpu.alloc_zeros::<f64>((naux * naux).max(1))?;
+    eri.compute(gpu, 0..pairs.len(), &Operator::Coulomb, &mut v, 0)?;
+    Ok(Some(v))
 }
 
 /// The Coulomb metric of `source` on the device, factored in place into its lower Cholesky
-/// factor L (cuSOLVER), and the seconds of forming and uploading it.
+/// factor L (cuSOLVER), and the seconds of forming (or uploading) it.
 pub(crate) fn metric_factor(
     gpu: &Gpu,
     source: Metric<'_>,
@@ -129,6 +201,10 @@ pub(crate) fn metric_factor(
     let mut chol = match source {
         Metric::Staged(s) => s.upload_metric(gpu)?,
         Metric::Formed(aux3) => gpu.upload(&metric(aux3, 0.0, &Operator::Coulomb))?,
+        Metric::Device(aux, s) => match device_metric(gpu, aux, naux)? {
+            Some(v) => v,
+            None => s.upload_metric(gpu)?,
+        },
     };
     let host = t.elapsed().as_secs_f64();
     Solver::new(gpu)?.potrf_lower(gpu, &mut chol, naux)?;

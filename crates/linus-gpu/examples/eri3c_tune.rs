@@ -13,7 +13,7 @@
 //! the disk cache), then time under the GPU lock.
 
 mod common;
-use common::device_ms;
+use common::{arg, device_ms};
 use linus_gpu::eri3c::{all_pairs, Eri3c, Eri3cHost, Eri3cKind, PairRow};
 use linus_gpu::harness::{self, compare};
 use linus_gpu::kernels::eri3c_class::{gen_kernel_for, GenKernel, Mapping};
@@ -69,12 +69,6 @@ fn read_manifest(dir: &str) -> Vec<Cand> {
             }
         })
         .collect()
-}
-
-fn arg(args: &[String], name: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn args_after(args: &[String], name: &str) -> Vec<String> {

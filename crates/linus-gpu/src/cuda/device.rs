@@ -92,6 +92,14 @@ pub struct Kernel {
 }
 
 impl Kernel {
+    /// The kernel `entry` of the loaded module `m`.
+    fn load(m: &Arc<cudarc::driver::CudaModule>, entry: &str) -> Result<Kernel, GpuError> {
+        Ok(Kernel {
+            f: m.load_function(entry)?,
+            name: entry.to_string(),
+        })
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -621,6 +629,37 @@ impl Gpu {
         self.kernel_with(name, src, entry, &[])
     }
 
+    /// As [`Gpu::kernel_with`] compiled for the device's architecture-specific target (`sm_XYa`,
+    /// [`crate::nvrtc::KernelCache::arch_specific`]): for kernels that use features of that
+    /// architecture alone (sm_90a's register hand-over). An error where the cache compiles PTX
+    /// for an older architecture.
+    pub fn kernel_arch_specific(
+        &self,
+        name: &str,
+        src: &str,
+        entry: &str,
+        extra: &[&str],
+    ) -> Result<Kernel, GpuError> {
+        let target = self.kernels.arch_specific()?;
+        let m = self
+            .kernels
+            .module_for(name, &self.kernel_source(src), extra, &target)?;
+        Kernel::load(&m, entry)
+    }
+
+    /// The kernels `entries` of one module compiled from `src` (one compilation, one cache
+    /// entry, one load for all of them; [`Gpu::kernel`] per entry would hash and look up the
+    /// source each time).
+    pub fn kernels(
+        &self,
+        name: &str,
+        src: &str,
+        entries: &[&str],
+    ) -> Result<Vec<Kernel>, GpuError> {
+        let m = self.kernels.module(name, &self.kernel_source(src), &[])?;
+        entries.iter().map(|e| Kernel::load(&m, e)).collect()
+    }
+
     /// As [`Gpu::kernel`] with extra compiler options.
     pub fn kernel_with(
         &self,
@@ -630,10 +669,7 @@ impl Gpu {
         extra: &[&str],
     ) -> Result<Kernel, GpuError> {
         let m = self.kernels.module(name, &self.kernel_source(src), extra)?;
-        Ok(Kernel {
-            f: m.load_function(entry)?,
-            name: entry.to_string(),
-        })
+        Kernel::load(&m, entry)
     }
 
     /// Queues `k` on the stream.

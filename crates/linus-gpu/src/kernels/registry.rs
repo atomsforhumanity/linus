@@ -17,7 +17,7 @@
 use std::borrow::Cow;
 
 /// The device functions shared by modules (`device/common.cuh`: the packed lower-triangle
-/// index), pasted in front of the sources that use them.
+/// index, Becke's switching function), pasted in front of the sources that use them.
 pub(crate) const COMMON_H: &str = include_str!("../../device/common.cuh");
 
 /// A hand-written CUDA module: what an engine compiles with [`crate::Gpu::kernel`].
@@ -58,11 +58,15 @@ pub fn modules() -> Vec<&'static KernelModule> {
         &crate::df::MODULE,
         &crate::df::FIT_MODULE,
         &crate::df::OZAKI_MODULE,
+        &crate::df::PANEL_MODULE,
+        &crate::df::PANEL_MMA_MODULE,
         &crate::grad::df::MODULE,
         &crate::hess::df::MODULE,
         &crate::response::df::MODULE,
+        &crate::response::krylov::MODULE,
         &crate::xc::MODULE,
         &crate::xc::layout::MODULE,
+        &crate::xc::partition::MODULE,
         &crate::grad::xc::MODULE,
         &crate::hess::xc::MODULE,
         &crate::response::xc::MODULE,
@@ -70,6 +74,8 @@ pub fn modules() -> Vec<&'static KernelModule> {
         &crate::xc::vv10::MODULE,
         &crate::xc::vv10::RESP_MODULE,
         &crate::pcm::MODULE,
+        &crate::jengine::MODULE,
+        &crate::gridk::MODULE,
         &crate::pcm::solver::MODULE,
         &crate::scf::kernels::MODULE,
     ]

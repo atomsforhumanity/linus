@@ -183,6 +183,25 @@ impl PairSet {
         self.kind
     }
 
+    /// The primitive-pair cut the set was built with ([`PairOptions::prim_cut`]).
+    pub fn prim_cut(&self) -> f64 {
+        self.opts.prim_cut
+    }
+
+    /// Whether this is an index-ordered orbital set of as many shells as `basis` has, at the
+    /// default primitive cut, of any derivative order: a set of `basis` built so has the pairs,
+    /// order and Schwarz factors of `PairSet::build(basis, PairOptions::default())` (a pure
+    /// function of the basis and the cut; the facade's test `pairs_identical_across_orders`),
+    /// so a caller's set can stand in for one built here. A set of another basis with as many
+    /// shells is the caller's error.
+    pub fn is_default_set_of(&self, basis: &BasisSet) -> bool {
+        let ns = basis.shells.len();
+        self.kind == PairKind::Orbital
+            && self.nshell == ns
+            && self.pairs.len() == ns * (ns + 1) / 2
+            && self.opts.prim_cut.to_bits() == PairOptions::default().prim_cut.to_bits()
+    }
+
     /// The number of shells of the basis.
     pub fn nshell(&self) -> usize {
         self.nshell

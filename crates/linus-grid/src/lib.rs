@@ -14,10 +14,10 @@
 //! Units: bohr. Weights of an atomic grid point are `w_rad * w_ang`, with radial weights
 //! including `4 pi r^2` and Lebedev weights summing to one.
 
-#[allow(clippy::excessive_precision)]
+#[allow(clippy::excessive_precision, reason = "the tables' digits as published")]
 #[rustfmt::skip]
 pub(crate) mod element_data;
-#[allow(clippy::excessive_precision)]
+#[allow(clippy::excessive_precision, reason = "the tables' digits as published")]
 #[rustfmt::skip]
 pub(crate) mod lebedev_data;
 
@@ -36,14 +36,18 @@ pub mod radial;
 
 pub use batch::{bbox, Batch, Batching};
 pub use elements::RadiiTable;
-pub use grid::{atomic_grid, AtomSizes, AtomicGrid, GridSpec, MolecularGrid};
+pub use grid::{
+    atomic_grid, AtomSizes, AtomicGrid, DevicePartition, GridSpec, GridTimes, MolecularGrid,
+};
 pub use orient::Orientation;
-pub use partition::{PartitionScheme, Partitioner, Scratch, SizeAdjust, ROW2_MAX_Z};
+pub use partition::{
+    PairScheme, PairTables, PartitionScheme, Partitioner, Scratch, SizeAdjust, ROW2_MAX_Z,
+};
 pub use prune::Pruning;
 pub use radial::{ChebyshevKind, RadialGrid, RadialMapping, RadialScale, RadialScheme};
 
 /// Errors from grid construction.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub enum GridError {
     /// No Lebedev set with this number of points.
     UnsupportedAngular(usize),
@@ -53,6 +57,9 @@ pub enum GridError {
         what: &'static str,
     },
     InvalidSpec(String),
+    /// A device partition failed ([`DevicePartition::weights`]: the device's error, for the
+    /// caller to report as its own).
+    Device(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl std::fmt::Display for GridError {
@@ -63,6 +70,7 @@ impl std::fmt::Display for GridError {
                 write!(f, "{what} not available for Z={z}")
             }
             GridError::InvalidSpec(s) => write!(f, "invalid grid spec: {s}"),
+            GridError::Device(e) => write!(f, "device partition: {e}"),
         }
     }
 }

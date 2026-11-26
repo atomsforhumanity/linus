@@ -134,7 +134,8 @@ pub enum Event<'a> {
     },
     /// `scf_escalation`: the SCF restarts after `iteration` from the orbitals of `from_iteration`
     /// (its lowest energy) with quasi-Newton steps, within its budget; `trigger` is
-    /// `stagnation` (the lowest energy stopped improving) or `two_thirds` (of `scf.max_iter`).
+    /// `stagnation` (the lowest energy stopped improving), `blowup` (DIIS blew up) or `two_thirds`
+    /// (of `scf.max_iter`).
     ScfEscalation {
         iteration: usize,
         trigger: &'a str,

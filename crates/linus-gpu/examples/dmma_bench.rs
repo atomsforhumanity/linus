@@ -27,7 +27,7 @@
 //! peak (FMA chains; DMMA chains in registers).
 
 mod common;
-use common::device_ms;
+use common::{device_ms, median};
 use linus_gpu::cpu::{ncart, nherm};
 use linus_gpu::{Arg, Gpu, GpuError, Launch};
 use std::fmt::Write as _;
@@ -216,11 +216,6 @@ extern "C" __global__ void dmma_peak(double *out, int iters) {
     out[blockIdx.x * blockDim.x + threadIdx.x] = s;
 }
 "#;
-
-fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    v[v.len() / 2]
-}
 
 fn peaks(gpu: &Gpu) -> R<(f64, f64)> {
     let blocks = gpu.info().sm_count * 8;

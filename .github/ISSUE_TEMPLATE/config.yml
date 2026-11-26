@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question
+    url: https://github.com/atomsforhumanity/linus/discussions/categories/q-a
+    about: How to run something, which settings to use, or anything else. No question is too small.
+  - name: Request a dataset
+    url: https://github.com/atomsforhumanity/datasets/discussions/new?category=ideas
+    about: Tell us which quantum-chemistry datasets you'd like us to compute and release openly.

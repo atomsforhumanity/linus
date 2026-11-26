@@ -27,6 +27,7 @@
 use super::perturbation::Perturbation;
 use super::stationary::Correction;
 use faer::{Mat, Par};
+use linus_base::error::LinusError;
 use linus_base::linalg::mm;
 
 /// The first-order occupied orbitals and orbital energies of a perturbation's response,
@@ -108,20 +109,30 @@ pub struct SecondOrder<'a> {
     pub rows: &'a dyn Perturbation,
     pub columns: &'a FirstOrderOrbitals,
     pub correction: Option<Correction<'a>>,
+    /// The stacked GEMMs elsewhere (a device's; None: the host's [`stacked_gram`]).
+    pub gram: Option<&'a dyn Gram>,
 }
 
 impl SecondOrder<'_> {
     /// Adds channel `s`'s part, with the channel's occupation `f_occ`, to `out` (rows x
-    /// columns), as one GEMM of the stacked matrices per term.
-    pub fn add_channel(&self, out: &mut Mat<f64>, s: usize, f_occ: f64, par: Par) {
+    /// columns), as one GEMM of the stacked matrices per term. An error is the device's
+    /// ([`Gram`]); on the host it cannot fail.
+    pub fn add_channel(
+        &self,
+        out: &mut Mat<f64>,
+        s: usize,
+        f_occ: f64,
+        par: Par,
+    ) -> Result<(), LinusError> {
         let c1 = &self.columns.c1[s];
-        stacked_gram(
+        stacked_gram_on(
+            self.gram,
             out,
             2.0 * f_occ,
             &refs(&self.rows.fock_occ()[s]),
             &refs(c1),
             par,
-        );
+        )?;
         if let Some(o) = self.rows.overlap() {
             let b = self.rows.reference().channels.spin(s);
             let (n, eo) = (b.c_occ.nrows(), &b.eps_occ);
@@ -129,19 +140,60 @@ impl SecondOrder<'_> {
                 .iter()
                 .map(|c| Mat::from_fn(n, b.nocc(), |i, k| c[(i, k)] * eo[k]))
                 .collect();
-            stacked_gram(out, -2.0 * f_occ, &refs(&o.sxo[s]), &refs(&c1e), par);
-            stacked_gram(
+            stacked_gram_on(
+                self.gram,
+                out,
+                -2.0 * f_occ,
+                &refs(&o.sxo[s]),
+                &refs(&c1e),
+                par,
+            )?;
+            stacked_gram_on(
+                self.gram,
                 out,
                 -f_occ,
                 &refs(&o.s1oo[s]),
                 &refs(&self.columns.e1[s]),
                 par,
-            );
+            )?;
         }
         if let Some(c) = &self.correction {
-            c.add_gram(out, s, -2.0 * f_occ, par);
+            c.add_gram(self.gram, out, s, -2.0 * f_occ, par)?;
+        }
+        Ok(())
+    }
+}
+
+/// The GEMM of [`stacked_gram`] on other hardware (a device's): hr += f A^T B of the stacked
+/// matrices, its sums in that hardware's order (the result the host's to round-off). Ok(false):
+/// nothing added, the hardware declined (out of its memory, recorded by it) and the host's GEMM
+/// runs; an error is the calculation's.
+pub trait Gram: Sync {
+    fn gram(
+        &self,
+        hr: &mut Mat<f64>,
+        f: f64,
+        a: &[&Mat<f64>],
+        b: &[&Mat<f64>],
+    ) -> Result<bool, LinusError>;
+}
+
+/// [`stacked_gram`] by `gram` where it takes it, else on the host.
+pub fn stacked_gram_on(
+    gram: Option<&dyn Gram>,
+    hr: &mut Mat<f64>,
+    f: f64,
+    a: &[&Mat<f64>],
+    b: &[&Mat<f64>],
+    par: Par,
+) -> Result<(), LinusError> {
+    if let Some(g) = gram {
+        if g.gram(hr, f, a, b)? {
+            return Ok(());
         }
     }
+    stacked_gram(hr, f, a, b, par);
+    Ok(())
 }
 
 /// hr += f A^T B with A, B the matrices of `a` and `b` vectorized as columns (all of the same
@@ -151,10 +203,18 @@ pub fn stacked_gram(hr: &mut Mat<f64>, f: f64, a: &[&Mat<f64>], b: &[&Mat<f64>],
     if len == 0 {
         return;
     }
+    // column c: the columns of v[c] one after another (its column-major vectorization), copied
+    // column by column into a matrix made as Mat::from_fn makes it
     let stack = |v: &[&Mat<f64>]| {
-        Mat::from_fn(len, v.len(), |i, c| {
-            v[c][(i % v[c].nrows(), i / v[c].nrows())]
-        })
+        let mut m = Mat::from_fn(len, v.len(), |_, _| 0.0);
+        for (c, src) in v.iter().enumerate() {
+            let nr = src.nrows();
+            let dst = m.col_as_slice_mut(c);
+            for j in 0..src.ncols() {
+                dst[j * nr..(j + 1) * nr].copy_from_slice(src.col_as_slice(j));
+            }
+        }
+        m
     };
     let (am, bm) = (stack(a), stack(b));
     linus_base::linalg::matmul(
@@ -203,6 +263,27 @@ mod tests {
                 let (ra, rb) = (refs(&ma), refs(&mb));
                 let mut seq = Mat::<f64>::zeros(na, nb);
                 stacked_gram(&mut seq, -4.0, &ra, &rb, Par::Seq);
+                // the stacks as they were built element by element (the same bits)
+                let stack = |v: &[&Mat<f64>]| {
+                    let len = shape.0 * shape.1;
+                    Mat::from_fn(len, v.len(), |i, c| {
+                        v[c][(i % v[c].nrows(), i / v[c].nrows())]
+                    })
+                };
+                let mut old = Mat::<f64>::zeros(na, nb);
+                linus_base::linalg::matmul(
+                    old.as_mut(),
+                    faer::Accum::Add,
+                    stack(&ra).transpose(),
+                    stack(&rb).as_ref(),
+                    -4.0,
+                    Par::Seq,
+                );
+                for x in 0..na {
+                    for y in 0..nb {
+                        assert_eq!(seq[(x, y)].to_bits(), old[(x, y)].to_bits());
+                    }
+                }
                 for (t, pool) in &pools {
                     let mut par = Mat::<f64>::zeros(na, nb);
                     pool.install(|| stacked_gram(&mut par, -4.0, &ra, &rb, Par::rayon(*t)));

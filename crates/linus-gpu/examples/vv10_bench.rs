@@ -7,50 +7,13 @@
 //!   vv10_bench [--molecule u1an39] [--basis def2-svp] [--grid linus:1] [--method wb97m-v]
 //!              [--math fp64,df64,fp32] [--reps 3] [--no-grad] [--no-energy]
 
+mod common;
+use common::{arg, median_warm, orbitals};
 use linus_gpu::cpu::GridSpec;
 use linus_gpu::harness;
 use linus_gpu::xc::vv10::{GpuVv10, GpuVv10Grad, GpuVv10GradOptions, GpuVv10Options, Vv10Math};
 use linus_gpu::xc::XcChannel;
 use linus_gpu::{Gpu, GpuError};
-
-fn arg(args: &[String], name: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1).cloned())
-}
-
-/// n x o column-major orbitals: a deterministic pseudo-random matrix with orthonormal columns.
-fn orbitals(n: usize, o: usize, seed: u64) -> Vec<f64> {
-    let mut s = seed;
-    let mut c: Vec<f64> = (0..n * o)
-        .map(|_| {
-            s = s
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            ((s >> 11) as f64 / (1u64 << 53) as f64) - 0.5
-        })
-        .collect();
-    for j in 0..o {
-        for k in 0..j {
-            let d: f64 = (0..n).map(|i| c[i + j * n] * c[i + k * n]).sum();
-            for i in 0..n {
-                c[i + j * n] -= d * c[i + k * n];
-            }
-        }
-        let nrm = (0..n).map(|i| c[i + j * n].powi(2)).sum::<f64>().sqrt();
-        for i in 0..n {
-            c[i + j * n] /= nrm;
-        }
-    }
-    c
-}
-
-/// The median of the calls after the first (which compiles and warms up), or the first alone.
-fn median(v: Vec<f64>) -> f64 {
-    let mut v = if v.len() > 1 { v[1..].to_vec() } else { v };
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    v[v.len() / 2]
-}
 
 fn main() -> Result<(), GpuError> {
     let args: Vec<String> = std::env::args().collect();
@@ -123,11 +86,11 @@ fn main() -> Result<(), GpuError> {
             }
             // the first call compiles and warms up
             let (tot, pk, pt, dn, po) = (
-                median(tot.clone()),
-                median(pk.clone()),
-                median(pt.clone()),
-                median(dn.clone()),
-                median(po.clone()),
+                median_warm(&tot),
+                median_warm(&pk),
+                median_warm(&pt),
+                median_warm(&dn),
+                median_warm(&po),
             );
             let n = nl.last.pairs.active as f64;
             let de = e64.map_or(0.0, |r: f64| e - r);
@@ -161,7 +124,7 @@ fn main() -> Result<(), GpuError> {
                 tot.push(g.last.total * 1e3);
                 pk.push(g.last.pairs.pairs * 1e3);
             }
-            let (tot, pk) = (median(tot.clone()), median(pk.clone()));
+            let (tot, pk) = (median_warm(&tot), median_warm(&pk));
             let dg = g64.as_ref().map_or(0.0, |r| {
                 r.iter()
                     .flatten()

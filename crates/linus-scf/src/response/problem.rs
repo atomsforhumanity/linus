@@ -33,8 +33,19 @@
 
 use crate::reference::Reference;
 use crate::response::operator::ResponseOperator;
+
+/// The smallest diagonal element of the response solver's Jacobi preconditioner (Eh), which is
+/// |e_a - e_i| floored here: a positive preconditioner however the reference is occupied. At a
+/// non-aufbau reference (an empty orbital below an occupied one, `linus_scf::NonAufbau`: the
+/// escalation's states) the hole pair's e_a - e_i is negative, and at an exactly degenerate pair
+/// it is zero, a division by zero. The products keep the signed e_a - e_i, so the solution and an
+/// indefinite orbital Hessian (a saddle-point reference) are the operator's; the floor lies far
+/// below the frontier gaps of aufbau references, whose preconditioner and bits it leaves alone.
+pub const PRECONDITIONER_FLOOR: f64 = 1e-6;
 use crate::response::perturbation::Perturbation;
-use crate::response::solver::{map_cols, subspace_solve, ResponseStats, SolveControl};
+use crate::response::solver::{
+    map_cols, subspace_solve, Products, ResponseStats, SolveControl, SubspaceSolver,
+};
 use faer::{Mat, MatRef, Par};
 use linus_base::error::LinusError;
 use linus_base::linalg::mm;
@@ -52,6 +63,8 @@ pub struct ResponseProblem<'a> {
     /// Where the solve reports its iterations, and the solve's name in the events
     /// ([`ResponseProblem::report_to`]; off by default).
     progress: (Progress, &'static str),
+    /// The algebra of the solves elsewhere (a device's; None: the host's [`subspace_solve`]).
+    solver: Option<Box<dyn SubspaceSolver + 'a>>,
 }
 
 /// The solution of [`ResponseProblem::solve`]: U (`[s][k]`, nvir_s x nocc_s), dF\[U\] C_o when
@@ -78,6 +91,7 @@ impl<'a> ResponseProblem<'a> {
             eps_vir: reference.eps_vir(),
             operator,
             progress: (Progress::off(), ""),
+            solver: None,
         }
     }
 
@@ -85,6 +99,12 @@ impl<'a> ResponseProblem<'a> {
     /// (`hessian`, `polarizability`).
     pub fn report_to(&mut self, progress: Progress, solve: &'static str) {
         self.progress = (progress, solve);
+    }
+
+    /// Solve with `solver`'s algebra (a device's) instead of the host's [`subspace_solve`]
+    /// (None: the host's, the default).
+    pub fn set_solver(&mut self, solver: Option<Box<dyn SubspaceSolver + 'a>>) {
+        self.solver = solver;
     }
 
     fn nch(&self) -> usize {
@@ -232,10 +252,16 @@ impl<'a> ResponseProblem<'a> {
         let ushape: Vec<(usize, usize)> = (0..nch).map(|s| (nvir[s], nocc[s])).collect();
         let fshape: Vec<(usize, usize)> = (0..nch).map(|s| (n, nocc[s])).collect();
         let (eps_occ, eps_vir) = (&self.eps_occ, &self.eps_vir);
+        // the Jacobi preconditioner: |e_a - e_i|, at least PRECONDITIONER_FLOOR (the operator
+        // keeps the signed differences)
         let diag: Vec<f64> = (0..nch)
             .flat_map(|s| {
                 (0..nocc[s]).flat_map(move |i| {
-                    (0..eps_vir[s].len()).map(move |a| eps_vir[s][a] - eps_occ[s][i])
+                    (0..eps_vir[s].len()).map(move |a| {
+                        (eps_vir[s][a] - eps_occ[s][i])
+                            .abs()
+                            .max(PRECONDITIONER_FLOOR)
+                    })
                 })
             })
             .collect();
@@ -252,13 +278,14 @@ impl<'a> ResponseProblem<'a> {
         let (mut t_products, mut t_host) = (0.0, 0.0);
         let c_vir = &self.c_vir;
         let operator = &mut self.operator;
+        let solver = &mut self.solver;
         let control = SolveControl {
             tol,
             max_iter,
             progress: self.progress.0.clone(),
             solve: self.progress.1,
         };
-        let (x, fx, st) = subspace_solve(&b, &diag, elen, control, par, |zs| {
+        let mut apply = |zs: &[Vec<f64>]| -> Result<Products, LinusError> {
             // (A + B) on the new directions (one batched induced-Fock build); dF[z] C_o of all
             // channels flattened (column-major n x nocc_s blocks) as the extra
             let t_apply = std::time::Instant::now();
@@ -301,7 +328,12 @@ impl<'a> ResponseProblem<'a> {
             });
             t_host += t_apply.elapsed().as_secs_f64();
             Ok(out)
-        })?;
+        };
+        // the host's solver, or the one given (a device's algebra)
+        let (x, fx, st) = match solver.as_mut() {
+            Some(s) => s.solve(&b, &diag, elen, control, par, &mut apply)?,
+            None => subspace_solve(&b, &diag, elen, control, par, &mut apply)?,
+        };
         {
             let t = self.operator.timers_mut();
             t.add("cphf_vo", t_host - t_products);

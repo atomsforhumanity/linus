@@ -406,8 +406,12 @@ pub enum JkKind {
     /// Density-fitted J and seminumerical K on a separate grid (ORCA's RIJCOSX).
     #[serde(alias = "rij_cosx", alias = "rijcosx", alias = "snk")]
     RijSnk,
+    /// Density-fitted J and compensated grid-based K (Hohenstein et al. 2026): the dSCF
+    /// partition with exact exchange of the SAD densities and the symmetric overlap fit, on one
+    /// grid (`jk.k_grid`).
+    RijCgk,
 }
-setting_enum!(JkKind: "exact", "df", "rij_snk");
+setting_enum!(JkKind: "exact", "df", "rij_snk", "rij_cgk");
 
 /// The J/K method a calculation uses, resolved from the `jk` settings
 /// ([`CalcOptions::jk_method`]): how the Coulomb and exact-exchange matrices are approximated,
@@ -421,6 +425,9 @@ pub enum JkMethod {
     /// Density-fitted J (default auxiliary basis [`AUX_RIJ_DEFAULT`]) and seminumerical K on a
     /// separate grid (default [`K_GRID_DEFAULT`]).
     RijSnk { aux: AuxBasis, k_grid: GridChoice },
+    /// Density-fitted J (the auxiliary basis of `df`, [`AuxBasis::Auto`] by purpose) and
+    /// compensated grid-based K on one grid (default [`K_GRID_CGK_DEFAULT`]).
+    RijCgk { aux: AuxBasis, k_grid: GridChoice },
 }
 
 /// An auxiliary basis setting: `"auto"` (chosen by the calculation's purpose,
@@ -509,48 +516,54 @@ pub const AUX_RIJ_DEFAULT: &str = "def2-universal-jfit";
 /// Grid of the seminumerical exchange of rij_snk unless set, and what `k_grid: "auto"` means:
 /// the ORCA-like COSX grids of DefGrid2.
 pub const K_GRID_DEFAULT: GridChoice = GridChoice::Cosx { defgrid: 2 };
+/// Grid of rij_cgk's compensated grid-K unless set (`k_grid: "auto"`): one COSX grid of level 2.
+pub const K_GRID_CGK_DEFAULT: GridChoice = GridChoice::CosxLevels { levels: [2, 2, 2] };
 
 impl JkMethod {
     /// The auxiliary basis of the density-fitted J (and K, with df) as set (None for exact).
     pub fn aux(&self) -> Option<&AuxBasis> {
         match self {
-            JkMethod::Df { aux } | JkMethod::RijSnk { aux, .. } => Some(aux),
+            JkMethod::Df { aux } | JkMethod::RijSnk { aux, .. } | JkMethod::RijCgk { aux, .. } => {
+                Some(aux)
+            }
             JkMethod::Exact => None,
         }
     }
 
-    /// The grid of the seminumerical exchange (rij_snk; None for the others).
+    /// The grid of the seminumerical or grid-based exchange (rij_snk, rij_cgk; None for the
+    /// others).
     pub fn k_grid(&self) -> Option<&GridChoice> {
         match self {
-            JkMethod::RijSnk { k_grid, .. } => Some(k_grid),
+            JkMethod::RijSnk { k_grid, .. } | JkMethod::RijCgk { k_grid, .. } => Some(k_grid),
             _ => None,
         }
     }
 
     /// The highest orbital angular momentum the method supports, if it has a limit of its own:
-    /// [`MAX_L_COSX`] for the seminumerical exchange of rij_snk.
+    /// [`MAX_L_COSX`] for the seminumerical and grid-based exchange of rij_snk and rij_cgk.
     pub fn max_orbital_l(&self) -> Option<usize> {
         match self {
-            JkMethod::RijSnk { .. } => Some(MAX_L_COSX),
+            JkMethod::RijSnk { .. } | JkMethod::RijCgk { .. } => Some(MAX_L_COSX),
             _ => None,
         }
     }
 
     /// Whether analytic second derivatives (Hessians, polarizabilities) exist for the method:
-    /// exact integrals and density fitting, not RIJ + COSX.
+    /// exact integrals and density fitting, not RIJ + COSX or compensated grid-K.
     pub fn has_second_derivatives(&self) -> bool {
         match self {
             JkMethod::Exact | JkMethod::Df { .. } => true,
-            JkMethod::RijSnk { .. } => false,
+            JkMethod::RijSnk { .. } | JkMethod::RijCgk { .. } => false,
         }
     }
 
-    /// The canonical name: exact, df, rij_snk.
+    /// The canonical name: exact, df, rij_snk, rij_cgk.
     pub fn name(&self) -> &'static str {
         match self {
             JkMethod::Exact => "exact",
             JkMethod::Df { .. } => "df",
             JkMethod::RijSnk { .. } => "rij_snk",
+            JkMethod::RijCgk { .. } => "rij_cgk",
         }
     }
 }
@@ -596,16 +609,21 @@ settings_group! {
     /// exact with `exact_storage: "incore"`).
     pub struct JkSettings at "jk." {
         /// The approximation: `df` (density fitting of J and K with the calculation's auxiliary
-        /// basis, `aux`; synonyms `ri`, `rijk`), `exact` four-center integrals, or `rij_snk`
-        /// (density-fitted J with seminumerical K, ORCA's RIJCOSX; synonym `rijcosx`).
+        /// basis, `aux`; synonyms `ri`, `rijk`), `exact` four-center integrals, `rij_snk`
+        /// (density-fitted J with seminumerical K, ORCA's RIJCOSX; synonym `rijcosx`) or
+        /// `rij_cgk` (density-fitted J with compensated grid-based K: exact exchange of the SAD
+        /// densities, the rest on the grid `k_grid` with a symmetric overlap fit; energies and
+        /// gradients).
         kind: JkKind = JkKind::Df, [common, approximation];
-        /// The auxiliary basis of `df` and of `rij_snk`'s J. `auto`: def2-universal-jkfit for
-        /// energies and gradients, `cc-pvtz-jkfit|def2-universal-jkfit` for Hessians (df);
-        /// def2-universal-jfit (rij_snk). `"a|b"` takes each element from the first set that has it.
+        /// The auxiliary basis of `df` and of the J of `rij_snk` and `rij_cgk`. `auto`:
+        /// def2-universal-jkfit for energies and gradients, `cc-pvtz-jkfit|def2-universal-jkfit`
+        /// for Hessians (df, rij_cgk); def2-universal-jfit (rij_snk). `"a|b"` takes each element
+        /// from the first set that has it.
         aux: AuxBasis = AuxBasis::Auto, [common, approximation];
         /// The grid of `rij_snk`'s seminumerical exchange: `cosx:N` (ORCA-like COSX grids of
         /// DefGrid N), `gridx:A,B,C` (COSX grid levels of the first and last SCF iterations and
-        /// the final energy) or any grid. `auto`: `cosx:2`.
+        /// the final energy) or any grid. `auto`: `cosx:2`. For `rij_cgk` one grid: `gridx:N`
+        /// (one COSX grid level) or any single grid; `auto`: `gridx:2`.
         k_grid: GridChoice = GridChoice::Auto, [expert, approximation];
         /// Screening threshold of the exact four-center integrals (derivatives use at most 1e-12).
         screening: f64 = 1e-12, [expert, approximation];
@@ -655,6 +673,12 @@ impl From<JkMethod> for JkSettings {
                 k_grid: Some(k_grid),
                 ..Default::default()
             },
+            JkMethod::RijCgk { aux, k_grid } => JkSettings {
+                kind: Some(JkKind::RijCgk),
+                aux: Some(aux),
+                k_grid: Some(k_grid),
+                ..Default::default()
+            },
         }
     }
 }
@@ -670,13 +694,13 @@ impl Shorthand for JkSettings {
             }
             Value::String(s) => Ok(Map::from_iter([("kind".to_string(), Value::String(s))])),
             v => Err(format!(
-                "{path} must be a J/K kind (exact, incore, df, rij_snk) or an object, not {v}"
+                "{path} must be a J/K kind (exact, incore, df, rij_snk, rij_cgk) or an object, not {v}"
             )),
         }
     }
 
     fn schema() -> Option<Value> {
-        Some(json!({"type": "string", "x-type": "exact | incore | df | rij_snk"}))
+        Some(json!({"type": "string", "x-type": "exact | incore | df | rij_snk | rij_cgk"}))
     }
 }
 
@@ -718,6 +742,58 @@ pub enum ScfLoop {
     Device,
 }
 setting_enum!(ScfLoop: "auto", "host", "device");
+
+/// The engine of the SCF's density-fitted J on a GPU (`backend.df_j`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DfJEngine {
+    /// Direct where the DF engine could not keep its tensor on the device, else stored.
+    #[default]
+    Auto,
+    /// The DF engine's three-index tensor (on the device, or streamed from host memory).
+    Stored,
+    /// No stored tensor: the integrals recomputed in every build (`linus_gpu::jdirect`).
+    Direct,
+}
+setting_enum!(DfJEngine: "auto", "stored", "direct");
+
+impl DfJEngine {
+    /// auto, stored or direct.
+    pub fn name(self) -> &'static str {
+        match self {
+            DfJEngine::Auto => "auto",
+            DfJEngine::Stored => "stored",
+            DfJEngine::Direct => "direct",
+        }
+    }
+}
+
+/// Where the SCF's nuclear attraction V is computed beside a GPU's J/K setup
+/// (`backend.nuclear_attraction`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NuclearAttractionPlace {
+    /// The GPU for large molecules, else the CPU (the plan's rule:
+    /// `Plan::nuclear_attraction_on_device`).
+    #[default]
+    Auto,
+    /// The GPU: the device PCM engine's pair x point integrals with the point charges.
+    Gpu,
+    /// The CPU.
+    Cpu,
+}
+setting_enum!(NuclearAttractionPlace: "auto", "gpu", "cpu");
+
+impl NuclearAttractionPlace {
+    /// auto, gpu or cpu.
+    pub fn name(self) -> &'static str {
+        match self {
+            NuclearAttractionPlace::Auto => "auto",
+            NuclearAttractionPlace::Gpu => "gpu",
+            NuclearAttractionPlace::Cpu => "cpu",
+        }
+    }
+}
 
 /// The kernel cache of a GPU backend (`backend.kernel_cache`): where compiled device kernels
 /// are kept between runs. Serialized as its string.
@@ -815,6 +891,18 @@ settings_group! {
         /// Fock builds) or `device` (the whole loop on the GPU). `auto`: device, closed and open
         /// shells.
         scf_loop: ScfLoop = ScfLoop::Auto, [expert, algorithm];
+        /// The engine of the SCF's density-fitted J on a GPU: `stored` (the DF engine's
+        /// three-index tensor, on the device or streamed from host memory) or `direct` (no
+        /// stored tensor: the integrals recomputed in every build; where J needs no tensor for
+        /// anything else: jk df with a pure functional, or the J of jk rij_cgk, without an
+        /// implicit solvent). `auto`: direct where the tensor would not stay on the device beside
+        /// the other engines, else stored.
+        df_j: DfJEngine = DfJEngine::Auto, [expert, algorithm];
+        /// Where the SCF's nuclear attraction V is computed beside a GPU's J/K setup: `gpu` (the
+        /// device PCM engine's pair x point integrals) or `cpu`. `auto`: the GPU when the kept
+        /// shell pairs times the point charges reach 2e8 (about a second of the host's: large
+        /// molecules), else the CPU. The overlap, kinetic energy and ECPs stay on the CPU.
+        nuclear_attraction: NuclearAttractionPlace = NuclearAttractionPlace::Auto, [expert, algorithm];
         /// Where a GPU backend keeps its compiled kernels between runs: a directory or `off`
         /// (memory only). `auto`: `$LINUS_GPU_CACHE`, else `$XDG_CACHE_HOME/linus/gpu-kernels`,
         /// else `~/.cache/linus/gpu-kernels`.
@@ -867,6 +955,16 @@ impl BackendSettings {
                 if self.scf_loop == Some(ScfLoop::Device) {
                     return Err(LinusError::Input(
                         "backend cpu: scf_loop \"device\" is the GPU's SCF loop; use backend \"gpu\" or \"auto\"".into(),
+                    ));
+                }
+                if self.df_j == Some(DfJEngine::Direct) {
+                    return Err(LinusError::Input(
+                        "backend cpu: df_j \"direct\" is a GPU's density-fitted J; use backend \"gpu\" or \"auto\"".into(),
+                    ));
+                }
+                if self.nuclear_attraction == Some(NuclearAttractionPlace::Gpu) {
+                    return Err(LinusError::Input(
+                        "backend cpu: nuclear_attraction \"gpu\" is a GPU's nuclear attraction V; use backend \"gpu\" or \"auto\"".into(),
                     ));
                 }
                 Ok(())
@@ -1583,13 +1681,17 @@ settings_group! {
         /// `loosely_converged`; under accuracy targets only when the estimates of its final orbital
         /// gradient meet them (0: off).
         plateau_window: usize = 50, [expert, algorithm];
-        /// An SCF whose DIIS stagnates (`stagnation_window`), or that has spent 2/3 of
-        /// `max_iter`, restarts once from the lowest-energy orbitals it visited, with
-        /// quasi-Newton steps, for the rest of `max_iter`.
+        /// An SCF whose DIIS stagnates (`stagnation_window`) or blows up (`blowup_window`), or
+        /// that has spent 2/3 of `max_iter`, restarts once from the lowest-energy orbitals it
+        /// visited, with quasi-Newton steps, for the rest of `max_iter`.
         escalate: bool = true, [expert, algorithm];
         /// Iterations without a new lowest energy after which the escalation starts (0: only at
         /// 2/3 of `max_iter`).
         stagnation_window: usize = linus_scf::ScfAlgorithm::STAGNATION_WINDOW, [expert, algorithm];
+        /// Iterations in a row of a DIIS blow-up (the energy more than 1 Eh above the lowest
+        /// visited, max|F_ai| more than 10 times the smallest) after which the escalation starts
+        /// (0: off).
+        blowup_window: usize = linus_scf::ScfAlgorithm::BLOWUP_WINDOW, [expert, algorithm];
         /// Canonical orthogonalization: overlap eigenvalues at or below this (absolute) drop their
         /// functions; fewer orbitals left than occupied ones is an input error (in (0, 1)).
         lindep: f64 = 1e-8, [expert, algorithm];
@@ -1947,7 +2049,7 @@ pub enum GridRole {
     Response,
     /// VV10 nonlocal correlation of -V functionals (`grid.nlc`).
     Nlc,
-    /// The seminumerical exchange of rij_snk (`jk.k_grid`).
+    /// The seminumerical or grid-based exchange of rij_snk and rij_cgk (`jk.k_grid`).
     Exchange,
 }
 
@@ -2016,6 +2118,22 @@ impl CalcOptions {
             .k_grid()
             .validate()
             .map_err(|e| LinusError::Input(format!("jk.k_grid: {e}")))?;
+        // compensated grid-K is variational on one grid: no grid schemes
+        if self.jk.kind() == JkKind::RijCgk {
+            let g = self.jk.k_grid();
+            let multi = match &g {
+                GridChoice::Cosx { .. } => true,
+                GridChoice::CosxLevels { levels } => levels.iter().any(|&l| l != levels[0]),
+                _ => false,
+            };
+            if multi {
+                return Err(LinusError::Input(format!(
+                    "jk.k_grid {}: jk rij_cgk runs on one grid (its energy is variational and its \
+                     gradient exact on it); use gridx:N for one COSX grid level, or any single grid",
+                    g.label()
+                )));
+            }
+        }
         let a = &self.accuracy;
         for (path, v) in [
             ("accuracy.energy", a.energy()),
@@ -2046,6 +2164,13 @@ impl CalcOptions {
                 },
                 k_grid: match j.k_grid() {
                     GridChoice::Auto => K_GRID_DEFAULT,
+                    g => g,
+                },
+            },
+            JkKind::RijCgk => JkMethod::RijCgk {
+                aux: j.aux(),
+                k_grid: match j.k_grid() {
+                    GridChoice::Auto => K_GRID_CGK_DEFAULT,
                     g => g,
                 },
             },
@@ -2181,6 +2306,7 @@ impl CalcOptions {
             plateau_window: s.plateau_window(),
             escalate: s.escalate(),
             stagnation_window: s.stagnation_window(),
+            blowup_window: s.blowup_window(),
             lindep: s.lindep(),
         }
     }
@@ -2794,6 +2920,10 @@ mod tests {
         );
         assert!(k(json!(3)).is_err());
         let o = CalcOptions::from_json(json!({"backend": {"scf_loop": "device"}})).unwrap();
+        assert!(o.backend.check().unwrap_err().is_input());
+        let o = CalcOptions::from_json(json!({"backend": {"df_j": "direct"}})).unwrap();
+        assert!(o.backend.check().unwrap_err().is_input());
+        let o = CalcOptions::from_json(json!({"backend": {"nuclear_attraction": "gpu"}})).unwrap();
         assert!(o.backend.check().unwrap_err().is_input());
         assert!(CalcOptions::from_json(json!({"backend": "tpu"})).is_err());
         assert!(CalcOptions::from_json(json!({"backend": {"kind": "cpu", "cores": 4}})).is_err());

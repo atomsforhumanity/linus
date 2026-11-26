@@ -15,6 +15,12 @@ readme = "README.md"
 links = "xc"
 build = "build.rs"
 
+[features]
+# The libxc sources of the functionals a GPU evaluates on the device (`device` module): extracted
+# from the libxc tarball at build time and compiled by the GPU engines at run time (linus-gpu's
+# `gpu` feature turns it on). Changes nothing on the CPU.
+device-sources = []
+
 [dependencies]
 thiserror.workspace = true
 

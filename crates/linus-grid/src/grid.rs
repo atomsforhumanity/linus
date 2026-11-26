@@ -220,13 +220,114 @@ struct ShellOut<'a> {
     x: &'a mut [f64],
     y: &'a mut [f64],
     z: &'a mut [f64],
-    wt: &'a mut [f64],
     wa: &'a mut [f64],
+}
+
+/// A partition evaluated elsewhere (a device): the weights of an unscreened partition at every
+/// point, as [`Partitioner::weights_block`] computes them (a device may leave out of a point's
+/// sum of cell functions terms below 2^-100 of it).
+pub trait DevicePartition: Sync {
+    /// `vol[k] P_owner(k) / sum_B P_B` at the points (`x`, `y`, `z`, owners `owner`) for the
+    /// partition `tables`, one per point; None: the device declines (the implementor records
+    /// why) and the host computes them; Err: a failure of the calculation.
+    fn weights(
+        &self,
+        tables: &crate::partition::PairTables,
+        x: &[f64],
+        y: &[f64],
+        z: &[f64],
+        owner: &[u32],
+        vol: &[f64],
+    ) -> Result<Option<Vec<f64>>, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// The partition weights `w` of the points (`x`, `y`, `z`, atomic weights `wa`) of the atoms'
+/// consecutive runs `groups` (start, end; the owner is the run's index) on the host, in
+/// parallel over blocks of up to [`BLOCK`] points of one run: the same bits for any blocking
+/// (`weights_block` computes each point on its own).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the points' coordinate and weight arrays"
+)]
+fn host_weights(
+    partitioner: &Partitioner,
+    groups: &[(usize, usize)],
+    x: &[f64],
+    y: &[f64],
+    z: &[f64],
+    wa: &[f64],
+    w: &mut [f64],
+) {
+    let mut blocks: Vec<(usize, usize, &mut [f64])> = Vec::new();
+    let mut rest = w;
+    let mut at = 0;
+    for (atom, &(s, e)) in groups.iter().enumerate() {
+        for k0 in (s..e).step_by(BLOCK) {
+            let k1 = (k0 + BLOCK).min(e);
+            let (skip, tail) = rest.split_at_mut(k0 - at);
+            debug_assert!(skip.is_empty());
+            let (out, tail) = tail.split_at_mut(k1 - k0);
+            blocks.push((atom, k0, out));
+            rest = tail;
+            at = k1;
+        }
+    }
+    blocks.into_par_iter().for_each_init(
+        || partitioner.scratch(),
+        |scr: &mut Scratch, (atom, k0, out)| {
+            let k1 = k0 + out.len();
+            partitioner.weights_block(
+                &x[k0..k1],
+                &y[k0..k1],
+                &z[k0..k1],
+                atom,
+                &wa[k0..k1],
+                out,
+                scr,
+            );
+        },
+    );
+}
+
+/// Wall seconds of a grid build's phases ([`MolecularGrid::build_timed`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GridTimes {
+    /// The atomic grids and the points.
+    pub points: f64,
+    /// The partition weights (the device's, or the host's).
+    pub partition: f64,
+    /// The weight cutoff, the batching (the points' sort into batches) and the batches'
+    /// bounding spheres.
+    pub batches: f64,
 }
 
 impl MolecularGrid {
     /// Builds the grid for atoms with nuclear charges `z` at `xyz` (bohr).
     pub fn build(z: &[u32], xyz: &[[f64; 3]], spec: &GridSpec) -> Result<MolecularGrid, GridError> {
+        Self::build_with(z, xyz, spec, None)
+    }
+
+    /// [`MolecularGrid::build`] with the partition weights from `device` where it gives them (an
+    /// unscreened partition: Becke's, PySCF's grids), else from the host: the same grid when the
+    /// device repeats the host's arithmetic (but for the terms it may leave out).
+    pub fn build_with(
+        z: &[u32],
+        xyz: &[[f64; 3]],
+        spec: &GridSpec,
+        device: Option<&dyn DevicePartition>,
+    ) -> Result<MolecularGrid, GridError> {
+        Self::build_timed(z, xyz, spec, device).map(|(g, _)| g)
+    }
+
+    /// [`MolecularGrid::build_with`] and the wall time of its phases.
+    pub fn build_timed(
+        z: &[u32],
+        xyz: &[[f64; 3]],
+        spec: &GridSpec,
+        device: Option<&dyn DevicePartition>,
+    ) -> Result<(MolecularGrid, GridTimes), GridError> {
+        let clock = std::time::Instant::now();
+        let mut times = GridTimes::default();
         if z.len() != xyz.len() {
             return Err(GridError::InvalidSpec("z and xyz lengths differ".into()));
         }
@@ -246,20 +347,20 @@ impl MolecularGrid {
         let rot = rotation_matrix(&spec.orientation, z, xyz);
         let identity = rot == [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let partitioner = Partitioner::new(z, xyz, spec.partition, spec.size_adjust);
+        let tables = device.and(partitioner.pair_tables());
 
         let npts: usize = atom_grid.iter().map(|&g| atomic_grids[g].npoints()).sum();
         let mut x = vec![0.0; npts];
         let mut y = vec![0.0; npts];
         let mut zz = vec![0.0; npts];
-        let mut w = vec![0.0; npts];
         let mut wa = vec![0.0; npts];
         let mut owner = vec![0u32; npts];
         let mut groups = Vec::with_capacity(natm);
         {
             // split output arrays into per-shell chunks
             let mut shells: Vec<ShellOut> = Vec::new();
-            let (mut rx, mut ry, mut rz, mut rw, mut rwa) =
-                (&mut x[..], &mut y[..], &mut zz[..], &mut w[..], &mut wa[..]);
+            let (mut rx, mut ry, mut rz, mut rwa) =
+                (&mut x[..], &mut y[..], &mut zz[..], &mut wa[..]);
             let mut pos = 0;
             for (ia, &gi) in atom_grid.iter().enumerate() {
                 let g = &atomic_grids[gi];
@@ -271,8 +372,6 @@ impl MolecularGrid {
                     ry = d;
                     let (e, f) = rz.split_at_mut(n);
                     rz = f;
-                    let (h, i) = rw.split_at_mut(n);
-                    rw = i;
                     let (j, l) = rwa.split_at_mut(n);
                     rwa = l;
                     shells.push(ShellOut {
@@ -283,7 +382,6 @@ impl MolecularGrid {
                         x: a,
                         y: c,
                         z: e,
-                        wt: h,
                         wa: j,
                     });
                     pos += n;
@@ -291,43 +389,54 @@ impl MolecularGrid {
                 owner[start..pos].fill(ia as u32);
                 groups.push((start, pos));
             }
-            shells.par_iter_mut().for_each_init(
-                || partitioner.scratch(),
-                |scr: &mut Scratch, sh| {
-                    let leb = lebedev(sh.n).expect("validated");
-                    let c = xyz[sh.atom];
-                    for j in 0..sh.n {
-                        let (ux, uy, uz) = if identity {
-                            (leb.x[j], leb.y[j], leb.z[j])
-                        } else {
-                            let u = [leb.x[j], leb.y[j], leb.z[j]];
-                            (
-                                rot[0][0] * u[0] + rot[0][1] * u[1] + rot[0][2] * u[2],
-                                rot[1][0] * u[0] + rot[1][1] * u[1] + rot[1][2] * u[2],
-                                rot[2][0] * u[0] + rot[2][1] * u[1] + rot[2][2] * u[2],
-                            )
-                        };
-                        // PySCF: coords = r * u + R_A ; vol = w_rad * w_ang
-                        sh.x[j] = sh.r * ux + c[0];
-                        sh.y[j] = sh.r * uy + c[1];
-                        sh.z[j] = sh.r * uz + c[2];
-                        sh.wa[j] = sh.w * leb.w[j];
-                    }
-                    for k0 in (0..sh.n).step_by(BLOCK) {
-                        let k1 = (k0 + BLOCK).min(sh.n);
-                        partitioner.weights_block(
-                            &sh.x[k0..k1],
-                            &sh.y[k0..k1],
-                            &sh.z[k0..k1],
-                            sh.atom,
-                            &sh.wa[k0..k1],
-                            &mut sh.wt[k0..k1],
-                            scr,
-                        );
-                    }
-                },
-            );
+            shells.par_iter_mut().for_each(|sh| {
+                let leb = lebedev(sh.n).expect("validated");
+                let c = xyz[sh.atom];
+                for j in 0..sh.n {
+                    let (ux, uy, uz) = if identity {
+                        (leb.x[j], leb.y[j], leb.z[j])
+                    } else {
+                        let u = [leb.x[j], leb.y[j], leb.z[j]];
+                        (
+                            rot[0][0] * u[0] + rot[0][1] * u[1] + rot[0][2] * u[2],
+                            rot[1][0] * u[0] + rot[1][1] * u[1] + rot[1][2] * u[2],
+                            rot[2][0] * u[0] + rot[2][1] * u[1] + rot[2][2] * u[2],
+                        )
+                    };
+                    // PySCF: coords = r * u + R_A ; vol = w_rad * w_ang
+                    sh.x[j] = sh.r * ux + c[0];
+                    sh.y[j] = sh.r * uy + c[1];
+                    sh.z[j] = sh.r * uz + c[2];
+                    sh.wa[j] = sh.w * leb.w[j];
+                }
+            });
         }
+        times.points = clock.elapsed().as_secs_f64();
+        // the partition weights: the device's where it gives them, else the host's
+        let device_w = match (device, tables.as_ref()) {
+            (Some(dev), Some(t)) => dev
+                .weights(t, &x, &y, &zz, &owner, &wa)
+                .map_err(GridError::Device)?,
+            _ => None,
+        };
+        let mut w = match device_w {
+            Some(v) if v.len() == npts => v,
+            Some(v) => {
+                return Err(GridError::Device(
+                    format!(
+                        "the device partition gave {} weights for {npts} points",
+                        v.len()
+                    )
+                    .into(),
+                ))
+            }
+            None => {
+                let mut w = vec![0.0; npts];
+                host_weights(&partitioner, &groups, &x, &y, &zz, &wa, &mut w);
+                w
+            }
+        };
+        times.partition = clock.elapsed().as_secs_f64() - times.points;
         let npoints_before_cutoff = npts;
         // weight cutoffs
         if spec.weight_cutoff.is_some() || spec.partition_cutoff.is_some() {
@@ -377,20 +486,29 @@ impl MolecularGrid {
         let z2 = apply(&zz);
         let w2 = apply(&w);
         let wa2 = apply(&wa);
-        let o2: Vec<u32> = perm.iter().map(|&i| owner[i as usize]).collect();
-        let mut batches = Vec::with_capacity(lens.len());
-        let mut s = 0;
-        for l in lens {
-            let (c, r) = bounding_sphere(&x2, &y2, &z2, s, s + l);
-            batches.push(Batch {
-                start: s,
-                end: s + l,
-                center: c,
-                radius: r,
-            });
-            s += l;
-        }
-        Ok(MolecularGrid {
+        let o2: Vec<u32> = perm.par_iter().map(|&i| owner[i as usize]).collect();
+        let starts: Vec<usize> = lens
+            .iter()
+            .scan(0, |s, &l| {
+                *s += l;
+                Some(*s - l)
+            })
+            .collect();
+        let batches: Vec<Batch> = starts
+            .par_iter()
+            .zip(lens.par_iter())
+            .map(|(&s, &l)| {
+                let (c, r) = bounding_sphere(&x2, &y2, &z2, s, s + l);
+                Batch {
+                    start: s,
+                    end: s + l,
+                    center: c,
+                    radius: r,
+                }
+            })
+            .collect();
+        times.batches = clock.elapsed().as_secs_f64() - times.points - times.partition;
+        let grid = MolecularGrid {
             x: x2,
             y: y2,
             z: z2,
@@ -405,7 +523,8 @@ impl MolecularGrid {
             atom_z: z.to_vec(),
             atom_xyz: xyz.to_vec(),
             partitioner,
-        })
+        };
+        Ok((grid, times))
     }
 
     pub fn len(&self) -> usize {

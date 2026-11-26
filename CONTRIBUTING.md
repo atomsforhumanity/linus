@@ -3,6 +3,18 @@
 Build requirements are in the [README](README.md#build-and-install). This file has the checks
 a change must pass, the rules the code keeps, and how the generated code is made.
 
+## Ways to take part
+
+You don't need to write code to help. Questions go to
+[Discussions](https://github.com/atomsforhumanity/linus/discussions); bugs, results that differ from
+another program, slow calculations and feature requests each have a short form under
+[New issue](https://github.com/atomsforhumanity/linus/issues/new/choose), with one required box. Feature
+requests decide what we build next.
+
+Pull requests are welcome. Development happens in a separate repository: a maintainer applies your change
+there with you credited as a co-author (`Co-authored-by`), runs it through the gate below, and it reaches the
+public repository in the next release. The rest of this file is the detail a code change needs.
+
 ## Rules
 
 - **Determinism.** Results are bitwise identical at any thread count (check 1, 3 and 8

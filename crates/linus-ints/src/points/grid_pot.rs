@@ -200,6 +200,27 @@ impl PotPair {
         self.prims.partition_point(|q| q.est >= cut)
     }
 
+    /// The shell pairs (i, j), i >= j, of `basis` in index order, each with its primitive pairs
+    /// whose estimate reaches `prim_cut` and its estimate their sum; pairs with none dropped
+    /// (the pair lists of seminumerical and grid-based exchange).
+    pub fn significant(basis: &BasisSet, prim_cut: f64) -> Vec<PotPair> {
+        use rayon::prelude::*;
+        let ns = basis.shells.len();
+        let list: Vec<(usize, usize)> =
+            (0..ns).flat_map(|i| (0..=i).map(move |j| (i, j))).collect();
+        list.par_iter()
+            .map(|&(i, j)| {
+                // the construction's own cut, far below any screening
+                let mut p = PotPair::new(basis, i, j, 1e-30);
+                let keep = p.nprim_above(prim_cut);
+                p.prims.truncate(keep);
+                p.est = p.prims.iter().map(|q| q.est).sum();
+                p
+            })
+            .filter(|p| !p.prims.is_empty())
+            .collect()
+    }
+
     /// out[(ia * nb + ib) * np + g] = <a| O(|r - r_g|) |b> for a in shell `sa`, b in shell `sb`
     /// and the np points (x, y, z). Primitive pairs with `est < cut` are skipped (cut = 0 keeps
     /// all).

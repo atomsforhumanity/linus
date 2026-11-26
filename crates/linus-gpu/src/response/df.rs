@@ -771,9 +771,9 @@ mod device {
             match k_math {
                 RespMath::Ozaki { slices } => {
                     let before = self.jk.resolved().k_math;
-                    self.jk.set_k_math(gpu, KMath::Ozaki { slices }, false)?;
+                    self.jk.set_k_math(gpu, KMath::Ozaki { slices })?;
                     if self.jk.resolved().k_planes_bytes == 0 {
-                        self.jk.set_k_math(gpu, before, false)?;
+                        self.jk.set_k_math(gpu, before)?;
                         return Err(GpuError::NotCovered(
                             "response J/K: the Ozaki exchange multiplies the tensor's pre-sliced planes, which do not fit the device"
                                 .into(),
@@ -800,7 +800,7 @@ mod device {
                         match r {
                             Ok(p) => self.w_planes = Some(p),
                             Err(e) => {
-                                self.jk.set_k_math(gpu, before, false)?;
+                                self.jk.set_k_math(gpu, before)?;
                                 return Err(GpuError::NotCovered(format!(
                                     "response J/K: the Ozaki exchange's planes of the range-separated operator tensor: {e}"
                                 )));
@@ -811,7 +811,7 @@ mod device {
                 _ => {
                     self.w_planes = None;
                     if matches!(self.jk.resolved().k_math, KMath::Ozaki { .. }) {
-                        self.jk.set_k_math(gpu, KMath::Native, false)?;
+                        self.jk.set_k_math(gpu, KMath::Native)?;
                     }
                 }
             }

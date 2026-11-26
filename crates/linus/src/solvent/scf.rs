@@ -25,7 +25,7 @@ pub(crate) fn resolve_scf_mode(
     let df_j = jk.aux().is_some();
     let need_df_j = |what: &str| {
         Err(LinusError::Input(format!(
-            "{what} needs density-fitted J (jk df or rij_snk)"
+            "{what} needs density-fitted J (jk df, rij_snk or rij_cgk)"
         )))
     };
     Ok(match (so.df(), so.scf_terms()) {
@@ -185,10 +185,13 @@ pub(crate) fn open_environment(
         mode,
         aux,
     };
-    calc.resolve(crate::driver::backend::Family::Pcm, |b| {
+    let env = calc.resolve(crate::driver::backend::Family::Pcm, |b| {
         b.scf_environment(calc, setup, scf, &pcm)
-    })
-    .map(Some)
+    });
+    // the SCF's shell pairs, which a device PCM's setup took from its J/K setup, are done with
+    // (crate::backend::scf)
+    calc.integrals.release_pairs();
+    env.map(Some)
 }
 
 /// The CPU's term of the solvent `pcm` for an SCF on the loop `scf`, its Coulomb hook installed

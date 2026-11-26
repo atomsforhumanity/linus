@@ -136,6 +136,21 @@ def test_closed_shell_probe_record(water):
     assert hf.record["scf"]["closed_shell_probe"]["skipped"] == "hf_default"
 
 
+def test_non_aufbau_state_after_the_escalation():
+    """C2 singlet (1.243 Å) PBE: the escalation converges to a state with 3 sigma_g empty below the occupied pi
+    pair (docs/internal/deggrad.md). The gradient is that state's (ORCA 6.0.0: -0.038282036; before the fix
+    -0.1667, the aufbau determinant's), recorded as non-aufbau with one warning."""
+    from qcdata import Structure
+
+    c2 = Structure(symbols=["C", "C"], geometry=[[0, 0, 0], [0, 0, 1.243 / 0.529177210544]])
+    f = run(c2, "gradient", method="pbe", jk="df", grid={"xc": "orca:3"}, scf={"convergence": "extreme", "max_iter": 300})
+    assert f.results.gradient[1][2] == pytest.approx(-0.038282036, abs=1e-6)
+    na = f.record["scf"]["non_aufbau"]
+    assert na == [{"spin": "restricted", "holes": [4], "particles": [6], "inversion": pytest.approx(3.687e-4, abs=1e-6)}]
+    assert [w.code for w in f.warnings].count("non_aufbau") == 1 and f.record["homo_lumo_gap"] < 0
+    assert f.record["scf"]["closed_shell_probe"]["eigenvalue"] > -1
+
+
 def test_response_and_df_options_keep_defaults(water):
     """Explicit default settings give the same bits as unset ones; single precision moves the
     Hessian by round-off only."""

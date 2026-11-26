@@ -177,40 +177,76 @@ fn weighted_density(c: &Mat<f64>, occ: &[f64], par: Par) -> Mat<f64> {
     mm(cw.as_ref(), cw.transpose(), par)
 }
 
-/// SAD guess: block-diagonal superposition of atomic densities, returned as spin densities
-/// scaled to the molecule's alpha and beta electron counts.
-pub fn sad_guess(
-    def: &BasisDef,
-    basis: &BasisSet,
-    z: &[u32],
-    nalpha: usize,
-    nbeta: usize,
-    par: Par,
-) -> (Mat<f64>, Mat<f64>) {
+/// The atomic densities [`sad_guess`] takes for the atoms of `basis` (elements `z`), by element,
+/// computed side by side on the current rayon pool: each is its own one-thread SCF
+/// ([`atomic_density`], cached for the process), so they are the densities of one computed after
+/// another. A caller may compute them ahead (a session while its device opens); `sad_guess` then
+/// finds them cached.
+pub fn atomic_densities(def: &BasisDef, basis: &BasisSet, z: &[u32]) -> HashMap<u32, Mat<f64>> {
+    use rayon::prelude::*;
+    let mut elements: Vec<u32> = basis
+        .atom_shells
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| !r.is_empty())
+        .map(|(atom, _)| z[atom])
+        .collect();
+    elements.sort_unstable();
+    elements.dedup();
+    elements
+        .par_iter()
+        .map(|&e| (e, atomic_density(def, e, basis.pure, Par::Seq)))
+        .collect()
+}
+
+/// The superposition of the atoms' spin-averaged densities (total, alpha + beta) in the basis:
+/// block-diagonal, unscaled (neutral atoms). The SAD guess before its scaling, and the
+/// reference density of compensated grid-K (`linus_jk::gridk`). The atomic SCFs run on one
+/// thread each ([`atomic_densities`]), side by side on the current pool.
+pub fn sad_superposition(def: &BasisDef, basis: &BasisSet, z: &[u32]) -> Mat<f64> {
     let n = basis.nbf;
+    let dens = atomic_densities(def, basis, z);
     let mut d = Mat::<f64>::zeros(n, n);
-    let mut ntot = 0.0;
     for (atom, range) in basis.atom_shells.iter().enumerate() {
         if range.is_empty() {
             continue;
         }
-        let da = atomic_density(def, z[atom], basis.pure, par);
+        let da = &dens[&z[atom]];
         let off = basis.shells[range.start].ao_start;
         for j in 0..da.ncols() {
             for i in 0..da.nrows() {
                 d[(off + i, off + j)] = da[(i, j)];
             }
         }
-        ntot += (z[atom] - def.ecp.get(&z[atom]).map_or(0, |e| e.ncore)) as f64;
     }
-    let ne = (nalpha + nbeta) as f64;
+    d
+}
+
+/// SAD guess: block-diagonal superposition of atomic densities ([`sad_superposition`]),
+/// returned as spin densities scaled to the molecule's alpha and beta electron counts. The
+/// atomic SCFs run on one thread each, side by side on the current pool (`_par` is not used).
+pub fn sad_guess(
+    def: &BasisDef,
+    basis: &BasisSet,
+    z: &[u32],
+    nalpha: usize,
+    nbeta: usize,
+    _par: Par,
+) -> (Mat<f64>, Mat<f64>) {
+    let d = sad_superposition(def, basis, z);
+    // the neutral atoms' electrons (ECP cores excluded)
+    let mut ntot = 0.0;
+    for (atom, range) in basis.atom_shells.iter().enumerate() {
+        if !range.is_empty() {
+            ntot += (z[atom] - def.ecp.get(&z[atom]).map_or(0, |e| e.ncore)) as f64;
+        }
+    }
     let fa = if ntot > 0.0 {
         nalpha as f64 / ntot
     } else {
         0.0
     };
     let fb = if ntot > 0.0 { nbeta as f64 / ntot } else { 0.0 };
-    let _ = ne;
     (&d * fa, &d * fb)
 }
 

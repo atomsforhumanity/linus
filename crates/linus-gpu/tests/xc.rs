@@ -329,6 +329,82 @@ fn device_entry_point_matches_the_host_one_bitwise() {
         .all(|(x, y)| x.to_bits() == y.to_bits()));
 }
 
+/// The density entry point (a guess's densities, no orbitals) against the orbitals' on the
+/// per-batch path: closed and open shells, a GGA and a meta-GGA, to round-off (D formed on the
+/// host instead of the device); None on the block path.
+#[test]
+fn density_entry_point_matches_the_orbitals() {
+    let Some(gpu) = common::gpu() else { return };
+    let mol = water();
+    let basis = harness::basis(&mol, "def2-svp").unwrap();
+    let grid = harness::grid(&mol, &GridSpec::pyscf(1)).unwrap();
+    let nbf = basis.nbf;
+    let dm = |c: &[f64], nc: usize, occ: &[f64]| -> Vec<f64> {
+        let mut d = vec![0.0; nbf * nbf];
+        for j in 0..nbf {
+            for i in 0..nbf {
+                d[i + j * nbf] = (0..nc)
+                    .map(|k| occ[k] * c[i + k * nbf] * c[j + k * nbf])
+                    .sum();
+            }
+        }
+        d
+    };
+    for (name, restricted) in [("pbe", true), ("pbe", false), ("r2scan", false)] {
+        let mut xc = GpuXc::new(&gpu, &basis, &grid, name, &GpuXcOptions::default()).unwrap();
+        let chans: Vec<(Vec<f64>, usize, Vec<f64>)> = if restricted {
+            vec![channel(nbf, 5, 3)]
+        } else {
+            vec![channel(nbf, 5, 3), channel(nbf, 4, 9)]
+        };
+        let ch: Vec<XcChannel> = chans
+            .iter()
+            .map(|(c, ncol, occ)| XcChannel {
+                c,
+                ncol: *ncol,
+                occ,
+            })
+            .collect();
+        let orb = xc.compute(&gpu, &ch, restricted).unwrap();
+        let ds: Vec<Vec<f64>> = chans.iter().map(|(c, nc, occ)| dm(c, *nc, occ)).collect();
+        let refs: Vec<&[f64]> = ds.iter().map(|d| d.as_slice()).collect();
+        let den = xc
+            .compute_densities(&gpu, &refs, restricted)
+            .unwrap()
+            .unwrap();
+        let de = (den.exc - orb.exc).abs();
+        let vmax = orb.v.concat().iter().fold(0.0f64, |m, x| m.max(x.abs()));
+        let dv = den
+            .v
+            .concat()
+            .iter()
+            .zip(orb.v.concat())
+            .fold(0.0f64, |m, (a, b)| m.max((a - b).abs()));
+        eprintln!("{name} restricted {restricted}: dE {de:.2e}, max |dV| {dv:.2e} of {vmax:.2e}");
+        assert!(
+            de < 1e-11 * orb.exc.abs().max(1.0),
+            "{name} {restricted}: dE {de:e}"
+        );
+        assert!(dv < 1e-11 * vmax.max(1.0), "{name} {restricted}: dV {dv:e}");
+    }
+    let mut blocks = GpuXc::new(
+        &gpu,
+        &basis,
+        &grid,
+        "pbe",
+        &GpuXcOptions {
+            screen: linus_gpu::xc::XcScreen::Block,
+            ..GpuXcOptions::default()
+        },
+    )
+    .unwrap();
+    let d = vec![0.0; nbf * nbf];
+    assert!(blocks
+        .compute_densities(&gpu, &[&d], true)
+        .unwrap()
+        .is_none());
+}
+
 /// The XC Hessian's accumulators sized to a small free memory (a cap): main passes over groups
 /// of atoms instead of a CPU fallback, the call within that memory, and the same bits as one pass (the
 /// accumulators were a fixed 24 GiB, so under a cap the whole call had to fit or fall back).

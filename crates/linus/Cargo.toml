@@ -38,6 +38,8 @@ approx.workspace = true
 linus-ints = { path = "../linus-ints", features = ["reference"] }
 # the whole-calculation tests of linus-jk compare against its dense density-fitting references
 linus-jk = { path = "../linus-jk", features = ["reference"] }
+# the device solver's test solves linus-scf's test problem
+linus-scf = { path = "../linus-scf", features = ["reference"] }
 
 [features]
 default = ["dispersion"]

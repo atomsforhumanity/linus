@@ -197,10 +197,8 @@ impl<'a> Mo3c<'a> {
     }
 
     pub(crate) fn new(basis: &BasisSet, pairs: &PairSet, aux3c: &'a Aux3c) -> Self {
-        let q = pairs.schwarz();
-        let kept: Vec<usize> = (0..pairs.len())
-            .filter(|&i| pairs.pair(i).nprim > 0 && q[i] * aux3c.qmax >= 1e-14)
-            .collect();
+        let cut = linus_ints::eri3c::DfThresholds::default().pair;
+        let kept = linus_ints::eri3c::df_kept_pairs(pairs, aux3c.qmax, cut);
         let p3: Vec<Pair3c> = kept
             .par_iter()
             .map(|&i| Pair3c::from_shell_pair(pairs.pair(i)))

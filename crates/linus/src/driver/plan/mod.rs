@@ -20,7 +20,7 @@ use crate::driver::backend::{Device, Family, Placement};
 use crate::driver::memory::DeviceMemoryPlan;
 use crate::driver::options::{
     Auto, BackendSettings, CalcOptions, DfLongRange, DfPrecision, ExactStorage, JkMethod,
-    ResponseSettings, ScfLoop,
+    NuclearAttractionPlace, ResponseSettings, ScfLoop,
 };
 use crate::driver::policy::{DevicePolicy, ResponseArith};
 use crate::driver::{GridChoice, LinusError, MethodInfo, Purpose};
@@ -129,9 +129,7 @@ impl Plan {
             policy: DevicePolicy::new(
                 self.request.precision.fp64(),
                 self.request.precision.fp32(),
-                d.card.class(),
-                &d.info.compute_capability,
-                d.card.rates(),
+                &d.card,
             ),
             memory: DeviceMemoryPlan::for_limit(d.limit, d.response_defaults),
         });
@@ -267,6 +265,12 @@ impl Plan {
     /// The determinant (`reference`; None: restricted for a closed shell).
     pub(crate) fn restricted(&self) -> Option<bool> {
         self.request.reference().restricted()
+    }
+
+    /// Whether the determinant of `na` alpha and `nb` beta electrons is restricted: as
+    /// `reference` sets it, else for a closed shell (na == nb).
+    pub(crate) fn restricted_for(&self, na: usize, nb: usize) -> bool {
+        self.restricted().unwrap_or(na == nb)
     }
 
     /// The implicit solvent (`solvent`).
@@ -486,7 +490,40 @@ impl Plan {
     pub(crate) fn backend(&self) -> &BackendSettings {
         &self.request.backend
     }
+
+    /// Whether the SCF's nuclear attraction V of `charges` point charges over `kept_pairs` shell
+    /// pairs (with primitives kept) goes to the device beside a device J/K's setup, and why
+    /// (`backend.nuclear_attraction`; auto: the device from [`VNUC_DEVICE_WORK`] pairs x charges).
+    pub(crate) fn nuclear_attraction_on_device(
+        &self,
+        kept_pairs: usize,
+        charges: usize,
+    ) -> (bool, String) {
+        let work = kept_pairs as f64 * charges as f64;
+        let sizes = format!("{kept_pairs} pairs x {charges} charges = {work:.2e}");
+        match self.backend().nuclear_attraction() {
+            NuclearAttractionPlace::Gpu => {
+                (true, format!("backend.nuclear_attraction gpu; {sizes}"))
+            }
+            NuclearAttractionPlace::Cpu => {
+                (false, format!("backend.nuclear_attraction cpu; {sizes}"))
+            }
+            NuclearAttractionPlace::Auto if work >= VNUC_DEVICE_WORK => {
+                (true, format!("{sizes} >= {VNUC_DEVICE_WORK:.0e}"))
+            }
+            NuclearAttractionPlace::Auto => (
+                false,
+                format!("{sizes} < {VNUC_DEVICE_WORK:.0e}: the host's is as quick"),
+            ),
+        }
+    }
 }
+
+/// The work (kept shell pairs x point charges) from which `backend.nuclear_attraction` auto puts
+/// the SCF's nuclear attraction on the device ([`Plan::nuclear_attraction_on_device`]): about a
+/// second of the host's on 16 cores (ubiquitin/def2-SVP: 2.8 M pairs x 1231 nuclei, 15.7 s on 16
+/// Zen 5 cores); u1an39/def2-TZVP (1.8e6) and the validation's molecules stay on the host.
+pub(crate) const VNUC_DEVICE_WORK: f64 = 2e8;
 
 impl Plan {
     /// Where the kernel family `k` runs for `method` and these settings, with a device open or
@@ -513,10 +550,16 @@ impl Plan {
             "jk exact: the four-center integrals have no device kernels (jk df has them)";
         let no_snk =
             "jk rij_snk: the seminumerical exchange has no device kernels (jk df has them)";
+        let no_cgk = "jk rij_cgk: compensated grid-K's derivatives have no device kernels yet";
         match k {
             Family::Jk => match self.jk() {
                 JkMethod::Exact => cpu(no_exact),
                 JkMethod::RijSnk { .. } => cpu(no_snk),
+                JkMethod::RijCgk { .. } if self.solvent_df_pcm() => cpu(
+                    "solvent.df: the density-fitted PCM's terms ride on the CPU's density-fitted \
+                     Coulomb build",
+                ),
+                JkMethod::RijCgk { .. } => Some(Placement::Device),
                 JkMethod::Df { .. } if self.solvent_df_pcm() => cpu(
                     "solvent.df: the density-fitted PCM's terms ride on the CPU's density-fitted \
                      Coulomb build (without it the J/K runs on the device)",
@@ -526,6 +569,7 @@ impl Plan {
             Family::GradientJk | Family::HessianJk => match self.jk() {
                 JkMethod::Exact => cpu(no_exact),
                 JkMethod::RijSnk { .. } => cpu(no_snk),
+                JkMethod::RijCgk { .. } => cpu(no_cgk),
                 JkMethod::Df { .. } => match &self.uncovered {
                     Some(why) => cpu(why),
                     None => Some(Placement::Device),
@@ -751,6 +795,33 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(code(Session::new(mol(), o).err().unwrap()).1, "grid.xc");
+        // where V is computed with the CPU's J/K: no effect
+        let e = Session::new(
+            mol(),
+            req(json!({"backend": {"nuclear_attraction": "cpu"}})),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(
+            code(e),
+            ("no_effect", "backend.nuclear_attraction".to_string())
+        );
+    }
+
+    /// Where the SCF's nuclear attraction goes beside a device J/K: the setting, else from
+    /// VNUC_DEVICE_WORK kept pairs x point charges on.
+    #[test]
+    fn the_nuclear_attraction_rule() {
+        let plan =
+            |v: serde_json::Value| super::Plan::new(CalcOptions::from_json(v).unwrap()).unwrap();
+        let auto = plan(json!({}));
+        assert!(!auto.nuclear_attraction_on_device(1_999_999, 100).0);
+        let (on, why) = auto.nuclear_attraction_on_device(2_000_000, 100);
+        assert!(on && why.contains(">= 2e8"), "{why}");
+        let gpu = plan(json!({"backend": {"kind": "auto", "nuclear_attraction": "gpu"}}));
+        assert!(gpu.nuclear_attraction_on_device(10, 3).0);
+        let cpu = plan(json!({"backend": {"kind": "auto", "nuclear_attraction": "cpu"}}));
+        assert!(!cpu.nuclear_attraction_on_device(10_000_000, 1000).0);
     }
 
     /// D41's table checked by effect: for each case and every setting the table marks used or
@@ -801,6 +872,7 @@ mod tests {
             ("precision.fp64", json!("native")),
             ("precision.fp32", json!("off")),
             ("backend.scf_loop", json!("host")),
+            ("backend.nuclear_attraction", json!("cpu")),
         ];
         let water = |charge: i32, mult: u32| {
             Structure::from_xyz_str(

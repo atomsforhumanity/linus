@@ -39,6 +39,11 @@ states, post-HF methods, periodic systems ([Limitations](#limitations)).
 
 ## Limitations
 
+These are where linus is today, not deliberate limits. If you need something it doesn't do yet (post-HF
+methods such as MP2 or CCSD(T), another functional, property or solvent model, GPU support for a method),
+[open a feature request](https://github.com/atomsforhumanity/linus/issues/new/choose): we develop what the
+community asks for.
+
 - **ROHF/ROKS** is not implemented: open shells run UHF/UKS (`reference: "restricted"` on an open
   shell is refused as `unsupported`).
 - **Effective core potentials:** def2-type scalar ECPs only; LANL2-type ECPs (r^-2 local terms)
@@ -251,6 +256,20 @@ tools/              generators: basis export, integral kernels (intgen), Rys tab
 - [ARCHITECTURE.md](ARCHITECTURE.md): the crates, the module map, layering and the backend boundary.
 - [CHANGELOG.md](CHANGELOG.md): changes to the command line, the JSON and the Python package.
 - [CONTRIBUTING.md](CONTRIBUTING.md): building, the test gate, determinism, generated code.
+
+## Questions, bugs and feature requests
+
+We want to hear from you, and every form below has one required box:
+
+- **Ask a question:** [Discussions](https://github.com/atomsforhumanity/linus/discussions), for how to run
+  something or which settings to use.
+- **Request a feature:** [a feature request](https://github.com/atomsforhumanity/linus/issues/new/choose).
+  Methods, properties, file formats, GPU support: we build what the community asks for.
+- **Report a bug, a result that differs from another program, or a slow calculation:**
+  [open an issue](https://github.com/atomsforhumanity/linus/issues/new/choose) and pick the matching form.
+- **Contribute code:** pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Need a dataset computed?** Atoms for Humanity computes and releases open quantum-chemistry datasets:
+  [tell us what would help](https://github.com/atomsforhumanity/datasets).
 
 ## Citing
 

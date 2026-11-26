@@ -64,7 +64,7 @@ mod run;
 
 pub use diis::DiisBook;
 #[cfg(feature = "gpu")]
-pub use engines::DeviceTerms;
+pub use engines::{DeviceJ, DeviceTerms};
 #[cfg(feature = "gpu")]
 pub use host::{HostFockTerms, HostState, OnHost};
 #[cfg(feature = "gpu")]
@@ -387,6 +387,15 @@ mod device {
 
         /// Make the next build of the densities alone (before a [`Verdict::Confirm`]'s build).
         fn reset_incremental(&mut self) {}
+
+        /// The exchange energy sum_s E_K\[D_s\] of the last [`FockTerms::coulomb_exchange`],
+        /// unscaled (the loop applies -a_x; a closed shell's one channel, counted twice by the
+        /// loop as its e_k), when it is not 1/2 sum_s D_s . K_s: builders whose energy is defined
+        /// first and whose K is its derivative, affine in D (compensated grid-K:
+        /// K = K\[D0\] + K^grid\[D - D0\]). None: the loop's own 1/2 D . K, bit for bit as before.
+        fn exchange_energy(&self) -> Option<f64> {
+            None
+        }
     }
 
     /// The fixed input of an SCF (linus's `ScfInput`).

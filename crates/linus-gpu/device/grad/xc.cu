@@ -279,180 +279,49 @@ extern "C" __global__ void xg_energy_density(long long npts, int nsp,
     eps[P] = rt * zk[P];
 }
 
-// Becke weight derivatives sum_k f_k dw_k/dR (points moving with their owners) plus, with
-// tp, the point-motion term tp_k for the owner. One block per chunk of points, nslot points
-// at a time: thread t works on slot t / nat, atom t % nat (nslot > 1), or with one slot on
-// atoms t, t + T, ... Per point the cell functions P_b = prod_c s(nu_bc), Z, the coefficients
-// c_b P_b, then per atom the pair terms (each pair evaluated by both of its atoms), the u
-// terms and the owner's minus their sum. Per slot and atom, sums over the slot's points in
-// shared memory, then fixed point. With `screen`, the pair terms of two atoms that are both
-// negligible at the point are left out (linus-grid's criterion, per point: atom b is active
-// when |c_b P_b / min_c s_bc| > 1e-18 |f vol| / nat).
-extern "C" __global__ void xg_becke(long long npts, int nat, int nslot, int chunk,
-    const double *__restrict__ px, const double *__restrict__ py, const double *__restrict__ pz,
-    const int *__restrict__ owner, const double *__restrict__ vol, const double *__restrict__ f,
-    int with_tp, const double *__restrict__ tp, const double *__restrict__ rxyz,
-    const double *__restrict__ inv_r, const double *__restrict__ aij, unsigned long long *acc,
-    long long nacc, int screen)
+// Becke weight derivatives sum_k f_k dw_k/dR (points moving with their owners) plus, with tp,
+// the point-motion term tp_k for the owner: per point the cell functions P_b = prod_c s(nu_bc),
+// Z, the coefficients c_b P_b, per atom pair the derivative terms, the u terms and the owner's
+// minus their sum; per atom, sums over the points in shared memory, then fixed point. With
+// `screen`, the pair terms of two atoms that are both negligible at the point are left out
+// (linus-grid's criterion, per point: atom b is active when |c_b P_b / min_c s_bc| >
+// 1e-18 |f vol| / nat). Two kernels: xg_becke_pairs (each pair once per point, its values in
+// shared memory) where a point's pair values fit, xg_becke_warp (one warp per point, each pair
+// evaluated from both of its atoms) beyond.
+
+// The switching value s of the pair (i, j), i > j, at a point with distances di, dj: Becke's s of
+// the size-adjusted nu = mu + a (1 - mu^2), mu = (di - dj) / R_ij; i's cell factor is 0.5 - s,
+// j's 0.5 + s.
+__device__ __forceinline__ double xg_becke_t(double di, double dj, double inv_rij, double aij)
 {
-    extern __shared__ double sh[];
-    const int T = blockDim.x, tid = threadIdx.x;
-    int slot, b0, bstep;
-    if (nslot > 1) {
-        slot = tid / nat;
-        b0 = tid - slot * nat;
-        bstep = nat;
-        if (slot >= nslot) slot = -1;
-    } else {
-        slot = 0;
-        b0 = tid;
-        bstep = T;
-    }
-    const int per = 12 * nat + 2;
-    double *d = sh + (slot < 0 ? 0 : slot) * per;
-    double *u = d + nat;
-    double *pb = u + 3 * nat;
-    double *v = pb + nat;
-    double *ga = v + 3 * nat;
-    double *sm = ga + 3 * nat;
-    double *cf = sm + nat;
-    if (slot >= 0)
-        for (int b = b0; b < nat; b += bstep) ga[3 * b] = ga[3 * b + 1] = ga[3 * b + 2] = 0.0;
-    const long long k0 = (long long)blockIdx.x * chunk;
-    const long long k1 = k0 + chunk < npts ? k0 + chunk : npts;
-    __syncthreads();
-    for (long long kb = k0; kb < k1; kb += nslot) {
-        const long long k = kb + (slot < 0 ? 0 : slot);
-        const int act = slot >= 0 && k < k1;
-        double fk = 0.0;
-        int own = 0;
-        if (act) {
-            fk = f[k];
-            own = owner[k];
-        }
-        const int w = act && fk != 0.0;
-        if (w) {
-            const double qx = px[k], qy = py[k], qz = pz[k];
-            for (int b = b0; b < nat; b += bstep) {
-                const double dx = rxyz[3 * b] - qx, dy = rxyz[3 * b + 1] - qy,
-                             dz = rxyz[3 * b + 2] - qz;
-                const double dd = sqrt(dx * dx + dy * dy + dz * dz);
-                const double inv = dd > 0.0 ? 1.0 / dd : 0.0;
-                d[b] = dd;
-                u[3 * b] = dx * inv;
-                u[3 * b + 1] = dy * inv;
-                u[3 * b + 2] = dz * inv;
-            }
-        }
-        __syncthreads();
-        if (w) {
-            for (int b = b0; b < nat; b += bstep) {
-                double p = 1.0, smin = 1.0;
-                for (int c = 0; c < nat; ++c) {
-                    if (c == b) continue;
-                    const int i = b > c ? b : c, j = b > c ? c : b;
-                    double g = (d[i] - d[j]) * inv_r[i * nat + j];
-                    g += aij[i * nat + j] * (1.0 - g * g);
-                    double t = g;
-                    t = (3.0 - t * t) * t * 0.5;
-                    t = (3.0 - t * t) * t * 0.5;
-                    t = ((3.0 - t * t) * t * 0.5) * 0.5;
-                    const double fac = b > c ? 0.5 - t : 0.5 + t;
-                    p *= fac;
-                    smin = fmin(smin, fac);
-                }
-                pb[b] = p;
-                sm[b] = smin;
-            }
-        }
-        __syncthreads();
-        if (w && b0 == 0) {
-            double z = 0.0;
-            for (int b = 0; b < nat; ++b) z += pb[b];
-            const double pa = pb[own];
-            if (pa == 0.0 || z == 0.0) {
-                cf[0] = 0.0;
-                cf[1] = 0.0;
-            } else {
-                const double iz = 1.0 / z;
-                cf[0] = -fk * vol[k] * pa * iz * iz;
-                cf[1] = fk * vol[k] * iz;
-            }
-        }
-        __syncthreads();
-        if (w)
-            for (int b = b0; b < nat; b += bstep) {
-                pb[b] *= cf[0] + (b == own ? cf[1] : 0.0);
-                // sm becomes the atom's activity at this point (1 or 0)
-                sm[b] = !screen || (pb[b] != 0.0 && sm[b] > 0.0
-                    && fabs(pb[b] / sm[b]) > 1e-18 * fabs(fk * vol[k]) / nat) ? 1.0 : 0.0;
-            }
-        __syncthreads();
-        if (w) {
-            for (int b = b0; b < nat; b += bstep) {
-                double a = 0.0, e0 = 0.0, e1 = 0.0, e2 = 0.0;
-                const int act_b = sm[b] != 0.0;
-                for (int c = 0; c < nat; ++c) {
-                    if (c == b || (!act_b && sm[c] == 0.0)) continue;
-                    const int i = b > c ? b : c, j = b > c ? c : b;
-                    const double fac = inv_r[i * nat + j], aa = aij[i * nat + j];
-                    const double mu = (d[i] - d[j]) * fac;
-                    const double nu = mu + aa * (1.0 - mu * mu);
-                    const double dnu = 1.0 - 2.0 * aa * mu;
-                    const double s0 = nu;
-                    const double s1 = (3.0 - s0 * s0) * s0 * 0.5;
-                    const double s2 = (3.0 - s1 * s1) * s1 * 0.5;
-                    const double s3 = ((3.0 - s2 * s2) * s2 * 0.5) * 0.5;
-                    const double ds = -0.5 * (1.5 * (1.0 - s2 * s2)) * (1.5 * (1.0 - s1 * s1))
-                        * (1.5 * (1.0 - s0 * s0)) * dnu;
-                    const double sij = 0.5 - s3, sji = 0.5 + s3;
-                    const double qi = pb[i] != 0.0 ? pb[i] * ds / sij : 0.0;
-                    const double qj = pb[j] != 0.0 ? pb[j] * ds / sji : 0.0;
-                    const double q = qi - qj;
-                    const double te = -q * (d[i] - d[j]) * fac * fac;
-                    const double sg = b == i ? 1.0 : -1.0;
-                    a += sg * q * fac;
-                    e0 += sg * te * (rxyz[3 * i] - rxyz[3 * j]) * fac;
-                    e1 += sg * te * (rxyz[3 * i + 1] - rxyz[3 * j + 1]) * fac;
-                    e2 += sg * te * (rxyz[3 * i + 2] - rxyz[3 * j + 2]) * fac;
-                }
-                v[3 * b] = a * u[3 * b];
-                v[3 * b + 1] = a * u[3 * b + 1];
-                v[3 * b + 2] = a * u[3 * b + 2];
-                ga[3 * b] += v[3 * b] + e0;
-                ga[3 * b + 1] += v[3 * b + 1] + e1;
-                ga[3 * b + 2] += v[3 * b + 2] + e2;
-            }
-        }
-        __syncthreads();
-        // the owner's thread: minus the u terms of all atoms, and the point motion
-        if (act && (own - b0) % bstep == 0 && own >= b0) {
-            if (w) {
-                double s0 = 0.0, s1 = 0.0, s2 = 0.0;
-                for (int b = 0; b < nat; ++b) {
-                    s0 += v[3 * b];
-                    s1 += v[3 * b + 1];
-                    s2 += v[3 * b + 2];
-                }
-                ga[3 * own] -= s0;
-                ga[3 * own + 1] -= s1;
-                ga[3 * own + 2] -= s2;
-            }
-            if (with_tp) {
-                ga[3 * own] += tp[3 * k];
-                ga[3 * own + 1] += tp[3 * k + 1];
-                ga[3 * own + 2] += tp[3 * k + 2];
-            }
-        }
-        __syncthreads();
-    }
-    if (slot >= 0)
-        for (int b = b0; b < nat; b += bstep)
-            for (int x = 0; x < 3; ++x) det_add(acc, nacc, 3 * b + x, ga[3 * b + x]);
+    double g = (di - dj) * inv_rij;
+    g += aij * (1.0 - g * g);
+    return linus_becke_s(g);
 }
-// The weight derivatives of xg_becke with every atom pair evaluated once per point (xg_becke
-// evaluates each pair from both of its atoms): per slot, tps = blockDim / nslot threads; the
-// pairs' switching values t_ij (i > j, pair index i (i - 1) / 2 + j) into shared memory, the
+
+// The derivative coefficient q of the pair (i, j), i > j, whose atoms have the coefficients
+// ci = c_i P_i and cj = c_j P_j: q = (ci / s_ij - cj / s_ji) ds/dmu (a zero coefficient adds
+// nothing); the pair's terms are q / R_ij along u and -q (di - dj) / R_ij^3 along R_i - R_j.
+__device__ __forceinline__ double xg_becke_q(double di, double dj, double fac, double aa,
+    double ci, double cj)
+{
+    const double mu = (di - dj) * fac;
+    const double nu = mu + aa * (1.0 - mu * mu);
+    const double dnu = 1.0 - 2.0 * aa * mu;
+    const double s0 = nu;
+    const double s1 = (3.0 - s0 * s0) * s0 * 0.5;
+    const double s2 = (3.0 - s1 * s1) * s1 * 0.5;
+    const double s3 = ((3.0 - s2 * s2) * s2 * 0.5) * 0.5;
+    const double ds = -0.5 * (1.5 * (1.0 - s2 * s2)) * (1.5 * (1.0 - s1 * s1))
+        * (1.5 * (1.0 - s0 * s0)) * dnu;
+    const double sij = 0.5 - s3, sji = 0.5 + s3;
+    const double qi = ci != 0.0 ? ci * ds / sij : 0.0;
+    const double qj = cj != 0.0 ? cj * ds / sji : 0.0;
+    return qi - qj;
+}
+
+// The weight derivatives with every atom pair evaluated once per point: per slot (a point),
+// tps = blockDim / nslot threads; the pairs' switching values t_ij (i > j, pair index i (i - 1) / 2 + j) into shared memory, the
 // cell functions as products of them, then per pair the derivative terms q_ij fac_ij and
 // te_ij fac_ij (both atoms negligible: none), and per atom their sums in the order of the
 // partner atoms. Shared per slot: 12 nat + 2 + 2 npair doubles. pidx: the pairs (i, j) in
@@ -512,13 +381,7 @@ extern "C" __global__ void xg_becke_pairs(long long npts, int nat, int nslot, in
         if (w) {
             for (int p = r; p < npair; p += tps) {
                 const int i = pidx[2 * p], j = pidx[2 * p + 1];
-                double g = (d[i] - d[j]) * inv_r[i * nat + j];
-                g += aij[i * nat + j] * (1.0 - g * g);
-                double t = g;
-                t = (3.0 - t * t) * t * 0.5;
-                t = (3.0 - t * t) * t * 0.5;
-                t = ((3.0 - t * t) * t * 0.5) * 0.5;
-                tq[p] = t;
+                tq[p] = xg_becke_t(d[i], d[j], inv_r[i * nat + j], aij[i * nat + j]);
             }
         }
         __syncthreads();
@@ -570,20 +433,8 @@ extern "C" __global__ void xg_becke_pairs(long long npts, int nat, int nslot, in
                         te[p] = 0.0;
                         continue;
                     }
-                    const double fac = inv_r[i * nat + j], aa = aij[i * nat + j];
-                    const double mu = (d[i] - d[j]) * fac;
-                    const double nu = mu + aa * (1.0 - mu * mu);
-                    const double dnu = 1.0 - 2.0 * aa * mu;
-                    const double s0 = nu;
-                    const double s1 = (3.0 - s0 * s0) * s0 * 0.5;
-                    const double s2 = (3.0 - s1 * s1) * s1 * 0.5;
-                    const double s3 = ((3.0 - s2 * s2) * s2 * 0.5) * 0.5;
-                    const double ds = -0.5 * (1.5 * (1.0 - s2 * s2)) * (1.5 * (1.0 - s1 * s1))
-                        * (1.5 * (1.0 - s0 * s0)) * dnu;
-                    const double sij = 0.5 - s3, sji = 0.5 + s3;
-                    const double qi = pb[i] != 0.0 ? pb[i] * ds / sij : 0.0;
-                    const double qj = pb[j] != 0.0 ? pb[j] * ds / sji : 0.0;
-                    const double q = qi - qj;
+                    const double fac = inv_r[i * nat + j];
+                    const double q = xg_becke_q(d[i], d[j], fac, aij[i * nat + j], pb[i], pb[j]);
                     tq[p] = q * fac;
                     te[p] = -q * (d[i] - d[j]) * fac * fac * fac;
                 }
@@ -637,4 +488,131 @@ extern "C" __global__ void xg_becke_pairs(long long npts, int nat, int nslot, in
     if (live)
         for (int b = r; b < nat; b += tps)
             for (int x = 0; x < 3; ++x) det_add(acc, nacc, 3 * b + x, ga[3 * b + x]);
+}
+
+// The weight derivatives of xg_becke_pairs with one warp per point and no block barriers: the
+// lanes own the atoms b = lane, lane + W, ...; per point, the distances d_b and unit vectors u_b
+// (d in the warp's shared memory), each owned atom's cell function P_b = prod_c s(nu_bc) (each
+// pair's switching value evaluated from both of its atoms), Z and the owner's P_A by warp sums,
+// the coefficients C_b = P_b (cf0 + [b = A] cf1) and their screening flags (shared), then per
+// owned atom the derivative terms of its pairs (again from both atoms), v_b = a_b u_b and the
+// pairs' e_b into the warp's per-atom sums (shared, written by the owning lane only); the owner's
+// -sum_b v_b and the point motion tp by its lane. Each warp takes the points w, w + nwarps, ...
+// in that order, and adds its sums to the fixed-point accumulator once: deterministic.
+// Shared per warp: 6 nat doubles (d, C, flags, 3 sums).
+extern "C" __global__ void xg_becke_warp(long long npts, int nat, const double *__restrict__ px,
+    const double *__restrict__ py, const double *__restrict__ pz, const int *__restrict__ owner,
+    const double *__restrict__ vol, const double *__restrict__ f, int with_tp,
+    const double *__restrict__ tp, const double *__restrict__ rxyz,
+    const double *__restrict__ inv_r, const double *__restrict__ aij, unsigned long long *acc,
+    long long nacc, int screen)
+{
+    extern __shared__ double sh[];
+    const int W = LINUS_WARP_SIZE;
+    const int lane = threadIdx.x % W, wib = threadIdx.x / W;
+    double *d = sh + (long long)wib * 6 * nat;
+    double *cb = d + nat;
+    double *fl = cb + nat;
+    double *ga = fl + nat;
+    for (int b = lane; b < nat; b += W) ga[3 * b] = ga[3 * b + 1] = ga[3 * b + 2] = 0.0;
+    const long long nwarps = (long long)gridDim.x * (blockDim.x / W);
+    const long long w0 = (long long)blockIdx.x * (blockDim.x / W) + wib;
+    for (long long k = w0; k < npts; k += nwarps) {
+        const double fk = f[k];
+        if (fk == 0.0) continue;
+        const int own = owner[k];
+        const double qx = px[k], qy = py[k], qz = pz[k];
+        linus_syncwarp();
+        for (int b = lane; b < nat; b += W) {
+            const double dx = rxyz[3 * b] - qx, dy = rxyz[3 * b + 1] - qy,
+                         dz = rxyz[3 * b + 2] - qz;
+            d[b] = sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        linus_syncwarp();
+        // cell functions of the owned atoms, their smallest factors, and Z
+        double zpart = 0.0, pa = 0.0;
+        for (int b = lane; b < nat; b += W) {
+            double pr = 1.0, smin = 1.0;
+            for (int c = 0; c < nat; ++c) {
+                if (c == b) continue;
+                const int i = b > c ? b : c, j = b > c ? c : b;
+                const double t = xg_becke_t(d[i], d[j], inv_r[i * nat + j], aij[i * nat + j]);
+                const double fac = b > c ? 0.5 - t : 0.5 + t;
+                pr *= fac;
+                smin = fmin(smin, fac);
+            }
+            cb[b] = pr;
+            fl[b] = smin;
+            zpart += pr;
+            if (b == own) pa = pr;
+        }
+        for (int o = W / 2; o > 0; o >>= 1) {
+            zpart += linus_shfl_down(zpart, o);
+            pa += linus_shfl_down(pa, o);
+        }
+        const double z = linus_shfl(zpart, 0), pown = linus_shfl(pa, 0);
+        double cf0 = 0.0, cf1 = 0.0;
+        if (pown != 0.0 && z != 0.0) {
+            const double iz = 1.0 / z;
+            cf0 = -fk * vol[k] * pown * iz * iz;
+            cf1 = fk * vol[k] * iz;
+        }
+        for (int b = lane; b < nat; b += W) {
+            const double c = cb[b] * (cf0 + (b == own ? cf1 : 0.0));
+            const double smin = fl[b];
+            cb[b] = c;
+            fl[b] = !screen || (c != 0.0 && smin > 0.0
+                && fabs(c / smin) > 1e-18 * fabs(fk * vol[k]) / nat) ? 1.0 : 0.0;
+        }
+        linus_syncwarp();
+        // per owned atom: its pairs' derivative terms
+        double vs0 = 0.0, vs1 = 0.0, vs2 = 0.0;
+        for (int b = lane; b < nat; b += W) {
+            const double dxb = rxyz[3 * b] - qx, dyb = rxyz[3 * b + 1] - qy,
+                         dzb = rxyz[3 * b + 2] - qz;
+            const double inv = d[b] > 0.0 ? 1.0 / d[b] : 0.0;
+            double a = 0.0, e0 = 0.0, e1 = 0.0, e2 = 0.0;
+            for (int c = 0; c < nat; ++c) {
+                if (c == b) continue;
+                const int i = b > c ? b : c, j = b > c ? c : b;
+                if (fl[i] == 0.0 && fl[j] == 0.0) continue;
+                const double fac = inv_r[i * nat + j];
+                const double q = xg_becke_q(d[i], d[j], fac, aij[i * nat + j], cb[i], cb[j]);
+                const double sg = b == i ? 1.0 : -1.0;
+                a += sg * (q * fac);
+                const double tt = sg * (-q * (d[i] - d[j]) * fac * fac * fac);
+                e0 += tt * (rxyz[3 * i] - rxyz[3 * j]);
+                e1 += tt * (rxyz[3 * i + 1] - rxyz[3 * j + 1]);
+                e2 += tt * (rxyz[3 * i + 2] - rxyz[3 * j + 2]);
+            }
+            const double v0 = a * dxb * inv, v1 = a * dyb * inv, v2 = a * dzb * inv;
+            ga[3 * b] += v0 + e0;
+            ga[3 * b + 1] += v1 + e1;
+            ga[3 * b + 2] += v2 + e2;
+            vs0 += v0;
+            vs1 += v1;
+            vs2 += v2;
+        }
+        for (int o = W / 2; o > 0; o >>= 1) {
+            vs0 += linus_shfl_down(vs0, o);
+            vs1 += linus_shfl_down(vs1, o);
+            vs2 += linus_shfl_down(vs2, o);
+        }
+        vs0 = linus_shfl(vs0, 0);
+        vs1 = linus_shfl(vs1, 0);
+        vs2 = linus_shfl(vs2, 0);
+        if (lane == own % W) {
+            ga[3 * own] -= vs0;
+            ga[3 * own + 1] -= vs1;
+            ga[3 * own + 2] -= vs2;
+            if (with_tp) {
+                ga[3 * own] += tp[3 * k];
+                ga[3 * own + 1] += tp[3 * k + 1];
+                ga[3 * own + 2] += tp[3 * k + 2];
+            }
+        }
+    }
+    linus_syncwarp();
+    for (int b = lane; b < nat; b += W)
+        for (int x = 0; x < 3; ++x) det_add(acc, nacc, 3 * b + x, ga[3 * b + x]);
 }

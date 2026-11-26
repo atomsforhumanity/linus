@@ -17,12 +17,21 @@ impl GpuXc {
         v: &mut DeviceBuf<f64>,
     ) -> Result<f64, GpuError> {
         let VxcCall {
-            cmo,
-            ncols,
-            occ: occd,
+            src,
             restricted,
             func,
         } = call;
+        // densities without orbitals go to the per-batch path only (`compute_densities`)
+        let VxcSource::Orbitals {
+            cmo,
+            ncols,
+            occ: occd,
+        } = src
+        else {
+            return Err(GpuError::Contract(
+                "XC: the block path takes orbitals".into(),
+            ));
+        };
         let (nbf, npts) = (self.nbf, self.npts);
         let n2 = nbf * nbf;
         let nsp = if restricted { 1 } else { 2 };

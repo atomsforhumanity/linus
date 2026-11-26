@@ -4,7 +4,8 @@
 //!
 //! `memory_gib` limits the whole process (linus_base::memory's module docs). A phase's need is
 //! the process's baseline ([`linus_base::memory::Process`], a device's host part), the
-//! reservations of the SCF's large allocations (the PCM's), the parts its engines size from the
+//! reservations of the SCF's large allocations (the PCM's, rij_cgk's grid-K arrays on the CPU:
+//! [`linus_jk::gridk::host_bytes`]), the parts its engines size from the
 //! problem with their own functions (the SCF's DF tensors and exchange workspace,
 //! [`linus_jk::df::DfJk::scf_storage_needs`]; the DF gradient's blocks,
 //! [`linus_jk::df::gradient::df_gradient_workspace`]; a response's fixed arrays,
@@ -107,7 +108,7 @@ impl CalcContext {
 
     fn nch_occ(&self) -> Result<(usize, [usize; 2]), LinusError> {
         let (na, nb) = self.mol.nalpha_nbeta().map_err(LinusError::Input)?;
-        let restricted = self.plan.restricted().unwrap_or(na == nb);
+        let restricted = self.plan.restricted_for(na, nb);
         Ok((if restricted { 1 } else { 2 }, [na, nb]))
     }
 
@@ -136,7 +137,10 @@ impl CalcContext {
         let (nch, _) = self.nch_occ()?;
         let mut parts = vec![self.baseline_part()];
         parts.extend(reserved.iter().map(|r| Part {
-            what: "reserved (pcm)",
+            what: match r.what {
+                "grid-K" => "reserved (grid-K)",
+                _ => "reserved (pcm)",
+            },
             bytes: r.bytes,
         }));
         parts.extend(self.metric_part(purpose)?);
@@ -157,7 +161,8 @@ impl CalcContext {
         let fixed: usize = parts.iter().map(|p| p.bytes).sum();
         let df_k = matches!(self.plan.jk(), JkMethod::Df { .. })
             && self.method.exchange.is_some()
-            && self.placement(Family::Jk) != Some(Placement::Device);
+            && (self.placement(Family::Jk) != Some(Placement::Device)
+                || !self.df_fits_device(purpose)?);
         if matches!(self.plan.jk(), JkMethod::Exact)
             && self.plan.exact_storage() == crate::driver::ExactStorage::Incore
         {
@@ -220,6 +225,33 @@ impl CalcContext {
         Ok(need)
     }
 
+    /// Whether a device J/K holds its density-fitting tensors on the device: the device's DF-J/K
+    /// storage plan (its setup's rule, through the device's provider) for the layout's sizes (the
+    /// shell pairs it keeps, `linus_ints::eri3c::df_kept_pairs` at the density-fitting pair
+    /// threshold; the pairs and their Schwarz factors are the integral context's, built while the
+    /// device opened), B and, with a range-separated operator, W, on any device rung. When they
+    /// do not fit, the tensors land in host memory (the device streams them, or the CPU's J/K
+    /// takes over after the device's setup declines), so the SCF's need is the CPU's DF
+    /// storage's: a calculation neither holds is refused before any setup instead of after the
+    /// device's and the CPU's (ubiquitin/def2-SVP on the H200: 295 s and 57 GiB of setup before
+    /// RI-K's refusal).
+    fn df_fits_device(&self, purpose: Purpose) -> Result<bool, LinusError> {
+        let (JkMethod::Df { aux }, Some(provider)) = (self.plan.jk(), self.backend.provider())
+        else {
+            return Ok(true);
+        };
+        if self.plan.device().is_none() {
+            return Ok(true);
+        }
+        let auxb = self.aux_set(aux, purpose)?;
+        let qmax = linus_ints::eri3c::Aux3c::new(&auxb).qmax;
+        let cut = linus_ints::eri3c::DfThresholds::default().pair;
+        let pairs = self.integrals.pairs(&self.basis, DerivOrder::Zero);
+        let kept = linus_ints::eri3c::df_kept_pairs(&pairs, qmax, cut);
+        let rows = linus_ints::eri3c::DfRows::new(&self.basis, &pairs, &kept);
+        Ok(provider.df_on_device(self, &auxb, rows).unwrap_or(true))
+    }
+
     /// The gradient's need (SCF purpose `purpose`'s ground state): the baseline, the metric, the
     /// DF gradient's blocks (exchange on the CPU) and [`GRADIENT_REST`].
     fn gradient_need(&self, purpose: Purpose) -> Result<PhaseNeed, LinusError> {
@@ -250,6 +282,13 @@ impl CalcContext {
                     true,
                     xop.has_erf(),
                 ),
+            });
+        }
+        // rij_cgk's grid-K gradient (on the CPU): its arrays of the grid's points
+        if let Some(m) = self.gridk_memory()? {
+            parts.push(Part {
+                what: "grid-K gradient arrays",
+                bytes: m.gradient_host,
             });
         }
         parts.push(Part {

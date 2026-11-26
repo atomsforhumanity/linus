@@ -29,6 +29,12 @@ Three layers (the algorithm/schedule split):
   - CUDA C (cuda_pcm.py, `pcm` subcommand): integrals of polarizable-continuum surface charges
     (Gaussian or point charges at the cavity's points) and their first derivatives for
     linus-gpu's PCM engine (see that module).
+  - CUDA C (cuda_jengine.py, `jengine` subcommand): the Hermite J-engine of linus-gpu's
+    integral-direct Coulomb matrix and its gradient (see that module).
+  The three CUDA emitters share cuda_common.py: exact C literals, the C printer of IR nodes and
+  the Boys stage (linus-ints' eri3c scheme, with the emitters' differences as its parameters).
+  The default run also writes crates/linus-gpu/src/kernels/gridk_boys.txt, that Boys stage at
+  the grid-K engine's orders, which pins the grid-K engine's own (Rust) emitter to it.
 
 Only the standard library is needed.
 """
@@ -86,11 +92,18 @@ def main(argv=None):
         cuda_eri3c = None
     import cuda_pcm
     cuda_pcm.add_cli(sub)
+    import cuda_jengine
+    cuda_jengine.add_cli(sub)
     args = ap.parse_args(argv)
     if args.cmd in (None, "rust"):
         files = {OUT / name: text for name, text in rust_outputs().items()}
+        # the grid-K engine's Boys stage pin (its emitter is linus-gpu's Rust)
+        import cuda_common
+        files[ROOT / "crates/linus-gpu/src/kernels/gridk_boys.txt"] = cuda_common.gridk_boys_reference()
     elif args.cmd == "pcm":
         files = cuda_pcm.run_cli(args, ROOT)
+    elif args.cmd == "jengine":
+        files = cuda_jengine.run_cli(args, ROOT)
     else:
         files = cuda_eri3c.run_cli(args, ROOT)
         if files is None:

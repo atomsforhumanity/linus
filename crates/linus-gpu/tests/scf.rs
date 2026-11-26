@@ -431,7 +431,7 @@ fn df_terms(gpu: &Gpu, w: &Water, functional: Option<&str>) -> DeviceTerms {
         let grid = harness::grid(&w.mol, &GridSpec::pyscf(3)).unwrap();
         GpuXc::new(gpu, &w.basis, &grid, f, &GpuXcOptions::default()).unwrap()
     });
-    DeviceTerms::new(jk, xc)
+    DeviceTerms::new(linus_gpu::scf::DeviceJ::Df(Box::new(jk)), xc)
 }
 
 /// The loop on GpuDfJk: DF-HF of water and its cation against PySCF's DF energies, from the

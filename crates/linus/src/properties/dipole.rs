@@ -45,6 +45,7 @@ use linus_scf::response::perturbation::{NuclearDisplacements, Perturbation};
 use linus_scf::response::second_order::{FirstOrderOrbitals, SecondOrder};
 use linus_scf::response::stationary::Correction;
 use std::cell::OnceCell;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct DipoleDerivatives {
@@ -72,20 +73,56 @@ pub(crate) fn dipole_integrals(basis: &BasisSet) -> [Mat<f64>; 3] {
     r
 }
 
-impl CalcContext {
-    /// Electric dipole moment (e bohr) about the coordinate origin, of the nuclei and the
-    /// electron density D_a + D_b.
-    pub fn dipole_moment(&self, d_a: &Mat<f64>, d_b: &Mat<f64>) -> [f64; 3] {
-        let n = self.basis.nbf;
-        let ints = self.pool.install(|| dipole_integrals(&self.basis));
-        let mut mu = [0.0; 3];
-        for (k, m) in ints.iter().enumerate() {
-            let mut el = 0.0;
-            for i in 0..n {
-                for j in 0..n {
-                    el += (d_a[(i, j)] + d_b[(i, j)]) * m[(i, j)];
-                }
+/// sum over i, then j, of (D_a + D_b)_ij M_ij as one running sum in that order (the n x n
+/// column-major matrices read by rows): per block of 64 rows, the block's rows copied
+/// row-major (the columns read contiguously), then summed row after row, so the terms and their
+/// order are those of the plain double loop without its strided loads.
+fn row_order_sum(n: usize, d_a: &Mat<f64>, d_b: &Mat<f64>, m: &Mat<f64>) -> f64 {
+    const T: usize = 64;
+    let mut ds = vec![0.0; T * n];
+    let mut ms = vec![0.0; T * n];
+    let mut el = 0.0;
+    for i0 in (0..n).step_by(T) {
+        let rows = T.min(n - i0);
+        for j in 0..n {
+            for r in 0..rows {
+                ds[r * n + j] = d_a[(i0 + r, j)] + d_b[(i0 + r, j)];
+                ms[r * n + j] = m[(i0 + r, j)];
             }
+        }
+        for (s, r) in ds[..rows * n].iter().zip(&ms[..rows * n]) {
+            el += s * r;
+        }
+    }
+    el
+}
+
+impl CalcContext {
+    /// The dipole integrals of this geometry (the integral context's: built beside a device
+    /// SCF, or here), kept for later uses at this geometry.
+    pub(crate) fn dipole_ints(&self) -> Arc<[Mat<f64>; 3]> {
+        self.integrals
+            .dipole(|| self.pool.install(|| dipole_integrals(&self.basis)))
+    }
+
+    /// Electric dipole moment (e bohr) about the coordinate origin, of the nuclei and the
+    /// electron density D_a + D_b. The last use of the dipole integrals at a geometry (the
+    /// report's): the integral context no longer keeps them.
+    pub fn dipole_moment(&self, d_a: &Mat<f64>, d_b: &Mat<f64>) -> [f64; 3] {
+        use rayon::prelude::*;
+        let n = self.basis.nbf;
+        let ints = self
+            .integrals
+            .take_dipole(|| self.pool.install(|| dipole_integrals(&self.basis)));
+        // the electronic part, sum over i, then j, of (D_a + D_b)_ij r_ij as one running sum per
+        // component, in that order, the three components side by side
+        let el: Vec<f64> = self.pool.install(|| {
+            ints.par_iter()
+                .map(|m| row_order_sum(n, d_a, d_b, m))
+                .collect()
+        });
+        let mut mu = [0.0; 3];
+        for (k, el) in el.into_iter().enumerate() {
             let nuc: f64 = self.mol.point_charges().iter().map(|(q, r)| q * r[k]).sum();
             mu[k] = nuc - el;
         }
@@ -98,18 +135,19 @@ impl CalcContext {
 /// F^c C_o = r_c C_o (the dipole integrals) is its whole fixed-density Fock derivative.
 pub(crate) struct ElectricField<'a> {
     reference: &'a Reference,
-    r: [Mat<f64>; 3],
+    r: Arc<[Mat<f64>; 3]>,
     par: Par,
     fock_occ: OnceCell<Vec<Vec<Mat<f64>>>>,
 }
 
 impl<'a> ElectricField<'a> {
-    /// The field's perturbation of `reference` (F^c C_o made on first use, at parallelism
-    /// `par`: the dipole derivatives take it, the polarizability does not).
-    pub fn new(reference: &'a Reference, basis: &BasisSet, par: Par) -> Self {
+    /// The field's perturbation of `reference` with the dipole integrals `r` (F^c C_o made on
+    /// first use, at parallelism `par`: the dipole derivatives take it, the polarizability does
+    /// not).
+    pub fn new(reference: &'a Reference, r: Arc<[Mat<f64>; 3]>, par: Par) -> Self {
         ElectricField {
             reference,
-            r: dipole_integrals(basis),
+            r,
             par,
             fock_occ: OnceCell::new(),
         }
@@ -179,7 +217,11 @@ impl CalcContext {
     /// The dipole derivatives of a Hessian's response before their stationary correction
     /// (module docs): Z δ_ck - Tr(D_t r_c^x) plus the response part, minus the second-order
     /// assembly of the field (rows) and the nuclear displacements (columns).
-    pub(crate) fn dipole_terms(&self, h: HessianResponse<'_>, par: Par) -> DipoleTerms {
+    pub(crate) fn dipole_terms(
+        &self,
+        h: HessianResponse<'_>,
+        par: Par,
+    ) -> Result<DipoleTerms, LinusError> {
         let HessianResponse {
             nuclear,
             dtf,
@@ -188,25 +230,26 @@ impl CalcContext {
             jk,
         } = h;
         let reference = nuclear.reference;
-        let field = ElectricField::new(reference, &self.basis, par);
+        let field = ElectricField::new(reference, self.dipole_ints(), par);
         let mut apt = self.dipole_explicit(dtf);
         let f = 2.0 * reference.occupation();
         let response = SecondOrder {
             rows: &field,
             columns: orbitals,
             correction: None,
+            gram: None,
         };
         let mut m = Mat::<f64>::zeros(3, apt.len());
         for s in 0..reference.nch() {
-            response.add_channel(&mut m, s, reference.occupation(), par);
+            response.add_channel(&mut m, s, reference.occupation(), par)?;
         }
         subtract_transposed(&mut apt, &m);
-        DipoleTerms {
+        Ok(DipoleTerms {
             apt,
             residuals,
             f,
             jk,
-        }
+        })
     }
 
     /// The explicit part of the dipole derivatives, Z δ_ck - Tr(D_t r_c^x), for the total
@@ -257,7 +300,7 @@ impl CalcContext {
         };
         let mut m = Mat::<f64>::zeros(3, apt.len());
         for s in 0..residuals.len() {
-            correction.add_gram(&mut m, s, -f, par);
+            correction.add_gram(None, &mut m, s, -f, par)?;
         }
         subtract_transposed(&mut apt, &m);
         drop(residuals);
@@ -314,6 +357,42 @@ mod tests {
 
     const WATER: &str = "3\n\nO 0.0 0.05 0.11\nH 0.0 0.76 -0.47\nH 0.1 -0.75 -0.46\n";
     const CH2: &str = "3\n\nC 0.000 0.003 0.102\nH 0.000 0.995 -0.310\nH 0.010 -0.990 -0.302\n";
+
+    /// The dipole moment is the running sum over (i, j) in row order of (D_a + D_b)_ij r_ij,
+    /// bit for bit (the sum the column-major matrices were read by rows for), for densities
+    /// that are not symmetric and a basis of more than one tile.
+    #[test]
+    fn dipole_moment_sums_in_row_order() {
+        let mol = Structure::from_xyz_str(CH2, 0, 3).unwrap();
+        let o = CalcOptions {
+            basis: Some("def2-qzvp".into()),
+            ..Default::default()
+        };
+        let calc = Session::new(mol, o).unwrap();
+        let n = calc.cx.basis.nbf;
+        assert!(n > 64);
+        let noise =
+            |s: f64| faer::Mat::from_fn(n, n, |i, j| ((i * 31 + j * 17) as f64 * s).sin() * 0.3);
+        let (d_a, d_b) = (noise(0.37), noise(0.11));
+        let mu = calc.cx.dipole_moment(&d_a, &d_b);
+        let r = dipole_integrals(&calc.cx.basis);
+        for (k, m) in r.iter().enumerate() {
+            let mut el = 0.0;
+            for i in 0..n {
+                for j in 0..n {
+                    el += (d_a[(i, j)] + d_b[(i, j)]) * m[(i, j)];
+                }
+            }
+            let nuc: f64 = calc
+                .cx
+                .mol
+                .point_charges()
+                .iter()
+                .map(|(q, r)| q * r[k])
+                .sum();
+            assert_eq!(mu[k].to_bits(), (nuc - el).to_bits(), "component {k}");
+        }
+    }
 
     /// The dipole integrals are the same bits in a faer matrix as row-major from a plan of
     /// derivative order one (the dipole derivatives' former layout): one kernel, one value per

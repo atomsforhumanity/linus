@@ -110,6 +110,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -126,6 +127,7 @@ MOLS = {
 # molecules of single cases, outside the per-molecule loops of the matrix
 CASE_MOLS = {
     "pbenzyne": REPO / "tests/molecules/p_benzyne.xyz",
+    "hi": REPO / "tests/molecules/hi.xyz",
 }
 # (charge, multiplicity) of the closed shell and of the open shell (a cation; u1an39's neutral
 # radical, the molecule being an anion)
@@ -185,6 +187,10 @@ VV10 = {"jk": "gpu", "xc": "gpu", "vv10": "gpu", "gradient_jk": "gpu", "gradient
 # VV10's response pair sums too (its NLC-grid passes on the CPU)
 VV10_HESS = dict(GLOBAL, vv10="gpu")
 VV10_METHODS = ("wb97m-v", "wb97x-v", "b97m-v")
+# functionals without exact exchange (J only): the J-only DF gradient (Hermite space,
+# linus-gpu's grad::df_j) and the XC gradient on the device
+JONLY = {"jk": "gpu", "xc": "gpu", "gradient_jk": "gpu", "gradient_xc": "gpu"}
+JONLY_METHODS = ("pbe", "r2scan")
 # meta-GGAs: every family on the device, the Hessian's explicit XC terms (tau)
 # included; r2SCAN and the range-separated meta-GGA hybrid wB97M-D3BJ
 MGGA_METHODS = ("r2scan", "wb97m-d3bj")
@@ -216,8 +222,8 @@ def pcm_case(mol: str, method: str, shell: int, calc: str, model: str = "cpcm", 
              scf: str = "", loop: str = "", repeat: bool = False, precision: str = "") -> dict:
     charge, mult = SPINS[mol][shell]
     spin = "uks" if shell else "rks"
-    place = dict({"b3lyp": GLOBAL, "wb97x-d3bj": RSH, "hf": HF, **{m: VV10 for m in VV10_METHODS}}[method],
-                 pcm="gpu")
+    place = dict({"b3lyp": GLOBAL, "wb97x-d3bj": RSH, "hf": HF, **{m: VV10 for m in VV10_METHODS},
+                  **{m: JONLY for m in JONLY_METHODS}}[method], pcm="gpu")
     tag = "pcm" + ("" if model == "cpcm" else f"-{model}") + ("" if preset == "pyscf" else f"-{preset}") \
         + (f"-{scf}" if scf else "")
     extra = ["--solvent", "thf"] + PCM_MODELS[model] + PCM_PRESETS[preset] + (["--set", f"solvent.scf_terms={scf}"] if scf else [])
@@ -368,6 +374,110 @@ def mgga_cases() -> list[dict]:
     return out
 
 
+def rijcgk_cases() -> list[dict]:
+    """``jk: rij_cgk`` (density-fitted J, compensated grid-based K; opt-in): the SCF's J and K on
+    the device (the DF engine's J and the grid-K engine), its gradient's two-electron term on the
+    CPU (a recorded fallback: the grid-K derivatives have no device kernels), against the CPU's
+    rij_cgk at the usual tolerances (measured: la18 B3LYP energy 1.8e-12, gradient 6e-13).
+    B3LYP and wB97X-D3BJ (the erf operator's grid integrals), RKS and UKS, the host and the device
+    loop, and the device loop with the memory-lean J (``backend.df_j: direct``)."""
+    out = []
+    e_place = {k: GLOBAL[k] for k in ("jk", "xc")}
+    g_place = dict(e_place, gradient_jk="cpu", gradient_xc="gpu")
+    for mol in ("water", "la18", "u1an39"):
+        for method in ("b3lyp", "wb97x-d3bj"):
+            for shell in (0, 1):
+                charge, mult = SPINS[mol][shell]
+                spin = "uks" if shell else "rks"
+                out.append(dict(name=f"{mol}.{method}.{spin}.rijcgk.energy", mol=mol, charge=charge, mult=mult,
+                                method=method, basis="def2-svp", calc="energy", jk="rij_cgk", place=e_place,
+                                repeat=(mol, method, shell) == ("la18", "b3lyp", 0)))
+    for mol, method, shell in [("la18", "b3lyp", 0), ("la18", "b3lyp", 1), ("u1an39", "wb97x-d3bj", 0)]:
+        charge, mult = SPINS[mol][shell]
+        spin = "uks" if shell else "rks"
+        out.append(dict(name=f"{mol}.{method}.{spin}.rijcgk.dloop.energy", mol=mol, charge=charge, mult=mult,
+                        method=method, basis="def2-svp", calc="energy", jk="rij_cgk",
+                        place=dict(e_place, scf_loop="device"), scf_loop="device",
+                        repeat=(mol, shell) == ("la18", 0)))
+        out.append(dict(name=f"{mol}.{method}.{spin}.rijcgk.gradient", mol=mol, charge=charge, mult=mult,
+                        method=method, basis="def2-svp", calc="gradient", jk="rij_cgk", place=g_place))
+    out.append(dict(name="la18.b3lyp.rks.rijcgk.jdirect.dloop.energy", mol="la18", charge=0, mult=1,
+                    method="b3lyp", basis="def2-svp", calc="energy", jk="rij_cgk",
+                    place=dict(e_place, scf_loop="device"), scf_loop="device",
+                    gpu_extra=["--set", "backend.df_j=direct"], jdirect=True))
+    return out
+
+
+def jdirect_cases() -> list[dict]:
+    """The memory-lean device DF-J (``linus_gpu::jdirect``: no stored three-index tensor), which
+    the SCF of a pure functional takes when the DF engine could not keep its tensor on the device,
+    forced on the GPU side at small sizes (``backend.df_j: direct``): PBE and r2SCAN
+    energies and gradients, closed and open shells, at the usual tolerances, on the host loop and
+    (``*.jdirect.dloop.*``) the device loop; ``resolved.record.backend.j`` naming it."""
+    out = []
+    jd_place = {k: GLOBAL[k] for k in ("jk", "xc", "gradient_jk", "gradient_xc")}
+    for mol, method, shell, calc in [("la18", "pbe", 0, "energy"), ("la18", "pbe", 1, "energy"),
+                                     ("la18", "r2scan", 0, "energy"), ("u1an39", "r2scan", 1, "energy"),
+                                     ("u1an39", "pbe", 0, "gradient"), ("la18", "r2scan", 1, "gradient")]:
+        charge, mult = SPINS[mol][shell]
+        spin = "uks" if shell else "rks"
+        out.append(dict(name=f"{mol}.{method}.{spin}.jdirect.dloop.{calc}", mol=mol, charge=charge, mult=mult,
+                        method=method, basis="def2-svp", calc=calc, place=dict(jd_place, scf_loop="device"),
+                        scf_loop="device", gpu_extra=["--set", "backend.df_j=direct"], jdirect=True,
+                        repeat=(mol, method, shell) == ("la18", "pbe", 0)))
+    for mol in ("water", "la18", "u1an39"):
+        for method in ("pbe", "r2scan"):
+            for shell in (0, 1):
+                charge, mult = SPINS[mol][shell]
+                spin = "uks" if shell else "rks"
+                for calc in ("energy", "gradient"):
+                    if calc == "gradient" and mol == "water":
+                        continue
+                    out.append(dict(name=f"{mol}.{method}.{spin}.jdirect.{calc}", mol=mol, charge=charge,
+                                    mult=mult, method=method, basis="def2-svp", calc=calc,
+                                    place=jd_place,
+                                    gpu_extra=["--set", "backend.df_j=direct"], jdirect=True,
+                                    repeat=(mol, method, shell, calc) == ("la18", "pbe", 0, "energy")))
+    return out
+
+
+def vnuc_cases() -> list[dict]:
+    """The nuclei's attraction V on the device (``crate::backend::gpu::vnuc``: the device PCM
+    engine's pair x point integrals, which large molecules take), forced at small sizes
+    (``backend.nuclear_attraction: gpu``): u1an39 B3LYP energy and gradient, HI (iodine's ECP: V
+    of its effective charge, the ECP on the host) and u1an39 with C-PCM;
+    ``resolved.record.backend.nuclear_attraction`` naming the device."""
+    gpu = ["--set", "backend.nuclear_attraction=gpu"]
+    charge, mult = SPINS["u1an39"][0]
+    out = [dict(name=f"u1an39.b3lyp.rks.vnuc.{calc}", mol="u1an39", charge=charge, mult=mult, method="b3lyp",
+                basis="def2-svp", calc=calc, place=GLOBAL, gpu_extra=gpu, vnuc=True,
+                repeat=calc == "energy") for calc in ("energy", "gradient")]
+    out.append(dict(name="hi.b3lyp.rks.vnuc.energy", mol="hi", charge=0, mult=1, method="b3lyp",
+                    basis="def2-svp", calc="energy", place=GLOBAL, gpu_extra=gpu, vnuc=True))
+    p = pcm_case("u1an39", "b3lyp", 0, "energy")
+    p.update(name="u1an39.b3lyp.rks.pcm.vnuc.energy", gpu_extra=gpu, vnuc=True)
+    out.append(p)
+    return out
+
+
+def jonly_cases() -> list[dict]:
+    """J-only functionals' gradients: the density-fitted J gradient in Hermite space and the XC
+    gradient on the device, against the CPU; water, la18 and u1an39, PBE and r2SCAN, RKS and UKS;
+    with C-PCM la18 PBE RKS and u1an39 r2SCAN UKS."""
+    out = []
+    for mol in ("water", "la18", "u1an39"):
+        for method in JONLY_METHODS:
+            for shell in (0, 1):
+                charge, mult = SPINS[mol][shell]
+                spin = "uks" if shell else "rks"
+                out.append(dict(name=f"{mol}.{method}.{spin}.gradient", mol=mol, charge=charge, mult=mult,
+                                method=method, basis="def2-svp", calc="gradient", place=JONLY,
+                                repeat=(mol, method, shell) == ("la18", "pbe", 0)))
+    out.append(pcm_case("la18", "pbe", 0, "gradient"))
+    out.append(pcm_case("u1an39", "r2scan", 1, "gradient"))
+    return out
+
+
 def with_vv10_bar(cases: list[dict]) -> list[dict]:
     for c in cases:
         if c["method"] in VV10_METHODS:
@@ -397,11 +507,13 @@ def cases() -> list[dict]:
                     basis="def2-svp", calc="gradient", place=dict(GLOBAL, scf_loop="device"), scf_loop="device"))
     out.append(dict(name="water.b3lyp.uks.dloop.freq", mol="water", charge=1, mult=2, method="b3lyp",
                     basis="def2-svp", calc="freq", place=dict(GLOBAL, scf_loop="device"), scf_loop="device"))
-    # the escalation at max_iter (scf.escalate): the device loop hands over at max_iter 14 and the
-    # host loop escalates from the lowest iterate the device kept (converged in 9 more iterations)
+    # the escalation within max_iter (scf.escalate): with max_iter 25 it comes due at 2/3 of the
+    # budget (iteration 16; DIIS alone converges at 18), the device loop hands over there and the host
+    # loop escalates from the lowest iterate the device kept, converging at iteration 23 (24 to 26
+    # escalate and converge; 23 and below run out of budget, 27 and above converge before it)
     out.append(dict(name="la18.b3lyp.uks.maxiter.dloop.energy", mol="la18", charge=1, mult=2,
                     method="b3lyp", basis="def2-svp", calc="energy", place=dict(GLOBAL, scf_loop="device"),
-                    scf_loop="device", extra=["--max-iter", "14"]))
+                    scf_loop="device", extra=["--max-iter", "25"]))
     # the closed-shell probe (D36) on the device, a singlet diradical below the gap gate: flagged
     # on both backends, the device result bitwise run to run
     out.append(dict(name="pbenzyne.b3lyp.rks.probe.dloop.energy", mol="pbenzyne", charge=0, mult=1,
@@ -537,7 +649,8 @@ def cases() -> list[dict]:
     # la18.wb97m-v.rks.freq)
     out.append(dict(name="la18.wb97m-v.rks.default.freq", mol="la18", charge=0, mult=1, method="wb97m-v",
                     basis="def2-svp", calc="freq", ir=True, place=VV10_HESS, response="default"))
-    return with_vv10_bar(out + pcm_cases() + vv10_cases() + mgga_cases())
+    return with_vv10_bar(out + pcm_cases() + vv10_cases() + mgga_cases() + jonly_cases() + jdirect_cases() + vnuc_cases()
+                         + rijcgk_cases())
 
 
 # CPU results by command line: a case's ``.emu`` twin runs the same CPU calculation (only the
@@ -549,7 +662,7 @@ def command(args, case: dict, backend: str) -> list[str]:
     """The linus command of a case on a backend (without the --prefix)."""
     mol = MOLS.get(case["mol"]) or CASE_MOLS[case["mol"]]
     cmd = [args.linus_bin, str(mol), "--method", case["method"], "--basis", case["basis"],
-           "--jk", "df", "--charge", str(case["charge"]), "--mult", str(case["mult"]),
+           "--jk", case.get("jk", "df"), "--charge", str(case["charge"]), "--mult", str(case["mult"]),
            "--threads", str(args.threads), "--backend", backend, "--json"]
     cmd += case.get("extra", [])
     # the GPU side pins the arithmetic and the loop it names (decision D27 made both defaults
@@ -557,6 +670,9 @@ def command(args, case: dict, backend: str) -> list[str]:
     # that every card covers FP64 and the host loop; the ``*.auto.*`` cases keep the defaults.
     # FP64 is ``precision: fp64`` (native, precision.fp32 off: VV10's pair sums in FP64 too),
     # except at the default response precision, which precision.fp32 off would make FP64
+    # settings of the GPU side alone (``gpu_extra``: a device path forced at small sizes)
+    if backend == "gpu":
+        cmd += case.get("gpu_extra", [])
     if backend == "gpu" and not case.get("auto"):
         cmd += ["--set", f"backend.scf_loop={case.get('scf_loop') or 'host'}"]
         if case.get("precision") == "emulated":
@@ -600,7 +716,8 @@ def run(args, case: dict, backend: str, tag: str) -> dict:
         stderr = ""
     else:
         t = time.time()
-        p = subprocess.run(cmd, capture_output=True, text=True)
+        env = dict(os.environ, **case["gpu_env"]) if backend == "gpu" and case.get("gpu_env") else None
+        p = subprocess.run(cmd, capture_output=True, text=True, env=env)
         wall = time.time() - t
         stdout, stderr = p.stdout, p.stderr
         if backend == "cpu" and p.returncode == 0:
@@ -681,6 +798,13 @@ def maxdiff(a, b) -> float:
 def bitwise(a: dict, b: dict) -> bool:
     keys = ("energy", "gradient", "hessian")
     return all(json.dumps(a.get(k)) == json.dumps(b.get(k)) for k in keys)
+
+
+# the device CPHF/CPKS solver's decline for memory (crates/linus/src/backend/gpu/krylov.rs, `setup`):
+# its subspace, the GiB the response's engines left, the products' per-call reserve
+SOLVER_DECLINE = re.compile(
+    r"its subspace \(([0-9.]+) GiB\) does not fit the ([0-9.]+) GiB the response's engines left "
+    r"beside their ([0-9.]+) GiB reserve")
 
 
 def compare(case: dict, c: dict, g: dict, g2: dict | None, ref64: dict | None = None) -> dict:
@@ -813,6 +937,41 @@ def compare(case: dict, c: dict, g: dict, g2: dict | None, ref64: dict | None = 
     reasons = {f["kernel"] for f in rb["fallbacks"]}
     missing = [k for k, v in want.items() if v == "cpu" and k not in reasons]
     check("placement", got, got == want and not missing and rb.get("device") is not None)
+    if case.get("jdirect"):
+        # the SCF's J on the memory-lean device J, recorded with its reason, on the kernels of
+        # the card class (the Hermite J-engine on FP64-rich cards, recomputed integrals else)
+        jr = rb.get("j") or {}
+        cc = rb["device"]["compute_capability"]
+        want_k = "hermite" if auto_precision(cc) == "double" else "eri3c"
+        check("j_direct", jr, jr.get("engine") == "direct" and jr.get("kernels") == want_k)
+    if case.get("vnuc"):
+        # the SCF's nuclear attraction on the device, recorded with its reason
+        check("nuclear_attraction", rb.get("nuclear_attraction"),
+              (rb.get("nuclear_attraction") or {}).get("place") == "gpu")
+    if case["calc"] == "freq" and rb.get("response_jk") == "gpu":
+        # a Hessian whose response J/K ran on the device: its assembly's GEMMs there too, and its
+        # CPHF/CPKS solver's algebra, which on the whole card always fits beside the response (the
+        # matrix's molecules). Under a cap (device_memory_gib: the gate's packing) the stored
+        # exchange operator may leave only the products' per-call reserve free, and the solver
+        # then declines (u1an39's Hessians under the gate's caps). Accepted only so: under a cap,
+        # with the rule's reason, whose figures (rounded to 0.1 GiB) show the subspace and the
+        # reserve beyond what the engines left. Any other decline fails: without a cap, a
+        # subspace that fit by the figures, a grant that failed after the rule passed.
+        hess = [r for r in rb.get("response") or [] if r.get("purpose") == "hessian"]
+        capped = (rb.get("device") or {}).get("memory_cap_gib") is not None
+
+        def solver_ok(s):
+            if s.get("place") == "gpu":
+                return True
+            m = SOLVER_DECLINE.fullmatch(s.get("reason") or "")
+            if not (capped and s.get("place") == "cpu" and m):
+                return False
+            need, free, reserve = map(float, m.groups())
+            return need + reserve > free - 0.15
+
+        check("response_solver", [(r.get("solver"), r.get("assembly")) for r in hess],
+              len(hess) == 1 and solver_ok(hess[0].get("solver") or {})
+              and (hess[0].get("assembly") or {}).get("place") == "gpu")
     if prec == "emulated":
         emu = {e["kernel"]: e for e in rb.get("emulation", [])}
         kernels = ["jk"] + (["response_jk", "hessian_jk"] if case["calc"] == "freq" else [])

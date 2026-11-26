@@ -14,48 +14,6 @@
 #define XB_X 6
 #define XB_D 7
 
-// flags[j fstride + f] = 1 when max over batch j's points and the nc components of
-// |phi_B(f)| exceeds thresh (the CPU collocator's value test), for the block's functions
-// f < nfB; one warp per function, lanes over the points; blockIdx.y = batch.
-extern "C" __global__ void xcb_flags(int nfB, int nc, int npB, double thresh,
-    const long long *__restrict__ bd, int j0, long long fstride, const double *__restrict__ phi,
-    unsigned char *__restrict__ flags)
-{
-    const int lane = threadIdx.x % LINUS_WARP_SIZE;
-    const long long f = ((long long)blockIdx.x * blockDim.x + threadIdx.x) / LINUS_WARP_SIZE;
-    if (f >= nfB) return;
-    const int j = j0 + blockIdx.y;
-    const long long *d = bd + 9LL * j;
-    const int np = (int)d[XB_NP], q0 = (int)d[XB_Q0];
-    double m = 0.0;
-    for (int c = 0; c < nc; ++c) {
-        const double *p = phi + (f * nc + c) * (long long)npB + q0;
-        for (int g = lane; g < np; g += LINUS_WARP_SIZE) m = fmax(m, fabs(p[g]));
-    }
-    for (int o = LINUS_WARP_SIZE / 2; o > 0; o >>= 1) m = fmax(m, linus_shfl_down(m, o));
-    if (lane == 0) flags[j * fstride + f] = m > thresh ? 1 : 0;
-}
-
-// the kept functions of every batch of a block into the compressed arrays (and, with
-// phic32, their single-precision copies)
-extern "C" __global__ void xcb_compress(int nc, int npB, const long long *__restrict__ bd,
-    int j0, const int *__restrict__ lf, const double *__restrict__ phiB,
-    double *__restrict__ phic, float *__restrict__ phic32)
-{
-    const int j = j0 + blockIdx.y;
-    const long long *d = bd + 9LL * j;
-    const long long np = d[XB_NP], nf = d[XB_NF], q0 = d[XB_Q0], fl = d[XB_FL], po = d[XB_PHI];
-    const long long total = nf * nc * np;
-    for (long long e = (long long)blockIdx.x * blockDim.x + threadIdx.x; e < total;
-         e += (long long)gridDim.x * blockDim.x) {
-        const long long g = e % np, r = e / np;
-        const long long l = r / nc, c = r - l * nc;
-        const double v = phiB[((long long)lf[fl + l] * nc + c) * npB + q0 + g];
-        if (phic) phic[po + e] = v;
-        if (phic32) phic32[po + e] = (float)v;
-    }
-}
-
 // D sub-blocks of the batches: dsub[d + jj nf + i] = D[gf[jj] nbf + gf[i]] (and single copies)
 extern "C" __global__ void xcb_gather_d(long long nbf, const long long *__restrict__ bd, int j0,
     const int *__restrict__ gf, const double *__restrict__ dm, double *__restrict__ dsub,

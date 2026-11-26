@@ -20,8 +20,10 @@ pub mod dblock;
 pub mod deriv;
 pub mod deriv_plan;
 pub mod dgrad;
+mod layout;
 mod thresholds;
 
+pub use layout::{df_kept_pairs, DfRows};
 pub use thresholds::DfThresholds;
 
 use crate::basis::{cart_components, ncart, BasisSet, Shell};
@@ -385,6 +387,18 @@ impl Pair3c {
         let mut fm = vec![0.0; boys::MAX_M + 1];
         let mut r = vec![0.0; nherm(2 * lab)];
         let mut rw = vec![0.0; 2 * nherm(2 * lab)];
+        // per (t, u) of Herm(lab): the R slot of t + u and (-1)^|u|
+        let rtab: Vec<(usize, f64)> = (0..nh * nh)
+            .map(|x| {
+                let ([a0, a1, a2], [b0, b1, b2]) = (tuv[x / nh], tuv[x % nh]);
+                let sign = if (b0 + b1 + b2) % 2 == 0 { 1.0 } else { -1.0 };
+                (
+                    herm_idx((a0 + b0) as usize, (a1 + b1) as usize, (a2 + b2) as usize),
+                    sign,
+                )
+            })
+            .collect();
+        let mut nz: Vec<(usize, f64)> = Vec::with_capacity(nh);
         for ip in 0..sp.nprim {
             let e = sp.e_prim(ip);
             let dst = &mut et[ip * nab * nh..(ip + 1) * nab * nh];
@@ -400,24 +414,20 @@ impl Pair3c {
             crate::core::hermite::r_tensor(2 * lab, alpha, [0.0; 3], &fm, pref, &mut r, &mut rw);
             let mut qmax: f64 = 0.0;
             for ab in 0..nab {
+                let row = &dst[ab * nh..(ab + 1) * nh];
+                // the row's nonzero E (u ascending): a zero factor adds a zero product, which
+                // leaves |s| as it was, so the sum below is the dense loop's, bit for bit
+                nz.clear();
+                nz.extend((0..nh).filter(|&u| row[u] != 0.0).map(|u| (u, row[u])));
                 let mut s = 0.0;
-                for t in 0..nh {
-                    let et_ = dst[ab * nh + t];
+                for (t, &et_) in row.iter().enumerate() {
                     if et_ == 0.0 {
                         continue;
                     }
-                    for u in 0..nh {
-                        let [a0, a1, a2] = tuv[t];
-                        let [b0, b1, b2] = tuv[u];
-                        let sign = if (b0 + b1 + b2) % 2 == 0 { 1.0 } else { -1.0 };
-                        s += et_
-                            * sign
-                            * r[herm_idx(
-                                (a0 + b0) as usize,
-                                (a1 + b1) as usize,
-                                (a2 + b2) as usize,
-                            )]
-                            * dst[ab * nh + u];
+                    let tab = &rtab[t * nh..(t + 1) * nh];
+                    for &(u, eu) in &nz {
+                        let (idx, sign) = tab[u];
+                        s += et_ * sign * r[idx] * eu;
                     }
                 }
                 qmax = qmax.max(s.abs());
@@ -1280,6 +1290,72 @@ mod tests {
                 [0.3, -1.4309, -0.8857],
             ],
         )
+    }
+
+    /// The primitive Schwarz bounds of `Pair3c::from_shell_pair` against the dense loop they were
+    /// first computed with, bit for bit (def2-QZVP: g functions, high-degree Hermite sets).
+    #[test]
+    fn qprim_matches_the_dense_loop_bitwise() {
+        let (z, c) = water();
+        let b = BasisSet::new(&BasisDef::load("def2-qzvp", None).unwrap(), &z, &c, true).unwrap();
+        let pl = PairSet::build(&b, PairOptions::default());
+        let tuv = herm_tuv();
+        for i in 0..pl.len() {
+            let sp = pl.pair(i);
+            if sp.nprim == 0 {
+                continue;
+            }
+            let p3 = Pair3c::from_shell_pair(sp);
+            let (lab, nab) = (sp.lab(), sp.nab());
+            let nh = nherm(lab);
+            let mut fm = vec![0.0; boys::MAX_M + 1];
+            let mut r = vec![0.0; nherm(2 * lab)];
+            let mut rw = vec![0.0; 2 * nherm(2 * lab)];
+            for ip in 0..sp.nprim {
+                let dst = &p3.et[ip * nab * nh..(ip + 1) * nab * nh];
+                let p = sp.p[ip];
+                boys::boys(2 * lab, 0.0, &mut fm);
+                let pref = ERI_PREF / (p * p * (2.0 * p).sqrt());
+                crate::core::hermite::r_tensor(
+                    2 * lab,
+                    0.5 * p,
+                    [0.0; 3],
+                    &fm,
+                    pref,
+                    &mut r,
+                    &mut rw,
+                );
+                let mut qmax: f64 = 0.0;
+                for ab in 0..nab {
+                    let mut s = 0.0;
+                    for t in 0..nh {
+                        let et_ = dst[ab * nh + t];
+                        if et_ == 0.0 {
+                            continue;
+                        }
+                        for u in 0..nh {
+                            let [a0, a1, a2] = tuv[t];
+                            let [b0, b1, b2] = tuv[u];
+                            let sign = if (b0 + b1 + b2) % 2 == 0 { 1.0 } else { -1.0 };
+                            s += et_
+                                * sign
+                                * r[herm_idx(
+                                    (a0 + b0) as usize,
+                                    (a1 + b1) as usize,
+                                    (a2 + b2) as usize,
+                                )]
+                                * dst[ab * nh + u];
+                        }
+                    }
+                    qmax = qmax.max(s.abs());
+                }
+                assert_eq!(
+                    p3.qprim[ip].to_bits(),
+                    qmax.sqrt().to_bits(),
+                    "pair {i} primitive {ip}"
+                );
+            }
+        }
     }
 
     #[test]

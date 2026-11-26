@@ -16,10 +16,15 @@ pub use linus_ints::core::deriv::PairDeriv;
 pub use linus_ints::core::hermite::ShellPair;
 pub use linus_ints::{AoMatrix, Eri2DerivOptions, Eri2DerivPlan};
 
-pub use linus_grid::{build_grid, GridSpec, MolecularGrid};
+pub use linus_grid::{
+    build_grid, Batch, DevicePartition, GridSpec, MolecularGrid, PairScheme, PairTables,
+    Partitioner,
+};
 // grid-weight derivatives (crate::grad::xc)
 pub use linus_grid::{PartitionScheme, RadiiTable, SizeAdjust, ROW2_MAX_Z};
-pub use linus_ints::basis::{cart_components, ncart, search_path, BasisDef, BasisSet, Shell};
+pub use linus_ints::basis::{
+    cart_components, ncart, search_path, BasisDef, BasisSet, CartLayout, Shell,
+};
 pub use linus_ints::core::boys::boys_series;
 pub use linus_ints::core::hermite::{build_pair, herm_idx, herm_tuv, nherm, ShellView};
 pub use linus_ints::core::solid_harmonics::cart2sph;
@@ -28,7 +33,11 @@ pub use linus_ints::eri4c::ERI_PREF;
 pub use linus_ints::operator::Operator;
 pub use linus_ints::points::ao::{deriv_indices, eval_ao, ncomp};
 pub use linus_ints::points::colloc::Collocator;
+pub use linus_ints::points::grid_pot::PotPair;
 pub use linus_ints::{DerivOrder, PairOptions, PairSet};
 // the PCM surface integrals' CPU reference (crate::pcm, its tests)
 pub use linus_ints::points::pcm_ints::{self, GaussPoint};
 pub use linus_xc::{Family, Functional, XcInput, XcOutput};
+// the functionals' libxc trees for the device (crate::xc::devfunc)
+#[cfg(feature = "gpu")]
+pub use linus_xc::device::{DeviceLeaf, DeviceNode, DevicePlan};

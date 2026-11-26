@@ -85,6 +85,11 @@ pub struct JkOutput {
     /// Exchange matrices: K of the builder's exchange operator ([`JkBuilder::set_exchange_operator`];
     /// 1/r unless set).
     pub k: Vec<Mat<f64>>,
+    /// The exchange energies E_K of the densities (the operator's coefficients included, as in
+    /// `k`; the SCF applies a_x and the sign) when they are not 1/2 D_k . K_k: builders whose
+    /// energy is defined first and K is its derivative without being linear in D (compensated
+    /// grid-K: K = K\[D0\] + K^grid\[D - D0\]). None: 1/2 D_k . K_k.
+    pub k_energy: Option<Vec<f64>>,
 }
 
 pub trait JkBuilder: Send {

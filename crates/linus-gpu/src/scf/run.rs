@@ -517,11 +517,13 @@ pub fn run_scf(
 
         let e_one = sv[i_eone];
         let e_j = 0.5 * sv[i_ej];
-        let e_k = match i_ek {
+        let e_k = match (terms.exchange_energy(), i_ek) {
+            // the builder's own energy (compensated grid-K), with the fraction a_x
+            (Some(ek), _) => -a_x * if restricted { 2.0 * ek } else { ek },
             // a closed shell: D_b = D_a and K_b = K_a, as the CPU's two terms
-            Some(i) if restricted => -0.5 * (sv[i] + sv[i]),
-            Some(i) => -0.5 * sv[i],
-            None => -0.5 * (0.0 + 0.0),
+            (None, Some(i)) if restricted => -0.5 * (sv[i] + sv[i]),
+            (None, Some(i)) => -0.5 * sv[i],
+            (None, None) => -0.5 * (0.0 + 0.0),
         };
         let exc_v = exc.unwrap_or(0.0);
         let e_env = env.map_or(0.0, |x| x.0);

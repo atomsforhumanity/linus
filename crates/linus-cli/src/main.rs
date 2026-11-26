@@ -492,6 +492,10 @@ fn run(req: linus::Request) -> Result<Report, Failure> {
     for w in &report.warnings {
         eprintln!("linus: warning: {}", w.message);
     }
+    // the process ends after the report: the session's teardown (a device's memory pool
+    // trimmed for a later session, its buffers and modules released one by one) would only
+    // delay it; the operating system and the driver release all of it at exit
+    std::mem::forget(calc);
     Ok(report)
 }
 

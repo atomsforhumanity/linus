@@ -102,6 +102,7 @@ pub struct PlannedSizes {
 pub struct PlannedDeviceMemory {
     pub limit_gib: f64,
     pub others_reserve_gib: f64,
+    pub grid_partition_gib: f64,
     pub response_workspace_gib: f64,
     pub k_operator_reserve_gib: f64,
     pub w_planes_reserve_gib: f64,
@@ -174,7 +175,11 @@ impl CalcContext {
         let jk = self.plan.jk();
         let device = self.plan.device().is_some();
         let on = |k: Family| self.placement(k) == Some(Placement::Device);
-        if matches!(jk, JkMethod::Df { .. } | JkMethod::RijSnk { .. }) && !on(Family::Jk) {
+        if matches!(
+            jk,
+            JkMethod::Df { .. } | JkMethod::RijSnk { .. } | JkMethod::RijCgk { .. }
+        ) && !on(Family::Jk)
+        {
             add(
                 "jk.df_long_range and the storage of the DF tensors",
                 "f64 within the DF tensors' budget (75% of the memory limit less the reservations; with \
@@ -233,7 +238,7 @@ impl Session {
         let calctypes = CalcTypes::of(calctype, ir);
         let purpose = calctype.purpose();
         let (na, nb) = self.cx.mol.nalpha_nbeta().map_err(LinusError::Input)?;
-        let restricted = self.cx.plan.restricted().unwrap_or(na == nb);
+        let restricted = self.cx.plan.restricted_for(na, nb);
         let scf_grid = self.cx.plan.grid(purpose);
         let convergence = self.cx.plan.convergence(purpose)?;
         // the J/K's auxiliary basis set for the calculation's purpose (a Hessian's: its own)
@@ -300,6 +305,7 @@ impl Session {
                         iteration_aux: iteration_aux.clone(),
                         precision_setting: self.cx.plan.response_precision(),
                         max_residual: f64::NAN,
+                        end: None,
                         grid: self
                             .is_dft()
                             .then(|| self.cx.plan.response_grid(&scf_grid, meta))
@@ -321,6 +327,19 @@ impl Session {
             Some(so) => Some(crate::solvent::resolve_scf_mode(so, self.cx.plan.jk())?),
             None => None,
         };
+        // where the SCF's nuclear attraction will run: the plan's rule on this geometry's pairs
+        // (a GPU session builds them while its device opens)
+        let nuclear_attraction = (self.cx.placement(Family::Jk) == Some(Placement::Device))
+            .then(|| {
+                let pairs = self
+                    .cx
+                    .integrals
+                    .pairs(&self.cx.basis, linus_ints::DerivOrder::Zero);
+                self.cx
+                    .nuclear_attraction_place(&pairs, self.cx.mol.point_charges().len())
+            })
+            .flatten()
+            .map(|(gpu, why)| (if gpu { "gpu" } else { "cpu" }, why));
         let (settings, reasons) = self.cx.resolved_settings(&RunFacts {
             calctypes,
             purpose,
@@ -331,6 +350,9 @@ impl Session {
             df: None,
             response: cphf.as_ref(),
             solvent_scf,
+            // decided at the J/K's setup, from the screened tensor's size (not before a run)
+            df_j: None,
+            nuclear_attraction,
         });
         let placement = Family::ALL
             .into_iter()
@@ -374,6 +396,7 @@ impl Session {
             memory_limit: mem.limit,
             device_limit: device.map(|d| d.memory.limit),
             jk_on_device: self.cx.placement(Family::Jk) == Some(Placement::Device),
+            gridk: self.cx.gridk_memory()?,
         }
         .estimates();
         Ok(PlanReport {
@@ -400,6 +423,7 @@ impl Session {
                     PlannedDeviceMemory {
                         limit_gib: g(m.limit),
                         others_reserve_gib: g(m.others_reserve),
+                        grid_partition_gib: g(m.grid_partition),
                         response_workspace_gib: g(m.response_workspace),
                         k_operator_reserve_gib: g(m.k_operator_reserve),
                         w_planes_reserve_gib: g(m.w_planes_reserve),

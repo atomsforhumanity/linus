@@ -686,6 +686,32 @@ pub fn all_pairs(basis: &BasisSet) -> Vec<PairRow> {
 #[cfg(feature = "gpu")]
 pub use device::{Eri3c, Eri3cAuxBlocks, Eri3cStaged};
 
+/// The extra compiler options of the generated kernels of `kind` on a device of compute
+/// capability `cc` (besides the cache's base options and the architecture).
+///
+/// The second-derivative kernels ([`Eri3cKind::Hessian`]) on cc 9.x (H100/H200) take ptxas
+/// -O1 instead of its default -O3. At -O3, ptxas of CUDA 13.0 (NVRTC 13.0.88; driver 580.178;
+/// NVRTC 13.1.115 alike) builds sm_90 cubins of four 1/r classes that compute wrong values,
+/// deterministically and independently of the blocks per SM: (ff|g), (gg|d), (gd|g), (gf|f),
+/// relative errors 3.8e-3, 2.6e-3, 5.2e-6, 1.4e-6 of the class's Gamma-contracted Hessian
+/// against the same source on sm_120 (test `eri3c_gamma_hessian_matches_hess_3c`, FeOH
+/// def2-QZVP: 2.1e-2 absolute against linus-ints on an H200; the u1an39 B3LYP/def2-TZVP
+/// Hessian 4.9e-4 off, from its C-F pairs' (ff|g)). At -O1 (and -O0) every class agrees with
+/// sm_120 below 1e-12 relative and that Hessian with the CPU's to 7e-11; compute-sanitizer's
+/// memcheck, initcheck, racecheck and synccheck find nothing in these kernels (sm_120), and a
+/// standalone reproducer (the kernel's source and one launch's recorded inputs, no linus code)
+/// shows the -O3 and -O1 cubins disagreeing on an H200 only. Cost on an H200: the u1an39
+/// TZVP Hessian's second-derivative phase 0.79 to 1.04 s (of 44 s). sm_120 and the other kinds
+/// keep -O3 (their results unchanged). Re-test (that test on an H200 at -O3) and remove when
+/// the toolkit changes.
+pub fn compile_options(cc: (i32, i32), kind: Eri3cKind) -> &'static [&'static str] {
+    if cc.0 == 9 && kind == Eri3cKind::Hessian {
+        &["--ptxas-options=-O1"]
+    } else {
+        &[]
+    }
+}
+
 /// The module name and source of one operator's kernel of `gk` (or of `source` with gk's entry:
 /// the tuner's candidates), as the builder compiles it: the operator header (1/r, or
 /// erf(omega r)/r with `erf`), the fixed-point accumulator of the derivative kernels' Gamma
@@ -847,6 +873,19 @@ mod device {
             host: impl Into<std::sync::Arc<Eri3cHost>>,
             staged: Option<&Eri3cStaged>,
         ) -> Result<Eri3c, GpuError> {
+            let mut b = Self::records_only(gpu, host, staged)?;
+            b.ensure_kernels(gpu)?;
+            Ok(b)
+        }
+
+        /// As [`Eri3c::with_staged`] without the classes' kernels: the records on the device
+        /// for engines that contract them themselves (`grad::df_j`), the kernels loaded by
+        /// [`Eri3c::ensure_kernels`] before any launch of this builder's.
+        pub fn records_only(
+            gpu: &Gpu,
+            host: impl Into<std::sync::Arc<Eri3cHost>>,
+            staged: Option<&Eri3cStaged>,
+        ) -> Result<Eri3c, GpuError> {
             let host = host.into();
             let t = std::time::Instant::now();
             let btab = gpu.upload(&boys_table())?;
@@ -895,7 +934,26 @@ mod device {
                     .iter()
                     .map(|a| 8 * a.d.len() + 4 * (a.p0.len() + a.col.len() + a.atom.len()))
                     .sum::<usize>();
+            Ok(Eri3c {
+                host,
+                setup_upload,
+                setup_upload_bytes,
+                setup_kernels: 0.0,
+                btab,
+                classes,
+                aux,
+                kernels: Vec::new(),
+            })
+        }
+
+        /// Loads the classes' 1/r kernels (compiled, or from the caches) once; a builder made
+        /// by [`Eri3c::records_only`] needs them before its first launch.
+        pub fn ensure_kernels(&mut self, gpu: &Gpu) -> Result<(), GpuError> {
+            if self.kernels_loaded() {
+                return Ok(());
+            }
             let t = std::time::Instant::now();
+            let host = &self.host;
             let mut kernels = Vec::new();
             for c in &host.classes {
                 let mut row = Vec::new();
@@ -910,16 +968,14 @@ mod device {
                 }
                 kernels.push(row);
             }
-            Ok(Eri3c {
-                host,
-                setup_upload,
-                setup_upload_bytes,
-                setup_kernels: t.elapsed().as_secs_f64(),
-                btab,
-                classes,
-                aux,
-                kernels,
-            })
+            self.kernels = kernels;
+            self.setup_kernels += t.elapsed().as_secs_f64();
+            Ok(())
+        }
+
+        /// The classes' kernels are loaded ([`Eri3c::ensure_kernels`]).
+        pub fn kernels_loaded(&self) -> bool {
+            !self.kernels.is_empty() || self.host.classes.is_empty()
         }
 
         /// Loads (compiles, or reads from the caches) the 1/r kernels a builder of `host` takes,
@@ -948,7 +1004,8 @@ mod device {
             erf: bool,
         ) -> Result<Kernel, GpuError> {
             let (name, full) = module_source(gk, source, erf);
-            let kernel = gpu.kernel(&name, &full, gk.entry)?;
+            let extra = compile_options(gpu.info().cc, gk.kind);
+            let kernel = gpu.kernel_with(&name, &full, gk.entry, extra)?;
             if gk.mapping == Mapping::Block {
                 // dynamic plus static shared memory may pass the default 48 KiB (the derivative
                 // kernels' Gamma epilogue adds a static array): always opt in
@@ -999,6 +1056,19 @@ mod device {
             &self.host
         }
 
+        /// Class `ci`'s device records, for engines that contract the pair expansions
+        /// themselves (`grad::df_j`): the records (`rec` values per primitive), per
+        /// pair the output rows and swap flag (4 values) and the shells' atoms (2).
+        pub(crate) fn class_records(
+            &self,
+            ci: usize,
+        ) -> Option<(&DeviceBuf<f64>, &DeviceBuf<i64>, &DeviceBuf<i32>)> {
+            self.classes
+                .get(ci)
+                .and_then(|c| c.as_ref())
+                .map(|c| (&c.d, &c.out, &c.atom))
+        }
+
         /// Makes the builder ready for the operator `op` ([`kernel_operator`]: 1/r, always
         /// ready, or erf(omega r)/r for any omega > 0): compiles the erf kernels of its classes
         /// once (the disk cache keeps them). Idempotent.
@@ -1006,6 +1076,7 @@ mod device {
             if kernel_operator(op)?.is_none() {
                 return Ok(());
             }
+            self.ensure_kernels(gpu)?;
             for row in self.kernels.iter_mut() {
                 for dk in row.iter_mut().flatten() {
                     if dk.kernel_erf.is_none() {
@@ -1019,11 +1090,13 @@ mod device {
 
         /// The builder has its erf(omega r)/r kernels ([`Eri3c::prepare_operator`]).
         pub fn has_erf(&self) -> bool {
-            self.kernels
-                .iter()
-                .flatten()
-                .flatten()
-                .all(|k| k.kernel_erf.is_some())
+            self.kernels_loaded()
+                && self
+                    .kernels
+                    .iter()
+                    .flatten()
+                    .flatten()
+                    .all(|k| k.kernel_erf.is_some())
         }
 
         /// Swaps in a candidate kernel for class (la lb | lk): `gk` gives the entry point and
@@ -1034,8 +1107,10 @@ mod device {
             gk: &'static GenKernel,
             source: &str,
         ) -> Result<(), GpuError> {
+            // a records-only builder's kernels first
+            self.ensure_kernels(gpu)?;
             let ci = gk.la * (gk.la + 1) / 2 + gk.lb;
-            if let Some(old) = &self.kernels[ci][gk.lk] {
+            if let Some(Some(old)) = self.kernels.get(ci).and_then(|k| k.get(gk.lk)) {
                 let erf = old.kernel_erf.is_some();
                 self.kernels[ci][gk.lk] = Some(Self::prepare(gpu, gk, Some(source), erf)?);
             }
@@ -1260,6 +1335,11 @@ mod device {
             omega: Option<f64>,
             sel: Option<(&Eri3cAuxBlocks, usize)>,
         ) -> Result<(), GpuError> {
+            if !self.kernels_loaded() {
+                return Err(GpuError::Contract(
+                    "eri3c: a records-only builder (ensure_kernels first)".into(),
+                ));
+            }
             let h = &self.host;
             // output columns: every auxiliary function, or the block's
             let ld = match sel {
@@ -1413,8 +1493,10 @@ mod device {
             lb: usize,
             lk: usize,
         ) -> Option<(&'static GenKernel, &Kernel)> {
-            self.kernels[la * (la + 1) / 2 + lb][lk]
-                .as_ref()
+            self.kernels
+                .get(la * (la + 1) / 2 + lb)
+                .and_then(|row| row.get(lk))
+                .and_then(|k| k.as_ref())
                 .map(|k| (k.gk, &k.kernel))
         }
     }
@@ -1424,6 +1506,29 @@ mod device {
 mod tests {
     use super::*;
     use crate::harness;
+
+    /// ptxas -O1 for the second-derivative kernels on cc 9.x only ([`compile_options`]): the
+    /// other kinds, and every kind on other architectures, keep the base options.
+    #[test]
+    fn second_derivatives_take_ptxas_o1_on_hopper_only() {
+        for cc in [(9, 0), (9, 1)] {
+            assert_eq!(
+                compile_options(cc, Eri3cKind::Hessian),
+                ["--ptxas-options=-O1"]
+            );
+            assert!(compile_options(cc, Eri3cKind::Integrals).is_empty());
+            assert!(compile_options(cc, Eri3cKind::Derivatives).is_empty());
+        }
+        for cc in [(8, 0), (8, 9), (10, 0), (12, 0)] {
+            for kind in [
+                Eri3cKind::Integrals,
+                Eri3cKind::Derivatives,
+                Eri3cKind::Hessian,
+            ] {
+                assert!(compile_options(cc, kind).is_empty(), "{cc:?} {kind:?}");
+            }
+        }
+    }
 
     /// The packing is the same, bit for bit, on one thread and on several (its pairs are
     /// packed in parallel and appended in pair order), for every kind, more pairs than one

@@ -7,6 +7,20 @@ use linus_core::elements::z_to_symbol;
 pub use linus_core::Structure;
 use std::path::{Path, PathBuf};
 
+/// Device 0 for a test, or None (the test skips, with a message) when this machine has no usable
+/// GPU; with `LINUS_GPU_REQUIRED=1` a missing GPU fails the test instead.
+#[cfg(feature = "gpu")]
+pub fn gpu() -> Option<crate::Gpu> {
+    match crate::Gpu::new(0) {
+        Ok(g) => Some(g),
+        Err(e) if std::env::var("LINUS_GPU_REQUIRED").as_deref() != Ok("1") => {
+            eprintln!("skipped, no GPU: {e}");
+            None
+        }
+        Err(e) => panic!("LINUS_GPU_REQUIRED=1 but no GPU: {e}"),
+    }
+}
+
 /// `$LINUS_MOLECULES_DIR`, else the repository's bench/molecules.
 pub fn molecules_dir() -> PathBuf {
     std::env::var_os("LINUS_MOLECULES_DIR")

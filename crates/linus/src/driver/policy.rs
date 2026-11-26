@@ -12,19 +12,24 @@
 //! | Hessian F^x exchange (`hess_k`) | fp64 | ozaki 7, fp64 | fp64 | ozaki 7, fp64 |
 //! | SCF XC potential (`vxc`) | fp64 | fp64 | fp64 | fp64 |
 //!
-//! | family | `fp32` off | `fp32` auto | `fp32` on |
-//! |---|---|---|---|
-//! | XC gradient (`grad_xc`) | fp64 | fp64 | fp32 |
-//! | Hessian XC terms (`hess_xc`) | fp64 | fp64 | fp32 |
-//! | VV10 SCF pair sums (`vv10_scf`) | fp64 | df64 | df64 |
-//! | VV10 gradient pair sums (`vv10_grad`) | fp64 | df64 | fp32 |
+//! | family | `fp32` off | `fp32` auto, FP64-rich | `fp32` auto, FP64-poor | `fp32` on |
+//! |---|---|---|---|---|
+//! | XC gradient (`grad_xc`) | fp64 | fp64 | fp64 | fp32 |
+//! | Hessian XC terms (`hess_xc`) | fp64 | fp64 | fp64 | fp32 |
+//! | VV10 SCF pair sums (`vv10_scf`) | fp64 | fp64 | df64 | df64 |
+//! | VV10 gradient pair sums (`vv10_grad`) | fp64 | fp64 | df64 | fp32 |
 //!
 //! A list is a fallback chain: the first arithmetic that sets up runs, and the record says which
-//! and why (the device's adapters apply it, `crate::backend::gpu::df`). VV10's pair sums follow
-//! `precision.fp32`, not the card: double-float (pairs of FP32 numbers) is FP64-equal there and
-//! several times faster on FP64-poor cards, and the same on every card, so results stay bitwise
-//! card to card. Native K's resident dense planes (`k_dense`) and the XC products on cuBLAS's
-//! grouped DGEMM (`xc_grouped`) are the FP64-rich cards'.
+//! and why (the device's adapters apply it, `crate::backend::gpu::df`). VV10's pair sums with
+//! `precision.fp32` auto follow the card class, as the exchange does (D27): native FP64 on
+//! FP64-rich cards (3.2x double-float's speed on an H200, and at least as accurate), double-float
+//! (pairs of FP32 numbers, FP64-equal) on FP64-poor ones, where it is several times faster than
+//! their FP64; so VV10's bits, like the exchange's, are the same within a card class, not across
+//! classes. The XC products on cuBLAS's grouped DGEMM (`xc_grouped`) are the FP64-rich cards'.
+//! Native K's panel GEMM runs on the FP64 tensor-core kernel compiled for sm_90a
+//! (`k_tensor_cores`) on FP64-rich cards of compute capability 9.0 (H100/H200), else on cuBLAS;
+//! the DF gradient stores its derivative planes (`df_grad_planes`) on FP64-rich cards, else
+//! contracts Gamma inside the derivative kernels.
 //!
 //! A response's arithmetic (its exchange, the CPKS kernel, VV10's kernel) depends on its sizes
 //! and tolerance as well, and is decided per response: [`DevicePolicy::response`] (what the
@@ -112,6 +117,19 @@ pub(crate) struct CardProps {
 }
 
 impl CardProps {
+    /// A card of class `card` and compute capability `cc` with an RTX PRO 6000's
+    /// multiprocessors and clock (tests).
+    #[cfg(test)]
+    pub(crate) fn of_class(card: CardClass, cc: (i32, i32)) -> CardProps {
+        CardProps {
+            fp64_rich: card.fp64_rich(),
+            int8_per_fp64: card.int8_per_fp64(),
+            cc,
+            sm_count: 188,
+            clock_khz: 2_280_000,
+        }
+    }
+
     /// The card's class (decision D27).
     pub(crate) fn class(&self) -> CardClass {
         CardClass::new(self.fp64_rich, self.int8_per_fp64)
@@ -172,28 +190,38 @@ pub(crate) struct DevicePolicy {
     pub hess_xc: Arith,
     pub vv10_scf: Arith,
     pub vv10_grad: Arith,
-    /// Native K keeps its unpacked GEMM1 operand on the device between builds (FP64-rich
-    /// cards, where the unpack is a large part of K: H200 23-44 %; elsewhere FP64 GEMMs dominate
-    /// and the planes would take memory from the other engines for a few percent).
-    pub k_dense: bool,
     /// The XC engines' FP64 per-batch products on cuBLAS's grouped DGEMM, on the FP64 tensor
     /// cores of FP64-rich cards (17.7-18.8 against vgemm's 9.4-11.0 TFLOP/s on an H200); else
     /// on the variable-size batched kernel.
     pub xc_grouped: bool,
+    /// Native K's panel GEMM on the FP64 tensor-core kernel compiled for sm_90a (FP64-rich
+    /// cards of compute capability 9.0, H100/H200: about 42 TFLOP/s of mma.sync against
+    /// cuBLAS's 25-33 on the panels' small products, H200); else cuBLAS on the gathered panels.
+    /// `resolved.record.df.k_kernel` reports it.
+    pub k_tensor_cores: bool,
+    /// The DF gradient stores the six derivative planes of a sub-block and contracts them
+    /// (FP64-rich cards: the Gamma-contracted kernels' global fixed-point atomics bind once
+    /// FP64 is fast, H200 0.5-0.7x their time); else Gamma is contracted inside the derivative
+    /// kernels, whose buffer is a sixth. When the planes' workspace does not fit, the fused
+    /// kernels run (recorded).
+    pub df_grad_planes: bool,
+    /// The memory-lean device J (`linus_gpu::jdirect`) on its Hermite J-engine kernels on
+    /// FP64-rich cards (H200: 5.5-11x its recomputed three-center integrals per J build); else
+    /// on the recomputed integrals (RTX PRO 6000: the
+    /// Hermite kernels 0.27 against 0.21 s per build at ts61/def2-SVP).
+    pub j_direct_hermite: bool,
     /// The card's rates of D37's exchange costing.
     pub rates: ExchangeRates,
 }
 
 impl DevicePolicy {
-    /// The policy of the settings `fp64` and `fp32` on a card of class `card` with compute
-    /// capability `cc` (the reason of `auto`) and the exchange costing's `rates`.
-    pub(crate) fn new(
-        fp64: Fp64Mode,
-        fp32: Fp32Mode,
-        card: CardClass,
-        cc: &str,
-        rates: ExchangeRates,
-    ) -> DevicePolicy {
+    /// The policy of the settings `fp64` and `fp32` on the card `props` (its class, its compute
+    /// capability: the reason of `auto` and the tensor-core kernel's architecture, and the
+    /// exchange costing's rates).
+    pub(crate) fn new(fp64: Fp64Mode, fp32: Fp32Mode, props: &CardProps) -> DevicePolicy {
+        let card = props.class();
+        let rates = props.rates();
+        let cc = format!("{}.{}", props.cc.0, props.cc.1);
         let precision = match fp64 {
             Fp64Mode::Auto if !card.fp64_rich() => DevicePrecision::Emulated,
             Fp64Mode::Auto | Fp64Mode::Native => DevicePrecision::Double,
@@ -225,6 +253,7 @@ impl DevicePolicy {
         let (vv10_scf, vv10_grad) = match fp32 {
             Fp32Mode::Off => (Arith::Fp64, Arith::Fp64),
             Fp32Mode::On => (Arith::DoubleFloat, Arith::Fp32),
+            Fp32Mode::Auto if card.fp64_rich() => (Arith::Fp64, Arith::Fp64),
             Fp32Mode::Auto => (Arith::DoubleFloat, Arith::DoubleFloat),
         };
         DevicePolicy {
@@ -241,8 +270,10 @@ impl DevicePolicy {
             hess_xc: fp32_if_on,
             vv10_scf,
             vv10_grad,
-            k_dense: card.fp64_rich(),
             xc_grouped: card.fp64_rich(),
+            k_tensor_cores: card.fp64_rich() && props.cc == (9, 0),
+            df_grad_planes: card.fp64_rich(),
+            j_direct_hermite: card.fp64_rich(),
             rates,
         }
     }
@@ -309,10 +340,14 @@ impl DevicePolicy {
             format!("precision.fp64 {}", self.fp64.name())
         };
         let by32 = format!("precision.fp32 {}", self.fp32.name());
-        let vv10 = format!(
-            "precision.fp32 {}: VV10's pair sums follow it, not the card",
-            self.fp32.name()
-        );
+        let vv10 = if self.fp32 == Fp32Mode::Auto {
+            format!(
+                "precision.fp32 auto on {class}: native FP64 on FP64-rich cards, double-float on \
+                 FP64-poor ones"
+            )
+        } else {
+            format!("precision.fp32 {}", self.fp32.name())
+        };
         vec![
             ("scf_k", chain(self.scf_k), by.clone()),
             ("scf_fit", self.scf_fit.to_string(), by.clone()),
@@ -470,10 +505,10 @@ mod tests {
     #[test]
     fn the_policy_table() {
         use Arith::*;
-        let rates = ExchangeRates::of((12, 0), 188, 2_280_000, Some(500.0));
-        let rich = CardClass::new(true, Some(30.0));
-        let poor = CardClass::new(false, Some(500.0));
-        let pol = |s: (Fp64Mode, Fp32Mode), c| DevicePolicy::new(s.0, s.1, c, "x", rates);
+        let rich = CardProps::of_class(CardClass::new(true, Some(30.0)), (9, 0));
+        let a100 = CardProps::of_class(CardClass::new(true, Some(32.0)), (8, 0));
+        let poor = CardProps::of_class(CardClass::new(false, Some(500.0)), (12, 0));
+        let pol = |s: (Fp64Mode, Fp32Mode), c: CardProps| DevicePolicy::new(s.0, s.1, &c);
         let auto = (Fp64Mode::Auto, Fp32Mode::Auto);
         let native = (Fp64Mode::Native, Fp32Mode::Off);
         let emulated = (Fp64Mode::Emulated, Fp32Mode::Auto);
@@ -496,14 +531,7 @@ mod tests {
                 p.vv10_grad,
             )
         };
-        let fp64: Row = (
-            DevicePrecision::Double,
-            NATIVE,
-            Fp64,
-            Fp64,
-            DoubleFloat,
-            DoubleFloat,
-        );
+        let fp64: Row = (DevicePrecision::Double, NATIVE, Fp64, Fp64, Fp64, Fp64);
         let emu: Row = (
             DevicePrecision::Emulated,
             EMULATION,
@@ -514,7 +542,18 @@ mod tests {
         );
         assert_eq!(row(&pol(auto, rich)), fp64);
         assert_eq!(row(&pol(auto, poor)), emu);
-        assert_eq!(row(&pol(emulated, rich)), emu);
+        // emulated exchange set on an FP64-rich card: VV10 still the card class's FP64
+        assert_eq!(
+            row(&pol(emulated, rich)),
+            (
+                DevicePrecision::Emulated,
+                EMULATION,
+                OZAKI,
+                Fp64,
+                Fp64,
+                Fp64
+            )
+        );
         assert_eq!(
             row(&pol(native, poor)),
             (DevicePrecision::Double, NATIVE, Fp64, Fp64, Fp64, Fp64)
@@ -542,12 +581,16 @@ mod tests {
                 Fp32
             )
         );
-        assert!(pol(auto, rich).k_dense && !pol(auto, poor).k_dense);
         assert!(pol(native, rich).xc_grouped && !pol(native, poor).xc_grouped);
+        // the sm_90a tensor-core kernel on FP64-rich 9.0 alone; stored gradient planes on
+        // FP64-rich cards
+        assert!(pol(auto, rich).k_tensor_cores && !pol(auto, a100).k_tensor_cores);
+        assert!(!pol(native, poor).k_tensor_cores);
+        assert!(pol(auto, a100).df_grad_planes && !pol(auto, poor).df_grad_planes);
         assert_eq!(pol(emulated, poor).hess_k, HESSIAN_EMULATION);
         assert!(pol(native, poor).auto_note.is_none());
         assert!(pol(auto, poor).auto_note.unwrap().starts_with(
-            "auto: emulated (compute capability x: INT8 tensor cores about 500x FP64"
+            "auto: emulated (compute capability 12.0: INT8 tensor cores about 500x FP64"
         ));
         // VV10's response kernel: FP32 for single-precision responses and fp32 on, never with
         // fp32 off (the semilocal kernel's: crate::backend::gpu::xc's tests)
@@ -566,28 +609,11 @@ mod tests {
     #[test]
     fn response_arithmetic_per_card() {
         use ResponsePrecision as P;
-        let rates = ExchangeRates::of((12, 0), 188, 2_280_000, Some(500.0));
-        let rich = DevicePolicy::new(
-            Fp64Mode::Auto,
-            Fp32Mode::Auto,
-            CardClass::new(true, Some(30.0)),
-            "x",
-            rates,
-        );
-        let poor = DevicePolicy::new(
-            Fp64Mode::Auto,
-            Fp32Mode::Auto,
-            CardClass::new(false, Some(500.0)),
-            "x",
-            rates,
-        );
-        let mixed = DevicePolicy::new(
-            Fp64Mode::Native,
-            Fp32Mode::On,
-            CardClass::new(false, Some(500.0)),
-            "x",
-            rates,
-        );
+        let rich_card = CardProps::of_class(CardClass::new(true, Some(30.0)), (9, 0));
+        let poor_card = CardProps::of_class(CardClass::new(false, Some(500.0)), (12, 0));
+        let rich = DevicePolicy::new(Fp64Mode::Auto, Fp32Mode::Auto, &rich_card);
+        let poor = DevicePolicy::new(Fp64Mode::Auto, Fp32Mode::Auto, &poor_card);
+        let mixed = DevicePolicy::new(Fp64Mode::Native, Fp32Mode::On, &poor_card);
         let h = ResponseUse::Hessian;
         let r = rich.response(h, P::Auto, 1e11, None);
         assert!(r.mode == ResponseMode::Double && r.k == Arith::Fp64);

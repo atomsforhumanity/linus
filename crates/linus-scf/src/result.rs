@@ -130,10 +130,10 @@ impl Escalation {
             Escalation::Ran(r) => format!(
                 "the escalation ({}) restarted after iteration {} from the lowest-energy orbitals \
                  (iteration {}) with {} quasi-Newton iterations, scf.escalate",
-                if r.trigger == "stagnation" {
-                    "DIIS stagnated"
-                } else {
-                    "at 2/3 of scf.max_iter"
+                match r.trigger {
+                    "stagnation" => "DIIS stagnated",
+                    "blowup" => "DIIS blew up",
+                    _ => "at 2/3 of scf.max_iter",
                 },
                 r.at,
                 r.from_iter,
@@ -177,7 +177,8 @@ impl Serialize for Escalation {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EscalationRun {
     /// Why it started: `stagnation` (the lowest energy had not improved for
-    /// `stagnation_window` iterations) or `two_thirds` (2/3 of `max_iter` were spent).
+    /// `stagnation_window` iterations), `blowup` (DIIS blew up for `blowup_window` iterations) or
+    /// `two_thirds` (2/3 of `max_iter` were spent).
     pub trigger: &'static str,
     /// The iteration after which it started (its iterations follow).
     pub at: usize,
@@ -242,6 +243,62 @@ impl ModeCheck {
     }
 }
 
+/// A spin channel of a converged SCF whose occupied set is not the aufbau set of its final Fock
+/// matrix: empty orbitals lie below occupied ones. A quasi-Newton step keeps the occupied set it
+/// starts from, so the escalation (which restarts from an earlier iteration's occupied orbitals),
+/// the two-cycle rule and a stability step can converge to such a stationary point (C2 singlet
+/// PBE: 3 sigma_g empty 3.7e-4 Eh below the occupied pi pair; docs/internal/deggrad.md). The
+/// final orbitals are those of its occupied space all the same (occupied first), so the energy,
+/// orbitals and derivatives describe one determinant; a lower aufbau solution may exist.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NonAufbau {
+    /// The channel: `alpha`, `beta`, or `restricted` (a closed shell's one).
+    pub spin: &'static str,
+    /// The empty orbitals that aufbau would occupy and the occupied ones it would leave empty, by
+    /// their 0-based positions in the channel's spectrum in ascending energy.
+    pub holes: Vec<usize>,
+    pub particles: Vec<usize>,
+    /// The highest occupied orbital energy less the lowest empty one (Eh; positive).
+    pub inversion: f64,
+}
+
+impl NonAufbau {
+    /// The violation of the channel `spin` with orbital energies `eps` (its `nocc` occupied first),
+    /// when the highest occupied orbital lies more than `tol` (Eh) above the lowest empty one;
+    /// closer than that the two are degenerate to within the SCF's resolution.
+    pub fn of(spin: &'static str, eps: &[f64], nocc: usize, tol: f64) -> Option<NonAufbau> {
+        let homo = eps[..nocc]
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let lumo = eps[nocc..].iter().copied().fold(f64::INFINITY, f64::min);
+        let inversion = homo - lumo;
+        if inversion.is_nan() || inversion <= tol {
+            return None;
+        }
+        // the positions in ascending energy (a stable sort: ties keep the result's order)
+        let mut order: Vec<usize> = (0..eps.len()).collect();
+        order.sort_by(|&a, &b| eps[a].total_cmp(&eps[b]));
+        let mut rank = vec![0; eps.len()];
+        for (r, &p) in order.iter().enumerate() {
+            rank[p] = r;
+        }
+        let mut holes: Vec<usize> = (nocc..eps.len())
+            .map(|p| rank[p])
+            .filter(|&r| r < nocc)
+            .collect();
+        let mut particles: Vec<usize> = (0..nocc).map(|p| rank[p]).filter(|&r| r >= nocc).collect();
+        holes.sort_unstable();
+        particles.sort_unstable();
+        Some(NonAufbau {
+            spin,
+            holes,
+            particles,
+            inversion,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ScfResult {
     pub energy: f64,
@@ -299,6 +356,9 @@ pub struct ScfResult {
     /// Occupation numbers per spin (length nmo; 1 for occupied, 0 for virtual).
     pub occ_a: Vec<f64>,
     pub occ_b: Vec<f64>,
+    /// The channels of a converged SCF whose occupied set is not the aufbau set of the final Fock
+    /// matrix ([`NonAufbau`]); empty otherwise.
+    pub non_aufbau: Vec<NonAufbau>,
     /// <S^2> of the determinant (Kohn-Sham: of the KS determinant), S_z (S_z + 1) + n_beta -
     /// tr(D_a S D_b S); restricted closed shells 0.
     pub s2: f64,
@@ -378,6 +438,18 @@ impl ScfResult {
         let ([d_a, d_b], [f_a, f_b], [nalpha, nbeta]) = (fin.d, fin.f, fin.nocc);
         let (nbf, nmo) = (c_a.nrows(), eps_a.len());
         let occ = |no: usize| (0..nmo).map(|i| if i < no { 1.0 } else { 0.0 }).collect();
+        let non_aufbau = if !fin.converged {
+            Vec::new()
+        } else if fin.restricted {
+            NonAufbau::of("restricted", &eps_a, nalpha, opts.g_tol)
+                .into_iter()
+                .collect()
+        } else {
+            [("alpha", &eps_a, nalpha), ("beta", &eps_b, nbeta)]
+                .into_iter()
+                .filter_map(|(spin, e, n)| NonAufbau::of(spin, e, n, opts.g_tol))
+                .collect()
+        };
         let p = fin.parts;
         ScfResult {
             energy: fin.energy,
@@ -405,6 +477,7 @@ impl ScfResult {
             dropped_functions: nbf - nmo,
             occ_a: occ(nalpha),
             occ_b: occ(nbeta),
+            non_aufbau,
             eps_a,
             eps_b,
             c_a,

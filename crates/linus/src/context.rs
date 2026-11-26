@@ -55,6 +55,63 @@ pub(crate) struct IntegralContext {
     overlap: OnceLock<Mat<f64>>,
     /// The XC integrators by grid.
     xc: Mutex<Vec<(XcKey, Arc<XcIntegrator>)>>,
+    /// The dipole integrals (x, y, z): built, or being built on a thread of their own.
+    dipole: Mutex<Dipole>,
+}
+
+/// The dipole integrals of [`IntegralContext::dipole`].
+#[derive(Default)]
+enum Dipole {
+    #[default]
+    None,
+    /// Queued or being built on the session's pool ([`IntegralContext::prefetch_dipole`]).
+    Prefetch(Arc<DipoleJob>),
+    Built(Arc<[Mat<f64>; 3]>),
+}
+
+/// A prefetch of the dipole integrals: whoever starts it first builds them, the pool's job or a
+/// caller that needs them before the job ran; a caller that finds it running waits for it.
+#[derive(Default)]
+struct DipoleJob {
+    state: Mutex<DipoleState>,
+    done: std::sync::Condvar,
+}
+
+#[derive(Default)]
+enum DipoleState {
+    #[default]
+    Queued,
+    Running,
+    /// Built, or None when the job's build panicked.
+    Done(Option<Arc<[Mat<f64>; 3]>>),
+}
+
+impl DipoleJob {
+    /// Takes the build if nobody has started it.
+    fn claim(&self) -> bool {
+        let mut st = lock(&self.state);
+        let queued = matches!(*st, DipoleState::Queued);
+        if queued {
+            *st = DipoleState::Running;
+        }
+        queued
+    }
+
+    /// The job's integrals once it is done (None: it panicked).
+    fn wait(&self) -> Option<Arc<[Mat<f64>; 3]>> {
+        let mut st = lock(&self.state);
+        loop {
+            match &*st {
+                DipoleState::Done(d) => return d.clone(),
+                _ => st = self.done.wait(st).unwrap_or_else(|e| e.into_inner()),
+            }
+        }
+    }
+
+    fn finish(&self, d: Option<Arc<[Mat<f64>; 3]>>) {
+        *lock(&self.state) = DipoleState::Done(d);
+        self.done.notify_all();
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -81,6 +138,15 @@ impl IntegralContext {
                 *slot = Some(p.clone());
                 p
             }
+        }
+    }
+
+    /// Keeps `pairs` (this context's index-ordered pairs, built ahead: a session while its
+    /// device opens) unless a set is held already.
+    pub fn set_pairs(&self, pairs: Arc<PairSet>) {
+        let mut slot = lock(&self.pairs);
+        if slot.is_none() {
+            *slot = Some(pairs);
         }
     }
 
@@ -186,6 +252,52 @@ impl IntegralContext {
         }
         v.push(((grid.clone(), nlc_grid.cloned()), x.clone()));
         Ok(x)
+    }
+
+    /// The dipole integrals of `basis` (this context's geometry): the ones built so far (a
+    /// prefetch's: waited for while it runs, or built here when it has not started), else the
+    /// ones `build` makes; kept for a later call.
+    pub fn dipole(&self, build: impl FnOnce() -> [Mat<f64>; 3]) -> Arc<[Mat<f64>; 3]> {
+        let d = self.take_dipole(build);
+        *lock(&self.dipole) = Dipole::Built(d.clone());
+        d
+    }
+
+    /// [`Self::dipole`], no longer kept (the last use at this geometry: the report's dipole
+    /// moment; a later call builds them again).
+    pub fn take_dipole(&self, build: impl FnOnce() -> [Mat<f64>; 3]) -> Arc<[Mat<f64>; 3]> {
+        let mut slot = lock(&self.dipole);
+        match std::mem::take(&mut *slot) {
+            Dipole::Built(d) => d,
+            Dipole::Prefetch(job) if job.claim() => Arc::new(build()),
+            // a job that panicked: built here
+            Dipole::Prefetch(job) => job.wait().unwrap_or_else(|| Arc::new(build())),
+            Dipole::None => Arc::new(build()),
+        }
+    }
+
+    /// Queues the dipole integrals of `basis` on `pool` (the session's; unless built or queued
+    /// already), for [`Self::dipole`] to take later: while the SCF iterates on a device, whose
+    /// host threads mostly wait then, so the build takes none beyond the session's. A job whose
+    /// context is gone by the time it runs does nothing. The integrals are the same bits on any
+    /// pool.
+    pub fn prefetch_dipole(&self, pool: &rayon::ThreadPool, basis: &BasisSet) {
+        let mut slot = lock(&self.dipole);
+        if !matches!(*slot, Dipole::None) {
+            return;
+        }
+        let job = Arc::new(DipoleJob::default());
+        *slot = Dipole::Prefetch(job.clone());
+        let basis = basis.clone();
+        pool.spawn(move || {
+            if Arc::strong_count(&job) == 1 || !job.claim() {
+                return;
+            }
+            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::properties::dipole::dipole_integrals(&basis)
+            }));
+            job.finish(built.ok().map(Arc::new));
+        });
     }
 }
 

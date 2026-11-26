@@ -247,10 +247,33 @@ fn negative_probe_continues_on_the_host_loop() {
         first(c),
         "O3 triplet: the first analysis, host vs cpu"
     );
+    // both GPU loops end in the same state
+    assert!(
+        (d.energy - h.energy).abs() < 1e-10,
+        "O3 triplet: device loop E {} vs host loop {}",
+        d.energy,
+        h.energy
+    );
+    // the device loop takes the same decision at the same iteration (exact). Its analysis's
+    // Davidson may stop one iteration (its two products, one per spin) earlier or later: the
+    // XC functional is evaluated on the device (H2XC), whose round-off differs from libxc's on
+    // the host at the 1e-14 level, which moved the device loop's analysis from 16 to 14 products
+    // on an RTX PRO 6000 (with libxc on the host both loops have 16). No looser than that.
+    let decision = |o: &Report| {
+        let k = &o.scf.stability[0];
+        (k.iter, k.probe, k.step)
+    };
     assert_eq!(
-        first(d),
-        first(h),
+        decision(d),
+        decision(h),
         "O3 triplet: the first analysis, device vs host"
+    );
+    let builds = |o: &Report| o.scf.stability[0].fock_builds as i64;
+    assert!(
+        (builds(d) - builds(h)).abs() <= 2,
+        "O3 triplet: the first analysis's products, device {} vs host {}",
+        builds(d),
+        builds(h)
     );
     let chk = &r[2].scf.stability[0];
     assert!(

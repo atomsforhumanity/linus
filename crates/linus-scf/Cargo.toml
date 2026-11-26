@@ -19,3 +19,8 @@ linus-num = { path = "../linus-num" }
 faer.workspace = true
 rayon.workspace = true
 serde.workspace = true
+
+[features]
+# The shared-subspace solver's test problem (`response::solver::reference`), which the facade's
+# test of the device's solver algebra solves too.
+reference = []

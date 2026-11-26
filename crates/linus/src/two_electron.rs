@@ -189,14 +189,26 @@ impl CalcContext {
     }
 
     /// The memory to reserve before the SCF's tensors are sized: the large allocations alive
-    /// with them whose sizes are known up front. Now the PCM's dense surface matrices at their
-    /// peak while they are built (after the DF setup; `linus_solvent::pcm::dense_peak_bytes`:
+    /// with them whose sizes are known up front. rij_cgk's grid-K arrays on the CPU
+    /// ([`CalcContext::gridk_memory`]), and the PCM's dense surface matrices at their peak while
+    /// they are built (after the DF setup; `linus_solvent::pcm::dense_peak_bytes`:
     /// 2 n^2 f64 for C-PCM and COSMO, 6 n^2 for IEF-PCM, SS(V)PE and SMD, for the n points of
     /// the surface, built here to count them, cheap next to the matrices).
     pub(crate) fn scf_memory_reservations(
         &self,
     ) -> Result<Vec<linus_base::memory::Reservation>, LinusError> {
         let mut out = vec![];
+        // rij_cgk's grid-K arrays on the CPU (npts x nbf matrices, alive with the RI-J tensor)
+        if let (Some(m), false) = (
+            self.gridk_memory()?,
+            self.placement(crate::driver::backend::Family::Jk)
+                == Some(crate::driver::backend::Placement::Device),
+        ) {
+            out.push(linus_base::memory::Reservation {
+                what: "grid-K",
+                bytes: m.scf_host,
+            });
+        }
         if let Some(so) = self.plan.solvent() {
             let r = so.resolve(&self.mol.z).map_err(LinusError::Input)?;
             // matrices beyond the whole limit: the solvent's own resource error (it names the
@@ -309,20 +321,7 @@ impl CalcContext {
                 (Box::new(df), Some(resolved))
             }
             JkMethod::RijSnk { aux, k_grid } => {
-                let auxb = self.aux_set(aux, setup.purpose)?;
-                let opts = self.df_config(None, setup.memory.df_bytes());
-                let j = timers.time("jk_setup", || -> Result<DfJk, LinusError> {
-                    let metric = self.df_metric(aux, setup.purpose)?;
-                    Ok(DfJk::try_new(
-                        &self.basis,
-                        pairs,
-                        &auxb,
-                        metric,
-                        false,
-                        opts,
-                    )?)
-                })?;
-                let resolved = j.resolved();
+                let (j, resolved) = self.rij_j(aux, setup, pairs, timers)?;
                 let k = match k_grid.cosx_levels() {
                     Some(levels) => linus_jk::cosx::scf_builder(
                         &self.basis,
@@ -349,9 +348,115 @@ impl CalcContext {
                     Some(resolved),
                 )
             }
+            JkMethod::RijCgk { aux, k_grid } => {
+                let (j, resolved) = self.rij_j(aux, setup, pairs, timers)?;
+                // compensated grid-K for exact exchange alone: a pure functional's SCF never
+                // asks for K
+                if self.method.exchange.is_none() {
+                    (Box::new(j), Some(resolved))
+                } else {
+                    let k = timers.time("jk_setup", || self.gridk_builder(k_grid))?;
+                    (
+                        Box::new(CompositeJk {
+                            j: Box::new(j),
+                            k: Box::new(k),
+                        }),
+                        Some(resolved),
+                    )
+                }
+            }
         };
         set_exchange_operator(b.as_mut(), self.method.exchange)?;
         Ok((b, resolved))
+    }
+
+    /// The density-fitted J (no exchange tensor) of rij_snk and rij_cgk for the auxiliary basis
+    /// `aux` (timed as `jk_setup`), and what its setup resolved to.
+    fn rij_j(
+        &self,
+        aux: &AuxBasis,
+        setup: &ScfSetup,
+        pairs: &PairSet,
+        timers: &mut Timers,
+    ) -> Result<(DfJk, ResolvedDf), LinusError> {
+        let auxb = self.aux_set(aux, setup.purpose)?;
+        let opts = self.df_config(None, setup.memory.df_bytes());
+        let j = timers.time("jk_setup", || -> Result<DfJk, LinusError> {
+            let metric = self.df_metric(aux, setup.purpose)?;
+            Ok(DfJk::try_new(
+                &self.basis,
+                pairs,
+                &auxb,
+                metric,
+                false,
+                opts,
+            )?)
+        })?;
+        let resolved = j.resolved();
+        Ok((j, resolved))
+    }
+
+    /// The SAD density of one spin channel: half the superposition of the atoms' spin-averaged
+    /// densities in the molecular basis (linus-scf's SAD guess, unscaled: neutral atoms), the
+    /// reference density D0 of compensated grid-K's dSCF partition. The same at every geometry
+    /// (atom-block-diagonal, cached per element).
+    pub(crate) fn sad_reference(&self) -> Mat<f64> {
+        let d = linus_scf::guess::sad_superposition(&self.basis_def, &self.basis, &self.mol.z);
+        &d * 0.5
+    }
+
+    /// The memory of rij_cgk's grid-K (None without it or without exact exchange), on an upper
+    /// bound of its grid's points (every atom's whole atomic grid): the host's arrays of its
+    /// SCF builds and of its gradient (linus-jk's grid-K, on the CPU) and the device engine's
+    /// (linus-gpu's, without slices of its pairs: their copies of Z show at small sizes alone).
+    pub(crate) fn gridk_memory(&self) -> Result<Option<GridKMemory>, LinusError> {
+        let JkMethod::RijCgk { k_grid, .. } = self.plan.jk() else {
+            return Ok(None);
+        };
+        if self.method.exchange.is_none() {
+            return Ok(None);
+        }
+        let spec = k_grid.spec();
+        let mut npts = 0;
+        for &z in &self.mol.z {
+            npts += linus_grid::atomic_grid(&spec, z)
+                .map_err(|e| LinusError::Input(format!("jk.k_grid: {e}")))?
+                .npoints();
+        }
+        let nbf = self.basis.nbf;
+        // a build without the gpu feature has no device
+        #[cfg(feature = "gpu")]
+        let device = linus_gpu::gridk::device_bytes(npts, nbf, self.basis.cart_layout().ncart(), 1);
+        #[cfg(not(feature = "gpu"))]
+        let device = 0;
+        Ok(Some(GridKMemory {
+            scf_host: linus_jk::gridk::host_bytes(npts, nbf, false),
+            gradient_host: linus_jk::gridk::host_bytes(npts, nbf, true),
+            device,
+        }))
+    }
+
+    /// The compensated grid-K builder of rij_cgk on `k_grid` (one grid), with the SCF's
+    /// canonical orthogonalization threshold and the SAD reference density.
+    pub(crate) fn gridk_builder(
+        &self,
+        k_grid: &GridChoice,
+    ) -> Result<linus_jk::gridk::GridK, LinusError> {
+        let grid =
+            linus_grid::MolecularGrid::build(&self.mol.z, &self.mol.positions, &k_grid.spec())
+                .map_err(|e| LinusError::Input(format!("jk.k_grid: {e}")))?;
+        let cfg = linus_jk::gridk::GridKConfig {
+            lindep: self.plan.scf_algorithm().lindep,
+            ..Default::default()
+        };
+        linus_jk::gridk::GridK::new(
+            &self.basis,
+            grid,
+            Some(self.sad_reference()),
+            cfg,
+            self.par(),
+        )
+        .map_err(LinusError::Input)
     }
 
     /// The in-core J/K builder (the full ERI tensor), if it fits the budget of the large integral
@@ -477,6 +582,28 @@ impl CalcContext {
                     timers,
                 )
             }
+            JkMethod::RijCgk { aux, k_grid } => {
+                // RI-J + compensated grid-K (the exact derivative of its energy: grid, fit and the
+                // SAD reference's exact terms)
+                let auxb = self.aux_set(aux, gs.purpose())?;
+                let k = if xop.is_some() {
+                    Some(timers.time("grad_gridk_setup", || self.gridk_builder(k_grid))?)
+                } else {
+                    None
+                };
+                linus_jk::gridk::gradient::rij_cgk_gradient(
+                    basis,
+                    pairs,
+                    &auxb,
+                    k,
+                    r.restricted,
+                    da,
+                    db,
+                    xop,
+                    par,
+                    timers,
+                )
+            }
         }
     }
 
@@ -547,7 +674,9 @@ impl CalcContext {
                 }
                 linus_base::memory::mem_mark(timers, "explicit_ri");
             }
-            JkMethod::RijSnk { .. } => return Err(no_second_derivatives("analytic Hessians")),
+            JkMethod::RijSnk { .. } | JkMethod::RijCgk { .. } => {
+                return Err(no_second_derivatives("analytic Hessians"))
+            }
         }
         Ok(())
     }
@@ -681,7 +810,9 @@ impl CalcContext {
                     plan,
                 })
             }
-            JkMethod::RijSnk { .. } => Err(no_second_derivatives("response properties")),
+            JkMethod::RijSnk { .. } | JkMethod::RijCgk { .. } => {
+                Err(no_second_derivatives("response properties"))
+            }
         }
     }
 }
@@ -751,7 +882,7 @@ pub(crate) fn gradient_operator(xop: Option<Operator>) -> Operator {
 
 fn no_second_derivatives(what: &str) -> LinusError {
     LinusError::Unsupported(format!(
-        "{what} are implemented for jk exact and df, not rij_snk; use jk=\"df\" (--jk df)"
+        "{what} are implemented for jk exact and df, not rij_snk or rij_cgk; use jk=\"df\" (--jk df)"
     ))
 }
 
@@ -940,4 +1071,12 @@ mod tests {
         assert_eq!(enough.energy().unwrap().energy, e64);
         assert_eq!(stored(&enough), "B");
     }
+}
+
+/// The memory of rij_cgk's grid-K ([`CalcContext::gridk_memory`]), bytes.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GridKMemory {
+    pub scf_host: usize,
+    pub gradient_host: usize,
+    pub device: usize,
 }

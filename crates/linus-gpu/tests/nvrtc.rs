@@ -4,8 +4,11 @@
 //! (the registry, `linus_gpu::kernels::registry`), the PCM's and the three-center integrals'
 //! generated kernels (each class for 1/r; for erf(omega r)/r one class per kind and derivative
 //! order, or all with `LINUS_NVRTC_ERI3C=all`), the collocation kernels of every (l, pure) at
-//! every derivative order, and the variable-size batched GEMM's tile. Every module's declared
-//! entry points must be kernels of its image.
+//! every derivative order, the variable-size batched GEMM's tile, the device functionals of
+//! `DEVICE_FUNCTIONALS` (libxc's code, closed and open shell), the generated J-engine families
+//! (one module per family and bra degree, as the Hermite DF-J engine compiles them) and the
+//! tensor-core panel kernel in each copy mode, also for sm_90a (its register hand-over, the
+//! H100/H200's build). Every module's declared entry points must be kernels of its image.
 //!
 //! The sources are assembled as the engines assemble them, and the device layer's prelude as
 //! `Gpu::kernel_source` does (warp size 32), so `kernel_manifest` lists exactly what NVRTC is
@@ -18,7 +21,7 @@
 use linus_gpu::kernels::eri3c_class::GenKernel;
 use linus_gpu::kernels::eri3c_gen::KERNELS as ERI3C;
 use linus_gpu::kernels::eri3c_gen_arch::ARCH_KERNELS as ERI3C_ARCH;
-use linus_gpu::kernels::{colloc, pcm_gen, registry, vgemm};
+use linus_gpu::kernels::{colloc, gridk, pcm_gen, registry, vgemm};
 use linus_gpu::nvrtc::{self, Target};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
@@ -26,11 +29,13 @@ use sha2::{Digest, Sha256};
 /// The warp size of the architectures linus runs on (NVIDIA's).
 const WARP: u32 = 32;
 
-/// A module as the compiler gets it (before the device layer's prelude).
+/// A module as the compiler gets it (before the device layer's prelude), and whether it is
+/// built for sm_90a alone (the architecture-specific target).
 struct Module {
     label: String,
     source: String,
     entries: Vec<String>,
+    sm90a: bool,
 }
 
 fn module(label: impl Into<String>, source: impl Into<String>, entries: Vec<String>) -> Module {
@@ -38,6 +43,7 @@ fn module(label: impl Into<String>, source: impl Into<String>, entries: Vec<Stri
         label: label.into(),
         source: source.into(),
         entries,
+        sm90a: false,
     }
 }
 
@@ -95,9 +101,16 @@ fn modules(eri3c_all: bool) -> Vec<Module> {
         .flat_map(|l| [(l, false), (l, true)])
         .collect();
     for order in 0..=colloc::MAX_ORDER {
+        // per class: the block kernel, the per-batch (direct) collocation and the screening
         let entries = keys
             .iter()
-            .map(|&(l, p)| colloc::kernel_name(l, p, order))
+            .flat_map(|&(l, p)| {
+                [
+                    colloc::kernel_name(l, p, order),
+                    colloc::batched_kernel_name(l, p, order),
+                    colloc::screen_kernel_name(l, p, order),
+                ]
+            })
             .collect();
         out.push(module(
             format!("colloc_order{order}"),
@@ -111,8 +124,93 @@ fn modules(eri3c_all: bool) -> Vec<Module> {
         .map(|&(ta, tb)| vgemm::kernel_name(ta, tb, &tile))
         .collect();
     out.push(module("vgemm", vgemm::module_source(&tile), entries));
+    // grid-K's potential-integral classes: each in its default style, every style of one class,
+    // and the Z-direct style where the bra's components split in three groups
+    let mut gk = |la: usize, lb: usize, st: gridk::Style, tag: &str| {
+        out.push(module(
+            format!("gridk_{la}{lb}_{tag}"),
+            gridk::generate(la, lb, st),
+            vec![gridk::kernel_name(la, lb)],
+        ));
+    };
+    for la in 0..=gridk::L_MAX {
+        for lb in 0..=la {
+            gk(la, lb, gridk::Style::default_for(la, lb), "default");
+        }
+    }
+    for tag in ["-", "e", "z", "s", "ez", "es", "zs", "ezs"] {
+        gk(2, 1, gridk::Style::parse(tag), tag);
+    }
+    gk(4, 4, gridk::Style::parse("z"), "z");
+    // the functionals compiled for the device: the scoreboard's and the common hybrids, closed and
+    // open shell
+    for name in DEVICE_FUNCTIONALS {
+        for nsp in [1, 2] {
+            let (src, entry) = linus_gpu::xc::devfunc_module_source(name, nsp)
+                .unwrap_or_else(|e| panic!("{name}: no device functional: {e}"));
+            out.push(module(
+                format!("xc_devfunc_{name}_{nsp}"),
+                src,
+                vec![entry.into()],
+            ));
+        }
+    }
     out
 }
+
+/// The generated J-engine families' modules: per family and bra degree every ket degree, as
+/// `jengine::HermiteDf` compiles them.
+fn jengine_modules() -> Vec<Module> {
+    use linus_gpu::kernels::jengine_gen::{JENGB, JENGBK, JENGK};
+    let mut out = Vec::new();
+    for v in [&JENGB, &JENGK, &JENGBK] {
+        for b in 0..=v.bmax {
+            let src: String = (0..=v.kmax).map(|k| v.source(b, k)).collect();
+            let entries = (0..=v.kmax)
+                .map(|k| format!("{}_{b}_{k}", v.name))
+                .collect();
+            out.push(module(format!("{}_{b}", v.name), src, entries));
+        }
+    }
+    out
+}
+
+/// The tensor-core panel kernel's variants: each copy mode at the default tile, for the card's
+/// own target and for sm_90a.
+fn panel_mma_modules() -> Vec<Module> {
+    use linus_gpu::df::{panel_mma_source, MmaCopy, MMA_TILE};
+    let mut out = Vec::new();
+    for copy in [MmaCopy::Bulk, MmaCopy::Pairs, MmaCopy::Singles] {
+        for sm90a in [false, true] {
+            out.push(Module {
+                sm90a,
+                ..module(
+                    format!(
+                        "dfjk_panel_mma {copy:?}{}",
+                        if sm90a { " sm_90a" } else { "" }
+                    ),
+                    panel_mma_source(MMA_TILE, copy),
+                    vec!["df_panel_mma".into()],
+                )
+            });
+        }
+    }
+    out
+}
+
+/// Functionals whose device modules (`linus_gpu::xc::devfunc`) every architecture must compile.
+const DEVICE_FUNCTIONALS: [&str; 10] = [
+    "b3lyp",
+    "pbe",
+    "pbe0",
+    "r2scan",
+    "wb97x-d3bj",
+    "wb97m-v",
+    "tpss",
+    "scan",
+    "b97m-v",
+    "svwn",
+];
 
 /// Whether NVRTC can be loaded (the device layer panics when the library is missing): skip, or fail when
 /// `LINUS_NVRTC_REQUIRED=1`.
@@ -149,23 +247,32 @@ fn every_module_compiles_for_sm90_and_sm120() {
         return;
     }
     let all = std::env::var("LINUS_NVRTC_ERI3C").as_deref() == Ok("all");
-    let mods = modules(all);
+    let mut mods = modules(all);
+    mods.extend(jengine_modules());
+    mods.extend(panel_mma_modules());
     let archs = [90u32, 120];
     let supported = nvrtc::supported_archs().unwrap();
     for a in archs {
         assert!(supported.contains(&a), "NVRTC cannot compile for sm_{a}");
     }
-    let jobs: Vec<(&Module, u32)> = mods
+    let jobs: Vec<(&Module, Target)> = mods
         .iter()
-        .flat_map(|m| archs.iter().map(move |&a| (m, a)))
+        .flat_map(|m| {
+            let targets: Vec<Target> = if m.sm90a {
+                vec![Target::CubinArchSpecific(90)]
+            } else {
+                archs.iter().map(|&a| Target::Cubin(a)).collect()
+            };
+            targets.into_iter().map(move |t| (m, t))
+        })
         .collect();
     let t = std::time::Instant::now();
     let failures: Vec<String> = jobs
         .par_iter()
-        .filter_map(|&(m, arch)| {
+        .filter_map(|(m, target)| {
             let src = linus_gpu::kernel_source(WARP, &m.source);
-            match nvrtc::compile_uncached(&m.label, &src, &Target::Cubin(arch)) {
-                Err(e) => Some(format!("{} (sm_{arch}): {e}", m.label)),
+            match nvrtc::compile_uncached(&m.label, &src, target) {
+                Err(e) => Some(format!("{} ({target:?}): {e}", m.label)),
                 Ok((image, _)) => {
                     let missing: Vec<&String> = m
                         .entries
@@ -173,7 +280,7 @@ fn every_module_compiles_for_sm90_and_sm120() {
                         .filter(|e| !has_symbol(&image, e))
                         .collect();
                     (!missing.is_empty())
-                        .then(|| format!("{} (sm_{arch}): no kernels {missing:?}", m.label))
+                        .then(|| format!("{} ({target:?}): no kernels {missing:?}", m.label))
                 }
             }
         })

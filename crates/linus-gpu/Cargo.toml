@@ -13,7 +13,7 @@ publish = false
 [features]
 # Off by default, so CPU-only builds never need CUDA. Even with it on, nothing CUDA is needed
 # at build time: cudarc loads the driver, NVRTC, cuBLAS and cuSOLVER at run time.
-gpu = ["dep:cudarc", "dep:sha2", "dep:libc"]
+gpu = ["dep:cudarc", "dep:sha2", "dep:libc", "linus-xc/device-sources"]
 # The test and benchmark kit: the harness (structures, basis sets, grids and comparisons with the
 # CPU code) and the kernel cache's internals. The crate's own tests and examples turn it on (the
 # dev-dependency on itself below); the library linus links never contains it.
@@ -71,6 +71,10 @@ required-features = ["gpu"]
 
 # the DF Hessian's two-electron terms (GpuDfHess) of one molecule, phase times
 [[example]]
+name = "grid_bench"
+required-features = ["gpu"]
+
+[[example]]
 name = "hess_bench"
 required-features = ["gpu"]
 
@@ -84,6 +88,11 @@ required-features = ["gpu"]
 name = "ozaki_bench"
 required-features = ["gpu"]
 
+# the XC engines (GpuXc, GpuXcGrad) of one molecule: grid build, setups, call phase times
+[[example]]
+name = "xc_bench"
+required-features = ["gpu"]
+
 # VV10 on the device (GpuVv10, GpuVv10Grad) of one molecule per pair arithmetic, phase times
 [[example]]
 name = "vv10_bench"
@@ -92,4 +101,9 @@ required-features = ["gpu"]
 # vgemm against cuBLAS's grouped and per-product GEMMs on the XC engines' shapes
 [[example]]
 name = "grouped_gemm_bench"
+required-features = ["gpu"]
+
+# the DF J/K engines per call (SCF J/K, the two-electron gradient, the response J/K), phase times
+[[example]]
+name = "jk_bench"
 required-features = ["gpu"]

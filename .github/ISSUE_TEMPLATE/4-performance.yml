@@ -1,0 +1,41 @@
+name: Slow, or ran out of memory
+description: A calculation that is slower than you'd expect, or that runs out of memory.
+title: "[Performance] "
+labels: ["performance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Speed matters to us. Tell us what was slow; a comparison with another program helps but isn't needed.
+        Tip: `linus --plan` shows the memory and time linus expects before it runs, and the result's
+        `timings` say where the time went.
+  - type: textarea
+    id: what
+    attributes:
+      label: What was slow or ran out of memory?
+      placeholder: "e.g. ωB97X-D3BJ/def2-TZVP gradient of a 150-atom molecule took 40 min on 32 cores; PySCF took 25 min"
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: Optional. The structure and the command, request or Python code, including `threads` and `memory_gib`.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware and version
+      placeholder: "e.g. 2x AMD EPYC 9654, 512 GB; NVIDIA A100 80 GB; linus 0.1.3"
+    validations:
+      required: false
+  - type: textarea
+    id: timings
+    attributes:
+      label: Timings or the --plan output
+      description: Optional. The result's `timings` section, or `linus --plan` output.
+      render: text
+    validations:
+      required: false

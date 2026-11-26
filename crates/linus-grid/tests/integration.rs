@@ -281,6 +281,27 @@ fn batches_cover_grid() {
         assert_eq!(next, g.len());
         let avg = g.len() as f64 / g.batches.len() as f64;
         assert!(avg > 64.0, "average batch size {avg}");
+        // the sub-batches: consecutive pieces of the batches, at most 40 points, each inside its
+        // bounding sphere
+        let subs = g.sub_batches(40);
+        let mut next = 0;
+        for b in &subs {
+            assert_eq!(b.start, next);
+            assert!(b.len() <= 40 && !b.is_empty());
+            assert!(g
+                .batches
+                .iter()
+                .any(|p| p.start <= b.start && b.end <= p.end));
+            next = b.end;
+            for i in b.start..b.end {
+                let d = ((g.x[i] - b.center[0]).powi(2)
+                    + (g.y[i] - b.center[1]).powi(2)
+                    + (g.z[i] - b.center[2]).powi(2))
+                .sqrt();
+                assert!(d <= b.radius);
+            }
+        }
+        assert_eq!(next, g.len());
     }
 }
 

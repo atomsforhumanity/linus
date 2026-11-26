@@ -127,22 +127,131 @@ pub fn kernel_name(l: usize, pure: bool, order: usize) -> String {
     format!("colloc_l{l}{}_d{order}", if pure { "s" } else { "c" })
 }
 
+/// The kernel of the per-batch layout's direct collocation for (l, pure, order)
+/// ([`generate_batched`]).
+pub fn batched_kernel_name(l: usize, pure: bool, order: usize) -> String {
+    format!("{}_b", kernel_name(l, pure, order))
+}
+
 /// CUDA C++ of the kernel for (l, pure, order), and its source statistics (flops per shell and
 /// point, excluding the exponentials: each primitive adds one exp and 2 + 2 order flops).
-#[allow(clippy::needless_range_loop)]
 pub fn generate(l: usize, pure: bool, order: usize) -> (String, KernelStats) {
+    generate_with(l, pure, order, Mode::Block)
+}
+
+/// CUDA C++ of the per-batch layout's direct collocation for (l, pure, order): one thread block
+/// per entry (a grid batch and one of its shells), threads over the batch's points; each of the
+/// shell's functions that the batch keeps goes straight to its place in the batch's compressed
+/// values (`crate::xc::layout`: phic\[po + (q ncomp + d) np + g\] for kept function q,
+/// component d, point g; and its FP32 copy when given), the others are not written.
+///
+/// Entry e: `ent[3 e]` the batch (its descriptor `bd[9 j ..]`: first point, points, offset of
+/// its compressed values), `ent[3 e + 1]` the shell's global number, `ent[3 e + 2]` the offset
+/// in `fmap` of the shell's functions' kept positions (-1: not kept).
+pub fn generate_batched(l: usize, pure: bool, order: usize) -> (String, KernelStats) {
+    generate_with(l, pure, order, Mode::Batched)
+}
+
+/// The kernel of the per-batch layout's screening for (l, pure, order)
+/// ([`generate_screen`]).
+pub fn screen_kernel_name(l: usize, pure: bool, order: usize) -> String {
+    format!("{}_s", kernel_name(l, pure, order))
+}
+
+/// CUDA C++ of the per-batch layout's screening for (l, pure, order): one thread block per
+/// entry (a block of grid batches and one of its shells), threads over the block's points; a
+/// function of the shell is kept on a batch where one of its values or derivatives to `order`
+/// exceeds `thresh` in magnitude at one of the batch's points: bit (a + f) % 32 of word
+/// `flags[w_j + (a + f) / 32]` is set (batch j and its first word w_j, the shell's first function
+/// a in the block's list, function f; the words zeroed before).
+///
+/// Entry e: `ent[4 e]` the block's first batch j0 (descriptors `bd[9 j ..]`: first point,
+/// points, offset of the batch's first point in the block at 3, w_j at 4), `ent[4 e + 1]` its
+/// batches, `ent[4 e + 2]` the shell's global number, `ent[4 e + 3]` a. Dynamic shared memory:
+/// batches x the shell's functions bytes.
+pub fn generate_screen(l: usize, pure: bool, order: usize) -> (String, KernelStats) {
+    generate_with(l, pure, order, Mode::Screen)
+}
+
+/// What a generated collocation kernel writes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// A block's values (`generate`).
+    Block,
+    /// Each batch's kept values into its compressed values (`generate_batched`).
+    Batched,
+    /// Each batch's kept functions (`generate_screen`).
+    Screen,
+}
+
+#[allow(
+    clippy::needless_range_loop,
+    reason = "indexes the recipe's terms and outputs in step"
+)]
+fn generate_with(l: usize, pure: bool, order: usize, mode: Mode) -> (String, KernelStats) {
+    let batched = mode == Mode::Batched;
+    let screen = mode == Mode::Screen;
     let r = Recipe::new(l, pure, order);
-    let name = kernel_name(l, pure, order);
     let mut s = String::new();
     let mut flops = 0;
     let _ = writeln!(
         s,
-        "// linus-gpu collocation: l = {l}, {}, derivatives to order {order} (generated)",
-        if pure { "spherical" } else { "Cartesian" }
+        "// linus-gpu collocation: l = {l}, {}, derivatives to order {order}{} (generated)",
+        if pure { "spherical" } else { "Cartesian" },
+        match mode {
+            Mode::Batched => ", per batch into its compressed values",
+            Mode::Screen => ", the batches' kept functions",
+            Mode::Block => "",
+        }
     );
-    let _ = writeln!(
-        s,
-        "extern \"C\" __global__ void __launch_bounds__(128) {name}(const double *__restrict__ gx, const double *__restrict__ gy, const double *__restrict__ gz, int npts, long long sf, long long sc,
+    if screen {
+        let name = screen_kernel_name(l, pure, order);
+        let nf = r.nf;
+        let _ = writeln!(
+            s,
+            "extern \"C\" __global__ void __launch_bounds__(128) {name}(const double *__restrict__ gx, const double *__restrict__ gy, const double *__restrict__ gz,
+    const long long *__restrict__ bd, const int *__restrict__ ent, double thresh,
+    const int *__restrict__ sh_p0, const double *__restrict__ sh_c, const double *__restrict__ pexp, const double *__restrict__ pcoef, unsigned int *__restrict__ flags)
+{{
+    extern __shared__ unsigned char hit[];
+    const long long e = blockIdx.x;
+    const int j0 = ent[4 * e], nb = ent[4 * e + 1], s = ent[4 * e + 2], a = ent[4 * e + 3];
+    for (int i = threadIdx.x; i < nb * {nf}; i += blockDim.x) hit[i] = 0;
+    __syncthreads();
+    const long long *__restrict__ d0 = bd + 9LL * j0;
+    const long long *__restrict__ dl = bd + 9LL * (j0 + nb - 1);
+    const long long p0 = d0[0] - d0[3], npb = dl[3] + dl[1];
+    int jj = 0;
+    for (long long g = threadIdx.x; g < npb; g += blockDim.x) {{
+    while (jj + 1 < nb && g >= bd[9LL * (j0 + jj + 1) + 3]) ++jj;
+    unsigned char *__restrict__ h = hit + jj * {nf};
+    const long long P = p0 + g;
+    const double x = gx[P] - sh_c[3 * s], y = gy[P] - sh_c[3 * s + 1], z = gz[P] - sh_c[3 * s + 2];
+    const double rr = x * x + y * y + z * z;"
+        );
+    } else if batched {
+        let name = batched_kernel_name(l, pure, order);
+        let _ = writeln!(
+            s,
+            "extern \"C\" __global__ void __launch_bounds__(128) {name}(const double *__restrict__ gx, const double *__restrict__ gy, const double *__restrict__ gz,
+    const long long *__restrict__ bd, const int *__restrict__ ent, const int *__restrict__ fmap,
+    const int *__restrict__ sh_p0, const double *__restrict__ sh_c, const double *__restrict__ pexp, const double *__restrict__ pcoef, double *__restrict__ phic, float *__restrict__ phic32)
+{{
+    const long long e = blockIdx.x;
+    const int j = ent[3 * e], s = ent[3 * e + 1];
+    const int *__restrict__ fm = fmap + ent[3 * e + 2];
+    const long long *__restrict__ dsc = bd + 9LL * j;
+    const long long np = dsc[1], po = dsc[5];
+    for (long long g = threadIdx.x; g < np; g += blockDim.x) {{
+    const long long P = dsc[0] + g;
+    const double x = gx[P] - sh_c[3 * s], y = gy[P] - sh_c[3 * s + 1], z = gz[P] - sh_c[3 * s + 2];
+    const double rr = x * x + y * y + z * z;"
+        );
+    } else {
+        let name = kernel_name(l, pure, order);
+        let _ = writeln!(
+            s,
+            "extern \"C\" __global__ void __launch_bounds__(128) {name}(const double *__restrict__ gx, const double *__restrict__ gy, const double *__restrict__ gz, int npts, long long sf, long long sc,
     const int *__restrict__ sh_list, const int *__restrict__ sh_ao, const int *__restrict__ sh_p0, const double *__restrict__ sh_c, const double *__restrict__ pexp, const double *__restrict__ pcoef, double *__restrict__ out)
 {{
     const int s = sh_list[blockIdx.y];
@@ -150,7 +259,8 @@ pub fn generate(l: usize, pure: bool, order: usize) -> (String, KernelStats) {
     if (g >= npts) return;
     const double x = gx[g] - sh_c[3 * s], y = gy[g] - sh_c[3 * s + 1], z = gz[g] - sh_c[3 * s + 2];
     const double rr = x * x + y * y + z * z;"
-    );
+        );
+    }
     flops += 8;
     let nk = order + 1;
     let rk: Vec<String> = (0..nk).map(|k| format!("r{k}")).collect();
@@ -195,10 +305,12 @@ pub fn generate(l: usize, pure: bool, order: usize) -> (String, KernelStats) {
             _ => Some(format!("{v}{m}")),
         }
     };
-    let _ = writeln!(
-        s,
-        "    double *o = out + (long long)sh_ao[blockIdx.y] * sf + g;"
-    );
+    if mode == Mode::Block {
+        let _ = writeln!(
+            s,
+            "    double *o = out + (long long)sh_ao[blockIdx.y] * sf + g;"
+        );
+    }
     for d in 0..r.ncomp {
         for f in 0..r.nf {
             let terms = &r.terms[d * r.nf + f];
@@ -229,8 +341,38 @@ pub fn generate(l: usize, pure: bool, order: usize) -> (String, KernelStats) {
             } else {
                 parts.join(" + ")
             };
-            let _ = writeln!(s, "    o[{d} * sc + {f} * sf] = {rhs};");
+            match mode {
+                Mode::Batched => {
+                    let nc = r.ncomp;
+                    let _ = writeln!(
+                        s,
+                        "    if (fm[{f}] >= 0) {{ const double v = {rhs}; const long long o = po + ((long long)fm[{f}] * {nc} + {d}) * np + g; if (phic) phic[o] = v; if (phic32) phic32[o] = (float)v; }}"
+                    );
+                }
+                Mode::Screen => {
+                    let _ = writeln!(s, "    if (fabs({rhs}) > thresh) h[{f}] = 1;");
+                }
+                Mode::Block => {
+                    let _ = writeln!(s, "    o[{d} * sc + {f} * sf] = {rhs};");
+                }
+            }
         }
+    }
+    if batched {
+        let _ = writeln!(s, "    }}");
+    }
+    if screen {
+        let nf = r.nf;
+        let _ = writeln!(
+            s,
+            "    }}
+    __syncthreads();
+    for (int i = threadIdx.x; i < nb * {nf}; i += blockDim.x) {{
+        if (!hit[i]) continue;
+        const int f = a + i % {nf};
+        atomicOr(flags + bd[9LL * (j0 + i / {nf}) + 4] + f / 32, 1u << (f % 32));
+    }}"
+        );
     }
     let _ = writeln!(s, "}}");
     let lines = s.lines().count();
@@ -249,7 +391,13 @@ pub fn module_source(basis: &BasisSet, order: usize) -> String {
 /// `order`.
 pub fn module_source_for(keys: &[(usize, bool)], order: usize) -> String {
     keys.iter()
-        .map(|&(l, p)| generate(l, p, order).0)
+        .flat_map(|&(l, p)| {
+            [
+                generate(l, p, order).0,
+                generate_batched(l, p, order).0,
+                generate_screen(l, p, order).0,
+            ]
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -343,7 +491,10 @@ mod device {
         /// The addresses must hold what is described; `kernel` must be the kernel of the
         /// shells' (l, pure) with the output's derivative order; every write must lie inside
         /// the output buffer.
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "a kernel's arrays, strides and sizes"
+        )]
         pub unsafe fn launch(
             &self,
             gpu: &Gpu,
@@ -434,7 +585,10 @@ mod device {
 
         /// Values and derivatives at points (x, y, z)[0..npts] into
         /// out[(d * nao + ao) * ld + point] (out needs ncomp * nao * ld elements).
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "a kernel's arrays, strides and sizes"
+        )]
         pub fn eval(
             &self,
             gpu: &Gpu,

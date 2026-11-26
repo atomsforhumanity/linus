@@ -9,13 +9,16 @@
 //! | [`LowestEnergy`] | the lowest energy visited (the saddle check's reference, the escalation's start) |
 //! | [`TwoCycle`] | a two-cycle, answered with quasi-Newton steps |
 //! | [`PlateauRule`] | an SCF accepted on a soft-mode plateau when the escalation comes due or at `max_iter`, or refused by the accuracy targets |
-//! | [`EscalationRule`] | the iteration budget (`max_iter`, hard) and the restart within it when DIIS stagnates or at 2/3 of it |
+//! | [`BlowUp`] | a DIIS blow-up: the energy and the orbital gradient far above their lowest, iteration after iteration |
+//! | [`EscalationRule`] | the iteration budget (`max_iter`, hard) and the restart within it when DIIS stagnates or blows up, or at 2/3 of it |
 //! | [`StabilityTrigger`] | which converged UHF/UKS points are analysed, and how |
 //!
 //! Each iteration the loop reports an [`Observation`]; [`Controls::observe`] answers with a
 //! [`Decision`]. The accelerators' own switches (when DIIS, ADIIS, damping, SOSCF and the level
 //! shift apply) live with them in `super::accel`.
 
+#[doc(hidden)]
+pub mod blowup;
 #[doc(hidden)]
 pub mod convergence;
 #[doc(hidden)]
@@ -29,6 +32,7 @@ pub mod trigger;
 #[doc(hidden)]
 pub mod two_cycle;
 
+pub use blowup::{BlowUp, BLOWUP_ENERGY, BLOWUP_GRADIENT};
 pub(crate) use convergence::ConvergenceTest;
 pub(crate) use escalation::EscalationRule;
 pub use escalation::{Trigger, MIN_ESCALATION};
@@ -95,6 +99,7 @@ pub enum AtBudget {
 pub struct Controls {
     pub convergence: ConvergenceTest,
     pub lowest: LowestEnergy,
+    pub blowup: BlowUp,
     pub two_cycle: TwoCycle,
     pub plateau: PlateauRule,
     pub escalation: EscalationRule,
@@ -112,6 +117,7 @@ impl Controls {
                 g_norm: opts.g_norm,
             },
             lowest: LowestEnergy::new(),
+            blowup: BlowUp::new(opts.algo.blowup_window),
             two_cycle: TwoCycle::new(opts.algo.two_cycle),
             plateau: PlateauRule::new(opts),
             escalation: EscalationRule::new(
@@ -124,13 +130,17 @@ impl Controls {
         }
     }
 
-    /// One iteration: the lowest energy (forgotten at a change of the J/K approximation), then the
-    /// decision. Also returns whether the iteration is the new lowest.
+    /// One iteration: the lowest energy and the blow-up detector (both forgotten at a change of
+    /// the J/K approximation), then the decision. Also returns whether the iteration is the new
+    /// lowest.
     pub fn observe(&mut self, o: &Observation) -> (Decision, bool) {
         if o.switched {
             self.lowest.reset();
+            self.blowup.reset();
         }
         let new_lowest = self.lowest.observe(o.iter, o.guess_iter, o.energy);
+        self.blowup
+            .observe(o.iter, o.guess_iter, o.energy - self.lowest.energy, o.gmax);
         // after a switch to the next approximation, dE compares two different operators
         let gconv = self.convergence.gconv(o.gmax, o.gnorm_pyscf);
         if !o.switched
@@ -172,11 +182,13 @@ impl Controls {
     }
 
     /// Whether the escalation is due after iteration `iters` (the step of iteration `iters`
-    /// taken), and why: the lowest energy has not improved for `stagnation_window` iterations, or
-    /// 2/3 of `max_iter` are spent ([`EscalationRule::due`]). Both loops ask it at the same point;
-    /// the host loop then lets the plateau rule decide first.
+    /// taken), and why: the lowest energy has not improved for `stagnation_window` iterations,
+    /// 2/3 of `max_iter` are spent, or DIIS blew up over the last `blowup_window` iterations
+    /// ([`EscalationRule::due`]). Both loops ask it at the same point; the host loop then lets the
+    /// plateau rule decide first.
     pub fn escalation_due(&self, iters: usize) -> Option<Trigger> {
-        self.escalation.due(iters, self.lowest.iter)
+        self.escalation
+            .due(iters, self.lowest.iter, self.blowup.blown_up())
     }
 
     /// The J/K builder moves to its next approximation (COSX: the next grid) once max |F_ai| is
@@ -264,5 +276,46 @@ mod tests {
             Controls::new(&o, false).keeps_lowest_orbitals(),
             "the saddle check's direction"
         );
+    }
+
+    /// Trp-cage PBE/def2-SVP: the lowest energy at iteration 23 (max |F_ai| 6.8e-3, its smallest),
+    /// then 11 Eh higher at 0.146: the escalation is due after the window's 4th such iteration
+    /// (`blowup`), 60 iterations before the stagnation window; a change of the J/K approximation
+    /// starts the count again, and with the window 0 only the stagnation comes due.
+    #[test]
+    fn a_blowup_brings_the_escalation_forward() {
+        let trace = |c: &mut Controls, switch_at: Option<usize>| {
+            c.observe(&obs(2, -7464.3, 0.0, 8.7e-2));
+            for k in 3..=23 {
+                let e = -7470.0 - 0.0167 * (k - 2) as f64;
+                c.observe(&obs(k, e, -1e-2, 6.8e-3 * (24 - k) as f64));
+            }
+            assert_eq!(c.lowest.iter, 23);
+            let mut due = None;
+            for k in 24..=40 {
+                let o = Observation {
+                    switched: switch_at == Some(k),
+                    ..obs(k, -7459.2, 1e-2, 0.146)
+                };
+                c.observe(&o);
+                if due.is_none() {
+                    due = c.escalation_due(k).map(|t| (t, k));
+                }
+            }
+            due
+        };
+        let o = ScfConfig::default();
+        let mut c = Controls::new(&o, true);
+        assert_eq!(trace(&mut c, None), Some((Trigger::BlowUp, 27)));
+        assert_eq!(Trigger::BlowUp.name(), "blowup");
+        // the switch at iteration 26 forgets the lowest energy and the smallest gradient
+        let mut c = Controls::new(&o, true);
+        assert_eq!(trace(&mut c, Some(26)), None);
+        // off: nothing until the stagnation window
+        let mut o = ScfConfig::default();
+        o.algo.blowup_window = 0;
+        let mut c = Controls::new(&o, true);
+        assert_eq!(trace(&mut c, None), None);
+        assert_eq!(c.escalation_due(23 + 64), Some(Trigger::Stagnation));
     }
 }

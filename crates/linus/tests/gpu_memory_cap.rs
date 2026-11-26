@@ -25,9 +25,14 @@ fn gib(bytes: f64) -> f64 {
 }
 
 const LA18: &str = include_str!("../../../bench/molecules/la18.xyz");
+const U1AN39: &str = include_str!("../../../bench/molecules/u1an39.xyz");
 
 fn calc(opts: Value, backend: &str) -> Option<Session> {
-    let mol = Structure::from_xyz_str(LA18, 0, 1).unwrap();
+    calc_of(Structure::from_xyz_str(LA18, 0, 1).unwrap(), opts, backend)
+}
+
+/// A session of `mol` with `opts` on `backend` (None: no usable GPU, a skip).
+fn calc_of(mol: Structure, opts: Value, backend: &str) -> Option<Session> {
     let mut o = opts;
     // the backend's kind (an object's other settings kept)
     match o.get_mut("backend") {
@@ -134,50 +139,59 @@ fn an_xc_gradient_call_without_room_for_x_recomputes_it() {
 }
 
 #[test]
-fn scf_builds_that_do_not_fit_are_placed_before_the_first_iteration() {
-    // la18 B3LYP/def2-SVP with the Ozaki exchange under a 1.5 GB cap: the J/K and XC engines
-    // set up, but an SCF build (the Ozaki workspace, 207 MB, and the 256 MB it leaves free) does
-    // not fit beside them. Both loops failed in their first iteration ("GPU backend, jk /
-    // scf_loop: device memory ... rerun with backend cpu"); now the device loop gives way to the
-    // host loop and the J/K to the CPU's before the first iteration, with their reasons
+fn scf_builds_are_planned_or_placed_before_the_first_iteration() {
+    // la18 B3LYP/def2-SVP with the Ozaki exchange under tight caps. Both loops once failed in
+    // their first iteration ("GPU backend, jk / scf_loop: device memory ... rerun with backend
+    // cpu"): the J/K engine took the free memory and its builds (the Ozaki workspace) did not fit
+    // beside it. The J/K's storage plan now counts its builds within the memory plan's budget
+    // (REVIEW JK-1: at 1.5 GB the J/K stays on the device), and what still does not fit (the
+    // device loop's state, a probe's two-spin builds) gives way before the first iteration with
+    // its reason: at every cap each family is on the device or on the CPU with a reason, never a
+    // failure, and the energy is the CPU's
     let _cap = CAP.lock().unwrap_or_else(|e| e.into_inner());
     std::env::remove_var("LINUS_GPU_MEMORY_GIB");
     let base = json!({"method": "b3lyp", "basis": "def2-svp", "jk": "df"});
     let ec = calc(base.clone(), "cpu").unwrap().energy().unwrap();
-    for scf_loop in ["host", "device"] {
-        let mut o = base.clone();
-        o["backend"] = json!({"scf_loop": scf_loop});
-        o["precision"] = json!({"fp64": "emulated"});
-        o["device_memory_gib"] = json!(gib(1.5e9));
-        let Some(mut g) = calc(o, "gpu") else {
-            return;
-        };
-        let eg = g.energy().unwrap();
-        let b = serde_json::to_value(g.backend_used()).unwrap();
-        assert_eq!(
-            (&b["jk"], &b["scf_loop"]),
-            (&json!("cpu"), &json!("host")),
-            "{b}"
-        );
-        // (B3LYP at the first geometry: the closed-shell probe may run, its builds count)
-        let why = fallback_reason(&b, "jk").unwrap_or_default();
-        assert!(
-            why.starts_with("device call: the SCF's largest J/K build needs")
-                && why.contains("(the closed-shell probe's two-spin builds counted)"),
-            "{scf_loop}: {b}"
-        );
-        if scf_loop == "device" {
-            let why = fallback_reason(&b, "scf_loop").unwrap_or_default();
-            assert!(why.starts_with("device call: the device loop's"), "{b}");
+    for cap in [1.0e9, 1.25e9, 1.5e9] {
+        for scf_loop in ["host", "device"] {
+            let mut o = base.clone();
+            o["backend"] = json!({"scf_loop": scf_loop});
+            o["precision"] = json!({"fp64": "emulated"});
+            o["device_memory_gib"] = json!(gib(cap));
+            let Some(mut g) = calc(o, "gpu") else {
+                return;
+            };
+            let eg = g.energy().unwrap();
+            let b = serde_json::to_value(g.backend_used()).unwrap();
+            let tag = format!("{cap:e} B, {scf_loop} loop");
+            assert!(b.get("plan_violations").is_none(), "{tag}: {b}");
+            if b["jk"] == "cpu" {
+                let why = fallback_reason(&b, "jk").unwrap_or_default();
+                assert!(
+                    why.starts_with("device setup") || why.starts_with("device call"),
+                    "{tag}: {b}"
+                );
+            }
+            if scf_loop == "device" && b["scf_loop"] == "host" {
+                let why = fallback_reason(&b, "scf_loop").unwrap_or_default();
+                assert!(!why.is_empty(), "{tag}: {b}");
+            }
+            if cap == 1.5e9 {
+                assert_eq!(b["jk"], "gpu", "{tag}: {b}");
+            }
+            eprintln!(
+                "{tag}: jk {} scf_loop {} ({} iterations)",
+                b["jk"], b["scf_loop"], eg.iterations
+            );
+            assert!(
+                (eg.energy - ec.energy).abs() < 1e-9 && eg.iterations == ec.iterations,
+                "{tag}: gpu {} ({} iterations), cpu {} ({})",
+                eg.energy,
+                eg.iterations,
+                ec.energy,
+                ec.iterations
+            );
         }
-        assert!(
-            (eg.energy - ec.energy).abs() < 1e-9 && eg.iterations == ec.iterations,
-            "{scf_loop}: gpu {} ({} iterations), cpu {} ({})",
-            eg.energy,
-            eg.iterations,
-            ec.energy,
-            ec.iterations
-        );
     }
 }
 
@@ -243,4 +257,73 @@ fn a_hessian_under_an_8_gb_cap_keeps_its_response_on_the_device() {
         dh < 1e-9,
         "capped against uncapped Hessian: max |dH| {dh:e}"
     );
+}
+
+#[test]
+fn the_density_fitting_plan_takes_the_memory_plans_budget() {
+    // la18 B3LYP/def2-SVP under a 2 GiB cap: the SCF's DF-J/K plans its storage and K block
+    // within the memory plan's share (the limit less the reserve for the other engines), not the
+    // memory free when its setup runs (the XC grid's partition sets up beside it), so two sessions
+    // at the cap record the same plan and give the same energy, bit for bit
+    let _cap = CAP.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::remove_var("LINUS_GPU_MEMORY_GIB");
+    let opts = json!({"method": "b3lyp", "basis": "def2-svp", "jk": "df", "grid": "pyscf:2",
+        "device_memory_gib": 2.0});
+    let mut runs = Vec::new();
+    for _ in 0..2 {
+        let Some(mut g) = calc(opts.clone(), "gpu") else {
+            return;
+        };
+        let rep = g.run(linus::CalcType::Energy).unwrap();
+        let r = serde_json::to_value(&rep.resolved).unwrap();
+        let e = rep.energy;
+        runs.push((e.to_bits(), r["record"]["df"].clone(), r));
+    }
+    let (b0, df0, r0) = &runs[0];
+    let (b1, df1, _) = &runs[1];
+    assert_eq!((b0, df0), (b1, df1), "{r0}");
+    // the budget: the limit less the memory plan's reserve for the other engines
+    // (max(8 GiB, limit / 10), at most limit / 4)
+    let limit = r0["record"]["backend"]["device"]["memory_limit_gib"]
+        .as_f64()
+        .unwrap();
+    let reserve = 8f64.max(limit / 10.0).min(limit / 4.0);
+    let budget = df0["budget_gib"].as_f64().unwrap();
+    assert!(
+        (budget - (limit - reserve)).abs() < 1e-9,
+        "{df0}, limit {limit}"
+    );
+    assert!(df0["k_block"].as_u64().unwrap() > 0, "{df0}");
+}
+
+#[test]
+fn the_k_block_steps_down_for_the_other_engines_per_call_memory() {
+    // u1an39 (the neutral doublet) wB97M-V/def2-SVP UKS with C-PCM in FP64 under an 8 GB cap:
+    // the J/K's plan sized its panel block within the limit less the other engines' reserve,
+    // and VV10's and the PCM's per-call memory beside that reserve ran the second SCF build out
+    // of device memory (REVIEW JK-1, found by the H200 validate). The SCF's check before its first
+    // build now steps the block down to what the engines left, says so in the record, and two
+    // sessions take the same block and give the same energy, bit for bit
+    let _cap = CAP.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::remove_var("LINUS_GPU_MEMORY_GIB");
+    let opts = json!({"method": "wb97m-v", "basis": "def2-svp", "jk": "df",
+        "solvent": {"name": "thf", "model": "cpcm"}, "precision": {"fp64": "native"},
+        "backend": {"scf_loop": "host"}, "device_memory_gib": gib(8e9)});
+    let mut runs = Vec::new();
+    for _ in 0..2 {
+        let mol = Structure::from_xyz_str(U1AN39, 0, 2).unwrap();
+        let Some(mut g) = calc_of(mol, opts.clone(), "gpu") else {
+            return;
+        };
+        let rep = g.run(linus::CalcType::Energy).unwrap();
+        let r = serde_json::to_value(&rep.resolved).unwrap();
+        let b = &r["record"]["backend"];
+        assert_eq!(b["jk"], "gpu", "{r}");
+        assert!(b.get("plan_violations").is_none(), "{r}");
+        let df = r["record"]["df"].clone();
+        let rung = df["rung"].as_str().unwrap_or_default().to_string();
+        assert!(rung.contains("stepped down"), "{df}");
+        runs.push((rep.energy.to_bits(), df["k_block"].clone(), rung));
+    }
+    assert_eq!(runs[0], runs[1]);
 }

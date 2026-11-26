@@ -143,6 +143,20 @@ impl PcmIntsHost {
         pair_thresh: f64,
         derivatives: bool,
     ) -> Result<PcmIntsHost, GpuError> {
+        Self::with_pairs(basis, None, points, pair_thresh, derivatives)
+    }
+
+    /// [`PcmIntsHost::new`] screening the shell pairs of `pairs` (the index-ordered pairs of
+    /// `basis` that a caller already built, of any derivative order: their Schwarz factors are
+    /// the same, [`PairSet::is_default_set_of`]) instead of building them; None, or a set of
+    /// another kind, size or primitive cut: built here.
+    pub fn with_pairs(
+        basis: &BasisSet,
+        pairs: Option<&PairSet>,
+        points: &[PcmPoint],
+        pair_thresh: f64,
+        derivatives: bool,
+    ) -> Result<PcmIntsHost, GpuError> {
         for s in &basis.shells {
             if s.l >= 2 && !s.pure {
                 return Err(GpuError::NotCovered(format!(
@@ -158,7 +172,14 @@ impl PcmIntsHost {
             }
         }
         let gmax = points.iter().map(|p| p.sqrt_self()).fold(0.0, f64::max);
-        let pl = PairSet::build(basis, PairOptions::default());
+        let built;
+        let pl = match pairs.filter(|p| p.is_default_set_of(basis)) {
+            Some(p) => p,
+            None => {
+                built = PairSet::build(basis, PairOptions::default());
+                &built
+            }
+        };
         let q = pl.schwarz();
         let kept: Vec<usize> = (0..pl.len())
             .filter(|&k| pl.pair(k).nprim > 0 && q[k] * gmax * 2.0 >= pair_thresh)
@@ -462,10 +483,6 @@ mod device {
         pub npairs_kept: usize,
     }
 
-    fn sz<T>(b: &DeviceBuf<T>) -> usize {
-        b.len() * std::mem::size_of::<T>()
-    }
-
     /// Thread blocks per SM a launch aims at (the point chunks of a degree with few
     /// primitives).
     const BLOCKS_PER_SM: usize = 8;
@@ -486,7 +503,7 @@ mod device {
             let mut bytes = PcmIntsBytes::default();
             let btab = gpu.upload(&boys_table())?;
             let pts = gpu.upload(&host.points)?;
-            bytes.data += sz(&btab) + sz(&pts);
+            bytes.data += btab.bytes() + pts.bytes();
             let src = MODULE.source();
             let k = |e: &str| gpu.kernel(MODULE.name, &src, e);
             let support = Support {
@@ -529,17 +546,17 @@ mod device {
                     continue;
                 }
                 let p = gpu.upload(&host.prims[l])?;
-                bytes.data += sz(&p);
+                bytes.data += p.bytes();
                 prims.push(Some(p));
                 let nh = nherm(l);
                 let hb = gpu.alloc_zeros::<f64>(n * nh)?;
                 let ab = gpu.alloc_zeros::<f64>(nch * n * nh)?;
-                bytes.work += sz(&hb) + sz(&ab);
+                bytes.work += hb.bytes() + ab.bytes();
                 h.push(Some(hb));
                 acc.push(Some(ab));
                 if nch > 1 {
                     let s = gpu.alloc_zeros::<f64>(n * nh)?;
-                    bytes.work += sz(&s);
+                    bytes.work += s.bytes();
                     acc_sum.push(Some(s));
                 } else {
                     acc_sum.push(None);
@@ -552,11 +569,11 @@ mod device {
                 if host.derivatives {
                     let nh1 = nherm(l + 1);
                     let a1 = gpu.alloc_zeros::<f64>(nch * n * nh1)?;
-                    bytes.work += sz(&a1);
+                    bytes.work += a1.bytes();
                     acc1.push(Some(a1));
                     if nch > 1 {
                         let s = gpu.alloc_zeros::<f64>(n * nh1)?;
-                        bytes.work += sz(&s);
+                        bytes.work += s.bytes();
                         acc1_sum.push(Some(s));
                     } else {
                         acc1_sum.push(None);
@@ -600,21 +617,21 @@ mod device {
                         gr: host.derivatives.then(|| up(&c.gr)).transpose()?,
                         gm: host.derivatives.then(|| up(&c.gm)).transpose()?,
                     };
-                    bytes.data += sz(&dc.pairs)
-                        + sz(&dc.p0)
-                        + sz(&dc.prim_pair)
-                        + sz(&dc.e)
-                        + dc.d.as_ref().map_or(0, sz);
+                    bytes.data += dc.pairs.bytes()
+                        + dc.p0.bytes()
+                        + dc.prim_pair.bytes()
+                        + dc.e.bytes()
+                        + dc.d.as_ref().map_or(0, DeviceBuf::bytes);
                     Some(dc)
                 };
                 classes.push((c.l1, c.l2, c.deg_off, dc));
             }
             let nblocks = host.nblocks();
             let vpart = gpu.alloc_zeros::<f64>((nblocks * host.npts).max(1))?;
-            bytes.work += sz(&vpart);
+            bytes.work += vpart.bytes();
             let cpart = if host.derivatives {
                 let b = gpu.alloc_zeros::<f64>((3 * nblocks * host.npts).max(1))?;
-                bytes.work += sz(&b);
+                bytes.work += b.bytes();
                 Some(b)
             } else {
                 None
@@ -1085,5 +1102,63 @@ mod tests {
         let h0 = PcmIntsHost::new(&basis, &pts, 1e-17, false).unwrap();
         assert!(h0.classes.iter().all(|c| c.d.is_empty() && c.gr.is_empty()));
         assert_eq!(h0.npairs_kept, h.npairs_kept);
+    }
+
+    /// A caller's pair set (of derivative order one, as a gradient's) gives the packing of the
+    /// pairs built here, bit for bit; a set at another primitive cut is not used.
+    #[test]
+    fn a_callers_pairs_give_the_same_packing() {
+        use crate::cpu::{DerivOrder, PairOptions};
+        let def = BasisDef::load("def2-tzvp", None).unwrap();
+        let z = [8, 1, 1];
+        let pos = [[0.0, 0.1, 0.2], [0.0, 1.4, -0.9], [0.1, -1.4, -0.9]];
+        let basis = BasisSet::new(&def, &z, &pos, true).unwrap();
+        let pts: Vec<PcmPoint> = (0..20)
+            .map(|i| PcmPoint {
+                r: [
+                    3.0 * (i as f64).cos(),
+                    3.0 * (i as f64).sin(),
+                    0.1 * i as f64,
+                ],
+                zeta: 4.0,
+            })
+            .collect();
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        let same = |a: &PcmIntsHost, b: &PcmIntsHost| {
+            assert_eq!((a.npairs, a.npairs_kept), (b.npairs, b.npairs_kept));
+            assert_eq!(bits(&a.points), bits(&b.points));
+            for (x, y) in a.prims.iter().zip(&b.prims) {
+                assert_eq!(bits(x), bits(y));
+            }
+            assert_eq!(a.classes.len(), b.classes.len());
+            for (x, y) in a.classes.iter().zip(&b.classes) {
+                assert_eq!((x.l1, x.l2, x.deg_off), (y.l1, y.l2, y.deg_off));
+                assert_eq!(
+                    (&x.pairs, &x.p0, &x.prim_pair),
+                    (&y.pairs, &y.p0, &y.prim_pair)
+                );
+                assert_eq!(bits(&x.e), bits(&y.e));
+                assert_eq!(bits(&x.d), bits(&y.d));
+            }
+        };
+        let own = PcmIntsHost::new(&basis, &pts, 1e-17, true).unwrap();
+        let one = PairSet::build(&basis, PairOptions::with_order(DerivOrder::One));
+        assert!(one.is_default_set_of(&basis));
+        same(
+            &own,
+            &PcmIntsHost::with_pairs(&basis, Some(&one), &pts, 1e-17, true).unwrap(),
+        );
+        let cut = PairSet::build(
+            &basis,
+            PairOptions {
+                prim_cut: 1e-6,
+                ..PairOptions::default()
+            },
+        );
+        assert!(!cut.is_default_set_of(&basis));
+        same(
+            &own,
+            &PcmIntsHost::with_pairs(&basis, Some(&cut), &pts, 1e-17, true).unwrap(),
+        );
     }
 }

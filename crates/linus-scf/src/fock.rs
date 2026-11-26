@@ -136,6 +136,9 @@ pub(crate) struct FockEval {
     kb: Mat<f64>,
     va: Mat<f64>,
     vb: Mat<f64>,
+    /// The exchange energy when the builder reports it (`JkOutput::k_energy`), fractions and
+    /// sign included; None: -1/2 (D_a . K_a + D_b . K_b).
+    ex_energy: Option<f64>,
 }
 
 /// The SCF's Fock evaluations (see the module docs).
@@ -218,6 +221,18 @@ impl<'t, 'm> FockEvaluator<'t, 'm> {
         self.more_approx && self.want_k()
     }
 
+    /// The exchange energy -a_x sum_s E_K,s of a builder's reported energies `e` (one per
+    /// channel; `restricted`: one channel's for both); None without them or without exact
+    /// exchange.
+    fn exchange_energy(&self, e: Option<&Vec<f64>>, restricted: bool) -> Option<f64> {
+        let e = e.filter(|_| self.want_k())?;
+        Some(if restricted {
+            -self.a_x * 2.0 * e[0]
+        } else {
+            -self.a_x * (e[0] + e[1])
+        })
+    }
+
     /// a_x K_s per spin of the exchange matrices `k` (`restricted`: one channel's for both; zero
     /// without exact exchange).
     fn exchange(&self, k: &[Mat<f64>], restricted: bool) -> (Mat<f64>, Mat<f64>) {
@@ -254,8 +269,10 @@ impl<'t, 'm> FockEvaluator<'t, 'm> {
         let (h, da, db) = (self.h, &st.da, &st.db);
         ev.fa = h.to_owned() + &ev.j - &ev.ka + &ev.va;
         ev.fb = h.to_owned() + &ev.j - &ev.kb + &ev.vb;
-        ev.parts.exchange =
-            -0.5 * (dot(da.as_ref(), ev.ka.as_ref()) + dot(db.as_ref(), ev.kb.as_ref()));
+        ev.parts.exchange = match ev.ex_energy {
+            Some(e) => e,
+            None => -0.5 * (dot(da.as_ref(), ev.ka.as_ref()) + dot(db.as_ref(), ev.kb.as_ref())),
+        };
         ev.ea = self.gradient(&ev.fa, da);
         ev.eb = if self.restricted {
             Mat::zeros(1, 1)
@@ -336,6 +353,7 @@ impl<'t, 'm> FockEvaluator<'t, 'm> {
         let t_jk = t_jk0.elapsed().as_secs_f64();
         timers.add("jk", t_jk);
         let (ka, kb) = self.exchange(&out.k, self.restricted);
+        let ex_energy = self.exchange_energy(out.k_energy.as_ref(), self.restricted);
         let j = if self.restricted {
             &out.j[0] * 2.0
         } else {
@@ -384,6 +402,7 @@ impl<'t, 'm> FockEvaluator<'t, 'm> {
             kb,
             va,
             vb,
+            ex_energy,
         };
         self.complete(st, &mut ev);
         timers.add("diis", ev.assembled_at.elapsed().as_secs_f64());
@@ -416,11 +435,13 @@ impl<'t, 'm> FockEvaluator<'t, 'm> {
             want_j: false,
             ..self.request(dens, st)
         };
-        let k = self.terms.jk.compute(&req, self.par)?.k;
+        let out = self.terms.jk.compute(&req, self.par)?;
+        let k = out.k;
         let dt_k = t_k.elapsed().as_secs_f64();
         ev.t_jk += dt_k;
         timers.add("jk", dt_k);
         let (ka, kb) = self.exchange(&k, self.restricted);
+        ev.ex_energy = self.exchange_energy(out.k_energy.as_ref(), self.restricted);
         if let Some(out) = self.last_out.as_mut() {
             out.k = k;
         }
@@ -464,6 +485,7 @@ impl<'t, 'm> FockEvaluator<'t, 'm> {
         let out = self.terms.jk.compute(&req, par)?;
         let j = &out.j[0] + &out.j[1];
         let (ka, kb) = self.exchange(&out.k, false);
+        let ex_energy = self.exchange_energy(out.k_energy.as_ref(), false);
         let occ_n: Vec<Vec<f64>> = nocc.iter().map(|&n| vec![1.0; n]).collect();
         let xd = XcDensity {
             da: &d[0],
@@ -473,8 +495,13 @@ impl<'t, 'm> FockEvaluator<'t, 'm> {
         };
         let (exc, e_env, va, vb, _) = self.terms.xc_and_environment(&xd, par, None)?;
         let dt = &d[0] + &d[1];
-        let e = dot(dt.as_ref(), h) + 0.5 * dot(dt.as_ref(), j.as_ref())
-            - 0.5 * (dot(d[0].as_ref(), ka.as_ref()) + dot(d[1].as_ref(), kb.as_ref()))
+        let ex = match ex_energy {
+            Some(e) => e,
+            None => -0.5 * (dot(d[0].as_ref(), ka.as_ref()) + dot(d[1].as_ref(), kb.as_ref())),
+        };
+        let e = dot(dt.as_ref(), h)
+            + 0.5 * dot(dt.as_ref(), j.as_ref())
+            + ex
             + (exc + e_env)
             + self.e_nuc;
         Ok((
@@ -519,8 +546,10 @@ fn xc_density<'s>(st: &'s OrbitalState, restricted: bool, occ_n: &'s [Vec<f64>])
     }
 }
 
-/// The incremental build's J/K: the last build's plus that of D_n - D_n-1.
+/// The incremental build's J/K: the last build's plus that of D_n - D_n-1 (builders that report
+/// their own exchange energies are affine in D, not incremental: none here).
 fn add_out(prev: &JkOutput, delta: JkOutput) -> JkOutput {
+    debug_assert!(prev.k_energy.is_none() && delta.k_energy.is_none());
     let add = |a: &Vec<Mat<f64>>, b: Vec<Mat<f64>>| -> Vec<Mat<f64>> {
         if b.is_empty() {
             return a.clone();
@@ -530,6 +559,7 @@ fn add_out(prev: &JkOutput, delta: JkOutput) -> JkOutput {
     JkOutput {
         j: add(&prev.j, delta.j),
         k: add(&prev.k, delta.k),
+        k_energy: None,
     }
 }
 
@@ -568,6 +598,7 @@ mod tests {
             Ok(JkOutput {
                 j: req.dens.to_vec(),
                 k: req.dens.to_vec(),
+                k_energy: None,
             })
         }
 

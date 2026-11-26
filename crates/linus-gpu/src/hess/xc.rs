@@ -423,7 +423,7 @@ mod device {
         nx: usize,
         nc1: usize,
         lay: XcLayout,
-        colloc1: Vec<Kernel>,
+        colloc1: crate::xc::layout::OrderKernels,
         kern: Kernels,
         /// The FP64 products' kind ([`GpuXcHessOptions::products`]).
         fp64: ProdKind,
@@ -671,13 +671,9 @@ mod device {
                 });
                 b = e;
             }
-            let (bd, lf, gf) = layout::descriptors(&lay.host, &chunks, nc);
-            lay.bd = gpu.upload(if bd.is_empty() { &[0] } else { &bd })?;
-            lay.lf = gpu.upload(if lf.is_empty() { &[0] } else { &lf })?;
-            lay.gf = gpu.upload(if gf.is_empty() { &[0] } else { &gf })?;
-            lay.max_x = chunks.iter().map(|c| c.x_len).max().unwrap_or(0);
-            lay.max_d = chunks.iter().map(|c| c.d_len).max().unwrap_or(0);
-            lay.chunks = chunks;
+            // the layout's descriptors (and its direct collocation's work list) for these chunks;
+            // the batch fields below read them
+            let bd = lay.set_chunks(gpu, chunks)?;
             // the descriptors and int tables
             let nb = lay.host.len();
             let mut hb = vec![0i64; HB * nb.max(1)];
@@ -863,8 +859,7 @@ mod device {
             let lay = &self.lay;
             // per point v (nu) and wF (nu^2); the GGA's sizes at least
             let ns = vars_per_spin(self.functional.kind()).max(4);
-            let doubles = lay.max_block_nf * self.nc * lay.max_block_np
-                + (self.nc + nsp * self.nx) * lay.max_x
+            let doubles = (self.nc + nsp * self.nx) * lay.max_x
                 + nsp * lay.max_d
                 + self.max_sizes.total()
                 + self.npts * (nsp * (ns + 1) + nsp * nsp * ns * ns + 8)
@@ -979,7 +974,10 @@ mod device {
 
         /// Pass 1: rho, grad rho and (meta-GGAs) tau of every point per spin (XCP's density
         /// kernels).
-        #[allow(clippy::type_complexity)]
+        #[allow(
+            clippy::type_complexity,
+            reason = "the three density arrays of one pass"
+        )]
         fn densities(
             &self,
             gpu: &Gpu,
@@ -989,10 +987,6 @@ mod device {
             let (gga, mgga) = (self.functional.kind().gga, self.functional.kind().mgga);
             let lay = &self.lay;
             let nc1 = self.nc1;
-            let mut phi = gpu.alloc_zeros_granted::<f64>(
-                self.workspace.as_ref(),
-                (lay.max_block_nf * nc1 * lay.max_block_np).max(1),
-            )?;
             // compressed at the layout's offsets (nc values per kept value), nc1 used
             let mut phic = gpu.alloc_zeros_granted::<f64>(
                 self.workspace.as_ref(),
@@ -1059,7 +1053,7 @@ mod device {
                 .collect::<Result<Vec<_>, _>>()?;
             let pass = DensityPass {
                 lay,
-                colloc: Collocation::With(&self.colloc1, nc1),
+                colloc: Collocation::With(&self.colloc1),
                 xyz: [&self.xg, &self.yg, &self.zg],
                 d: Some(dm),
                 nbf: n,
@@ -1069,7 +1063,6 @@ mod device {
                 gemm: &self.gemm,
             };
             let mut work = DensityWork {
-                phi: &mut phi,
                 phic: &mut phic,
                 phic32: None,
                 ops: DensityOps::Fp64 {
@@ -1178,7 +1171,10 @@ mod device {
 
         /// One main pass: perturbations of the atoms in `group` into the potential
         /// accumulators; with `with_e` also E and E1.
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "the pass's atom group and its accumulators"
+        )]
         fn main_pass(
             &self,
             gpu: &Gpu,
@@ -1206,7 +1202,6 @@ mod device {
             let lay = &self.lay;
             let ms = self.max_sizes;
             let al = |k: usize| gpu.alloc_zeros_granted::<f64>(self.workspace.as_ref(), k.max(1));
-            let mut phi = al(lay.max_block_nf * nc * lay.max_block_np)?;
             let mut phic = al(nc * lay.max_x)?;
             let mut phic32 = gpu.alloc_zeros_granted::<f32>(
                 self.workspace.as_ref(),
@@ -1246,16 +1241,9 @@ mod device {
                     .max()
                     .unwrap_or(0);
                 let cs = self.chunk_sizes[ci];
-                // collocation and compression
-                for bi in c.b0..c.b1 {
-                    let b = &lay.blocks[bi];
-                    if b.nf == 0 {
-                        continue;
-                    }
-                    lay.collocate(gpu, b, xyz, &mut phi)?;
-                    let p32 = if self.single { Some(&mut phic32) } else { None };
-                    lay.compress(gpu, b, &phi, Some(&mut phic), p32)?;
-                }
+                // the batches' kept values, collocated straight into the compressed arrays
+                let p32 = if self.single { Some(&mut phic32) } else { None };
+                lay.prepare(gpu, &c, Collocation::Own, xyz, Some(&mut phic), p32)?;
                 // X_s = phi[0..nx] D_s
                 let (maxd, _) = lay.chunk_max(&c);
                 for sp in 0..nsp {
@@ -1742,7 +1730,10 @@ mod device {
 
         /// V C for the group's accumulated potentials: unpacked in batches of matrices,
         /// multiplied by each channel's occupied orbitals, copied into the result.
-        #[allow(clippy::too_many_arguments)]
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "the call's orbitals and accumulators"
+        )]
         fn v_times_c(
             &self,
             gpu: &Gpu,

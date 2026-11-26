@@ -36,8 +36,9 @@
 //! Every response is `[s][k]` (channel s, component k), the layout of
 //! [`super::problem::ResponseProblem::solve`].
 
-use super::second_order::{refs, stacked_gram};
+use super::second_order::{refs, stacked_gram_on, Gram};
 use faer::{Mat, Par};
+use linus_base::error::LinusError;
 
 /// The stationary correction f sum_s U_s^a . r_s^b of a second-order property (see the module
 /// docs): `u[s][a]` the responses of one set of perturbations, `residuals[s][b]` the final
@@ -49,8 +50,23 @@ pub struct Correction<'a> {
 
 impl Correction<'_> {
     /// Adds f U_s^a . r_s^b of channel `s` to `out[(a, b)]` for all pairs, as one GEMM of the
-    /// stacked matrices.
-    pub fn add_gram(&self, out: &mut Mat<f64>, s: usize, f: f64, par: Par) {
-        stacked_gram(out, f, &refs(&self.u[s]), &refs(&self.residuals[s]), par);
+    /// stacked matrices, by `gram` where it takes it (a device's; None: the host's,
+    /// [`super::second_order::stacked_gram_on`]).
+    pub fn add_gram(
+        &self,
+        gram: Option<&dyn Gram>,
+        out: &mut Mat<f64>,
+        s: usize,
+        f: f64,
+        par: Par,
+    ) -> Result<(), LinusError> {
+        stacked_gram_on(
+            gram,
+            out,
+            f,
+            &refs(&self.u[s]),
+            &refs(&self.residuals[s]),
+            par,
+        )
     }
 }

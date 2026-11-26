@@ -1,8 +1,7 @@
-//! Second-order SCF steps: quasi-Newton (L-BFGS) orbital rotations (`Soscf`), the exact
-//! rotation C exp(K) of orbitals (`rotate`), and full orbitals from occupied ones
-//! (`semicanonical_orbitals`).
+//! Second-order SCF steps: quasi-Newton (L-BFGS) orbital rotations (`Soscf`) and the exact
+//! rotation C exp(K) of orbitals (`rotate`).
 
-use faer::{Mat, MatRef, Par};
+use faer::{Mat, Par};
 use linus_base::linalg::{eigh, mm};
 
 /// Quasi-Newton orbital optimizer (approximate second-order SCF): orbital rotations
@@ -118,37 +117,6 @@ impl Soscf {
         self.last = Some((step, g));
         out
     }
-}
-
-/// Full orbitals (nbf x nmo) from the occupied orbitals `o` (nbf x nocc, S-orthonormal): the
-/// first nocc span `o`, the rest its complement in the orthonormal basis `x` (nbf x nmo), each
-/// block semicanonical (diagonal in the Fock matrix `f`, ascending), so the density of `o` is
-/// kept. The start of the max_iter escalation, which keeps only the lowest-energy iteration's
-/// occupied orbitals.
-pub(crate) fn semicanonical_orbitals(
-    o: &Mat<f64>,
-    f: &Mat<f64>,
-    x: MatRef<'_, f64>,
-    s: MatRef<'_, f64>,
-    par: Par,
-) -> Mat<f64> {
-    let (nmo, no) = (x.ncols(), o.ncols());
-    // O = X P with P = X^T S O (orthonormal columns); the complement: the eigenvectors of
-    // I - P P^T with eigenvalue 1 (the last nmo - nocc, ascending)
-    let p = mm(x.transpose(), mm(s, o.as_ref(), par).as_ref(), par);
-    let q = Mat::<f64>::identity(nmo, nmo) - mm(p.as_ref(), p.transpose(), par);
-    let (_, u) = eigh(q.as_ref(), par);
-    let fx = mm(x.transpose(), mm(f.as_ref(), x, par).as_ref(), par);
-    let semi = |b: MatRef<'_, f64>| -> Mat<f64> {
-        let fb = mm(b.transpose(), mm(fx.as_ref(), b, par).as_ref(), par);
-        let (_, w) = eigh(fb.as_ref(), par);
-        mm(b, w.as_ref(), par)
-    };
-    let mut c = Mat::<f64>::zeros(nmo, nmo);
-    c.subcols_mut(0, no).copy_from(semi(p.as_ref()).as_ref());
-    c.subcols_mut(no, nmo - no)
-        .copy_from(semi(u.subcols(no, nmo - no)).as_ref());
-    mm(x, c.as_ref(), par)
 }
 
 /// C exp(K) for the antisymmetric K with virtual-occupied block kappa (nv x no):

@@ -9,7 +9,7 @@
 //! ```
 
 mod common;
-use common::device_ms;
+use common::{device_ms, median};
 use linus_gpu::blas::{Blas, Fp64Mode, GemmDims, MatMut, MatRef, Op};
 use linus_gpu::emu::{Order, Ozaki, OzakiWork, Sliced, Vectors};
 use linus_gpu::{Gpu, GpuError};
@@ -89,11 +89,6 @@ fn int8_rate(gpu: &Gpu, shapes: &[(usize, usize, usize)]) -> Result<(), GpuError
         );
     }
     Ok(())
-}
-
-fn median(mut v: Vec<f64>) -> f64 {
-    v.sort_by(|x, y| x.partial_cmp(y).unwrap());
-    v[v.len() / 2]
 }
 
 /// GEMM1 (X = A^T C: (nq nbf) x nocc, inner nbf) and GEMM2 (K = X X^T: nbf x nbf, inner

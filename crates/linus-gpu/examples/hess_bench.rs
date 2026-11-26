@@ -7,44 +7,13 @@
 //!   hess_bench [--molecule u1an39] [--basis def2-svp] [--aux def2-universal-jkfit]
 //!              [--a-x 0.2] [--omega 0.3] [--open] [--reps 2] [--emulated] [--dump FILE]
 
+mod common;
+use common::{arg, orbitals};
 use linus_gpu::cpu::Operator;
 use linus_gpu::harness;
 use linus_gpu::hess::df::{GpuDfHess, GpuDfHessOptions};
 use linus_gpu::{Gpu, GpuError};
 use std::time::Instant;
-
-fn arg(args: &[String], name: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1).cloned())
-}
-
-/// n x o column-major orbitals: a deterministic pseudo-random matrix, columns made orthonormal
-/// (Gram-Schmidt) so the magnitudes are those of a molecule's orbitals.
-fn orbitals(n: usize, o: usize, seed: u64) -> Vec<f64> {
-    let mut s = seed;
-    let mut c: Vec<f64> = (0..n * o)
-        .map(|_| {
-            s = s
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            ((s >> 11) as f64 / (1u64 << 53) as f64) - 0.5
-        })
-        .collect();
-    for j in 0..o {
-        for k in 0..j {
-            let d: f64 = (0..n).map(|i| c[i + j * n] * c[i + k * n]).sum();
-            for i in 0..n {
-                c[i + j * n] -= d * c[i + k * n];
-            }
-        }
-        let nrm = (0..n).map(|i| c[i + j * n].powi(2)).sum::<f64>().sqrt();
-        for i in 0..n {
-            c[i + j * n] /= nrm;
-        }
-    }
-    c
-}
 
 fn main() -> Result<(), GpuError> {
     let args: Vec<String> = std::env::args().collect();

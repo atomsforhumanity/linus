@@ -526,4 +526,9 @@ pub trait XcKernel: Send + Sync + fmt::Debug {
     fn eval(&self, order: usize, input: &XcInput<'_>, out: &mut XcOutRefs<'_>) -> Result<()>;
     /// An independent copy (same parameters and thresholds).
     fn try_clone(&self) -> Result<Box<dyn XcKernel>>;
+    /// The kernel as `Any`, for callers that need its concrete type (the device plans of
+    /// `crate::device`); None for kernels that do not offer it.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }

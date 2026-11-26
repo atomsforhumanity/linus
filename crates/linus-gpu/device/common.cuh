@@ -14,4 +14,14 @@ __device__ __forceinline__ void linus_packed_ij(long long k, long long &i, long 
     j = k - i * (i + 1) / 2;
 }
 
+// Becke's switching function s(nu) = p(p(p(nu))) / 2, p(x) = (3 - x^2) x / 2: the cell factors of
+// an atom pair are 0.5 - s and 0.5 + s (linus-grid's becke_s, operation for operation)
+__device__ __forceinline__ double linus_becke_s(double nu)
+{
+    double t = nu;
+    t = (3.0 - t * t) * t * 0.5;
+    t = (3.0 - t * t) * t * 0.5;
+    return ((3.0 - t * t) * t * 0.5) * 0.5;
+}
+
 #endif

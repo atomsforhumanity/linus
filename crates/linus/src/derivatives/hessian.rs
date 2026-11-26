@@ -69,29 +69,32 @@
 //! Hessians), the finite-difference tests below and in hess_df / hess_resp
 //! (bench/results/2026-11-07-rsh-hess).
 
+use crate::backend::SolverShape;
 use crate::derivatives::terms::{
     ExplicitHessian, HessianTerm, SolventTerm, TermInputs, TwoElectronTerm, XcTerm,
 };
+use crate::driver::backend::{Family, Placement};
 use crate::driver::ground::GroundState;
 use crate::driver::{CalcContext, GridChoice, Purpose, ResponsePrecision, Session};
 use crate::properties::dipole::{DipoleTerms, HessianResponse};
 use crate::properties::polarizability::Polarizability;
 use crate::two_electron::{ResponseSetup, ResponseUse};
 use faer::{Mat, Par};
-use linus_base::error::{LinusError, ResponseFailure};
+use linus_base::error::{LinusError, ResponseEnd, ResponseFailure};
 use linus_base::linalg::mat_to_rowmajor;
 use linus_base::memory::mem_mark;
 use linus_core::timing::Timers;
 use linus_dft::XcIntegrator;
-use linus_ints::{BasisSet, DerivOrder, OneEPlan};
+use linus_ints::{BasisSet, DerivOrder, OneEPlan, PairSet};
 use linus_scf::reference::Reference;
 use linus_scf::response::operator::ResponseOperator;
 use linus_scf::response::perturbation::{
     occupied_projections, NuclearDisplacements, Overlap, Perturbation,
 };
 use linus_scf::response::problem::ResponseProblem;
-use linus_scf::response::second_order::{refs, stacked_gram, FirstOrderOrbitals, SecondOrder};
+use linus_scf::response::second_order::{refs, stacked_gram_on, FirstOrderOrbitals, SecondOrder};
 use linus_scf::response::stationary::Correction;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct HessianResult {
@@ -132,6 +135,9 @@ pub struct ResolvedCphf {
     pub max_residual: f64,
     /// The grid of the CPKS kernel when it differs from the SCF's (`cpks_grid`).
     pub grid: Option<GridChoice>,
+    /// How the solve ended (None before it ran: the plan's record); for the failure's message.
+    #[serde(skip)]
+    pub end: Option<ResponseEnd>,
 }
 
 /// The CPHF/CPKS of a Hessian counts as converged when its max-abs residual is at most this
@@ -234,7 +240,7 @@ impl CalcContext {
         let n = self.basis.nbf as f64;
         let n3 = 3.0 * self.mol.natom() as f64;
         let (na, nb) = self.mol.nalpha_nbeta().map_err(LinusError::Input)?;
-        let restricted = self.plan.restricted().unwrap_or(na == nb);
+        let restricted = self.plan.restricted_for(na, nb);
         let (nch, o): (f64, f64) = if restricted {
             (1.0, na as f64)
         } else {
@@ -312,37 +318,40 @@ impl CalcContext {
         let pairs = timers.time("hess_pairs", || {
             self.integrals.pairs(basis, DerivOrder::Two)
         });
-        // explicit second-derivative terms (nuclear, one-electron)
-        let mut h = nuclear_repulsion_hessian(&self.mol.effective_z(), &self.mol.positions);
-        let add = |h: &mut Vec<f64>, x: &[f64]| h.iter_mut().zip(x).for_each(|(a, b)| *a += b);
-        let one_e = OneEPlan::new(basis, DerivOrder::Two)
-            .with_charges(&pairs, &charges)
-            .expect("pairs of derivative order two");
-        let mut wk = one_e.workspace();
-        let mut h1 = vec![0.0; h.len()];
-        timers.time("hess_1e", || {
-            one_e.overlap_kinetic_hess(Some(&ws), Some(&dtf), &mut h1, &mut wk)
-        });
-        add(&mut h, &h1);
-        timers.time("hess_1e", || {
-            one_e.nuclear_attraction_hess(&dtf, &mut h1, &mut wk)
-        });
-        add(&mut h, &h1);
-        drop((wk, h1));
-        // first-derivative matrices: S^x and F_s^x C_s = (h^x + J^x[D_t] - a_x K^x[D_s] +
-        // V_xc,s^x) C_s (range-separated hybrids: a_x = 1 and K of the operator
-        // a/r + b erf(omega r)/r), as fxo[s][x]
-        let mut sx = vec![0.0; 3 * basis.natom() * n2];
-        timers.time("hess_fock_deriv", || {
-            one_e.overlap_kinetic_deriv(Some(&mut sx), None)
-        });
-        let mut hx = vec![0.0; sx.len()];
-        timers.time("hess_fock_deriv", || one_e.hcore_deriv(&mut hx));
-        timers.time("hess_ecp", || {
-            self.add_ecp_hessian_terms(&pairs, &dtf, &mut h, &mut hx)
-        });
-        let fxo = occupied_projections(reference, &hx, par);
-        drop(hx);
+        // explicit second-derivative terms (nuclear, one-electron), into h; S^x; and the core
+        // Hamiltonian's F^x C_o
+        let h_nuc = nuclear_repulsion_hessian(&self.mol.effective_z(), &self.mol.positions);
+        let one_electron = |h: &mut Vec<f64>, pairs: &PairSet, timers: &mut Timers| {
+            let add = |h: &mut Vec<f64>, x: &[f64]| h.iter_mut().zip(x).for_each(|(a, b)| *a += b);
+            let one_e = OneEPlan::new(basis, DerivOrder::Two)
+                .with_charges(pairs, &charges)
+                .expect("pairs of derivative order two");
+            let mut wk = one_e.workspace();
+            let mut h1 = vec![0.0; h.len()];
+            timers.time("hess_1e", || {
+                one_e.overlap_kinetic_hess(Some(&ws), Some(&dtf), &mut h1, &mut wk)
+            });
+            add(h, &h1);
+            timers.time("hess_1e", || {
+                one_e.nuclear_attraction_hess(&dtf, &mut h1, &mut wk)
+            });
+            add(h, &h1);
+            drop((wk, h1));
+            // first-derivative matrices: S^x and F_s^x C_s = (h^x + J^x[D_t] - a_x K^x[D_s] +
+            // V_xc,s^x) C_s (range-separated hybrids: a_x = 1 and K of the operator
+            // a/r + b erf(omega r)/r), as fxo[s][x]
+            let mut sx = vec![0.0; 3 * basis.natom() * n2];
+            timers.time("hess_fock_deriv", || {
+                one_e.overlap_kinetic_deriv(Some(&mut sx), None)
+            });
+            let mut hx = vec![0.0; sx.len()];
+            timers.time("hess_fock_deriv", || one_e.hcore_deriv(&mut hx));
+            timers.time("hess_ecp", || {
+                self.add_ecp_hessian_terms(pairs, &dtf, h, &mut hx)
+            });
+            let fxo = occupied_projections(reference, &hx, par);
+            (sx, fxo)
+        };
         // the method families' explicit terms in their fixed order (crate::derivatives::terms):
         // the two-electron method's, then its response J/K (the right-hand sides and the final
         // dF[U] C_o; CalcContext::response_jk. Two-level responses (large systems; the CPKS
@@ -363,28 +372,76 @@ impl CalcContext {
             dsf: dsr,
             par,
         };
-        let mut explicit = ExplicitHessian::new(h, fxo);
-        let mut two_e = TwoElectronTerm::new(self, xop, &pairs, want_dip);
-        two_e.add_hessian(&inputs, &mut explicit, timers)?;
+        let grid_response = self.plan.grid_response();
+        let families = |explicit: &mut ExplicitHessian,
+                        pairs: Arc<PairSet>,
+                        timers: &mut Timers|
+         -> Result<_, LinusError> {
+            let mut two_e = TwoElectronTerm::new(self, xop, &pairs, want_dip);
+            two_e.add_hessian(&inputs, explicit, timers)?;
+            let response = two_e.into_response();
+            let mut solvent_term = SolventTerm::new(self);
+            solvent_term.add_hessian(&inputs, explicit, timers)?;
+            let solvent = solvent_term.into_response();
+            mem_mark(timers, "explicit_2e");
+            // the pairs' derivative expansions are done with: freed (E stays for the response)
+            drop(pairs);
+            self.integrals.release_pair_derivatives();
+            let mut xc_term = XcTerm::new(self, xc, grid_response);
+            xc_term.add_hessian(&inputs, explicit, timers)?;
+            Ok((response, solvent, xc_term.into_vv10_ground()))
+        };
+        let (explicit, sx, (response, solvent, nl_ground)) =
+            if self.placement(Family::HessianJk) == Some(Placement::Device) {
+                // the two-electron terms run on the device (and the XC terms mostly): the
+                // one-electron terms run on the host beside them, into their own h and F^x C_o,
+                // added to the families' at the end (the GPU's sums in another order than the
+                // CPU's, within round-off)
+                let zero: Vec<Vec<Mat<f64>>> = cor
+                    .iter()
+                    .map(|c| (0..n3).map(|_| Mat::zeros(n, c.ncols())).collect())
+                    .collect();
+                let mut explicit = ExplicitHessian::new(vec![0.0; h_nuc.len()], zero);
+                let mut t1 = Timers::default();
+                let p1 = pairs.clone();
+                let ((h1, sx, fxo1), fam) = rayon::join(
+                    || {
+                        let mut h1 = h_nuc;
+                        let (sx, fxo) = one_electron(&mut h1, &p1, &mut t1);
+                        drop(p1);
+                        (h1, sx, fxo)
+                    },
+                    || families(&mut explicit, pairs, timers),
+                );
+                timers.merge(&t1);
+                let fam = fam?;
+                // the derivative expansions the one-electron terms held until now
+                self.integrals.release_pair_derivatives();
+                for (a, b) in explicit.h.iter_mut().zip(&h1) {
+                    *a += b;
+                }
+                for (fs, f1s) in explicit.fxo.iter_mut().zip(fxo1) {
+                    for (f, f1) in fs.iter_mut().zip(f1s) {
+                        // in place (the sum's bits are f1 + f's: addition commutes)
+                        *f += &f1;
+                    }
+                }
+                (explicit, sx, fam)
+            } else {
+                let mut h = h_nuc;
+                let (sx, fxo) = one_electron(&mut h, &pairs, timers);
+                let mut explicit = ExplicitHessian::new(h, fxo);
+                let fam = families(&mut explicit, pairs, timers)?;
+                (explicit, sx, fam)
+            };
+        let pairs = self.integrals.pairs(basis, DerivOrder::Zero);
         let ResponseSetup {
             jk,
             plan: mut iter_plan,
             single_precision,
             kernel: kernel_use,
-        } = two_e.into_response();
+        } = response;
         let two_level = iter_plan.is_some();
-        let mut solvent_term = SolventTerm::new(self);
-        solvent_term.add_hessian(&inputs, &mut explicit, timers)?;
-        let solvent = solvent_term.into_response();
-        mem_mark(timers, "explicit_2e");
-        // the pairs' derivative expansions are done with: freed (E stays for the response)
-        drop(pairs);
-        self.integrals.release_pair_derivatives();
-        let pairs = self.integrals.pairs(basis, DerivOrder::Zero);
-        let grid_response = self.plan.grid_response();
-        let mut xc_term = XcTerm::new(self, xc, grid_response);
-        xc_term.add_hessian(&inputs, &mut explicit, timers)?;
-        let nl_ground = xc_term.into_vv10_ground();
         let nl = xc.and_then(|x| x.vv10());
         let (mut h, fxo, gxo) = explicit.finish();
         // CPHF/CPKS; with the stationary response term below the Hessian error is quadratic in
@@ -407,6 +464,25 @@ impl CalcContext {
             .with_environment(solvent);
         let mut problem = ResponseProblem::new(reference, operator);
         problem.report_to(self.progress.clone(), "hessian");
+        // the solver's own algebra on the products' device (crate::backend::gpu::krylov), set up
+        // now that the response's engines hold their memory: in what they left. The unknowns:
+        // nvir x nocc per channel for the 3N right-hand sides; the products' n x nocc extras
+        // unless the response is two-level
+        let shape = SolverShape {
+            len: reference
+                .c_vir()
+                .iter()
+                .zip(&cor)
+                .map(|(v, o)| v.ncols() * o.ncols())
+                .sum(),
+            nr: n3,
+            elen: if two_level {
+                0
+            } else {
+                n * cor.iter().map(|o| o.ncols()).sum::<usize>()
+            },
+        };
+        problem.set_solver(self.response_solver(ResponseUse::Hessian, shape));
         // the nuclear displacements as a perturbation of the reference
         // (crate::response::perturbation): F^x C_o from the terms above, S^x C_o and s1oo
         let nuclear = NuclearDisplacements {
@@ -466,7 +542,9 @@ impl CalcContext {
         // energies e1 (crate::response::second_order)
         let orbitals = FirstOrderOrbitals::new(&nuclear, &u, voo.as_deref(), &vvo, par);
         drop((voo, vvo));
-        timers.time("hess_assemble", || {
+        // the stacked GEMMs on the device of the response's products (the host's otherwise)
+        let gram = self.device_gram(ResponseUse::Hessian);
+        timers.time("hess_assemble", || -> Result<(), LinusError> {
             // f [2 (F^x C_o) . C1^y - 2 (S^x C_o) . (C1^y e_o) - s1oo^x . e1^y - 2 U^x . r^y]
             // per channel (crate::response::second_order), as GEMMs of the stacked (vectorized)
             // matrices; the U . r term makes the response part stationary in U (Hylleraas form,
@@ -479,14 +557,22 @@ impl CalcContext {
                     u: &u,
                     residuals: &resid,
                 }),
+                gram: gram.as_deref(),
             };
             let mut hr = Mat::<f64>::zeros(n3, n3);
             for s in 0..nch {
-                response.add_channel(&mut hr, s, focc, par);
+                response.add_channel(&mut hr, s, focc, par)?;
                 if !gxo.is_empty() {
                     // the gradient's F^x is the fixed-grid one
                     let c1 = refs(&orbitals.c1[s]);
-                    stacked_gram(&mut hr, -2.0 * focc, &refs(&gxo[s]), &c1, par);
+                    stacked_gram_on(
+                        gram.as_deref(),
+                        &mut hr,
+                        -2.0 * focc,
+                        &refs(&gxo[s]),
+                        &c1,
+                        par,
+                    )?;
                 }
             }
             for x in 0..n3 {
@@ -494,7 +580,8 @@ impl CalcContext {
                     h[x * n3 + y] += hr[(x, y)];
                 }
             }
-        });
+            Ok(())
+        })?;
         // symmetrize (the response part is symmetric only at convergence)
         for x in 0..n3 {
             for y in 0..x {
@@ -517,6 +604,7 @@ impl CalcContext {
                 self.dipole_terms(h, par)
             })
         });
+        let dip = dip.transpose()?;
         let resolved = ResolvedCphf {
             cphf_tol,
             single_precision,
@@ -525,6 +613,7 @@ impl CalcContext {
             precision_setting: self.plan.response_precision(),
             max_residual: st.max_residual,
             grid: None,
+            end: Some(st.end),
         };
         Ok((h, st.iterations, dip, resolved))
     }
@@ -622,6 +711,7 @@ impl Session {
                 iterations: res.cphf_iterations,
                 max_residual: rr.max_residual,
                 tol: rr.cphf_tol,
+                end: rr.end.unwrap_or(ResponseEnd::Iterations),
             };
             self.unconverged_response =
                 Some(crate::driver::UnconvergedResponse::Hessian(Box::new(res)));

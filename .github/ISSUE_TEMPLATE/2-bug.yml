@@ -1,0 +1,39 @@
+name: Report a bug
+description: A crash, an error you don't think is right, or something that doesn't work as documented.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Only the first box is required. If you can, include the input that shows the
+        problem: a molecule (xyz) and the command or Python lines you ran.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what you got (paste the error message).
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input to reproduce it
+      description: Optional. The structure and the command, JSON request or Python code. Smaller is better, but any size helps.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: linus version
+      description: Optional. The output of `linus --version` (or `python -c "import linus; print(linus.__version__, linus.NUMERICS_EPOCH)"`).
+    validations:
+      required: false
+  - type: input
+    id: setup
+    attributes:
+      label: How you installed it and where it ran
+      placeholder: "e.g. pip install afh-linus-cuda13, Ubuntu 24.04, AMD EPYC, NVIDIA H100"
+    validations:
+      required: false

@@ -34,6 +34,8 @@
 //! ```
 
 // the libxc C API as declared (not all of it is used)
+#[cfg(feature = "device-sources")]
+pub mod device;
 #[allow(dead_code)]
 pub(crate) mod ffi;
 mod functional;

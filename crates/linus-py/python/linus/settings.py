@@ -13,12 +13,12 @@ __all__ = ["JkSettings", "GridSettings", "PrecisionSettings", "SolventSettings",
 class JkSettings(TypedDict, total=False):
     """The J/K approximation."""
 
-    kind: Literal["exact", "df", "rij_snk"]
-    """The approximation: `df` (density fitting of J and K with the calculation's auxiliary basis, `aux`; synonyms `ri`, `rijk`), `exact` four-center integrals, or `rij_snk` (density-fitted J with seminumerical K, ORCA's RIJCOSX; synonym `rijcosx`)."""
+    kind: Literal["exact", "df", "rij_snk", "rij_cgk"]
+    """The approximation: `df` (density fitting of J and K with the calculation's auxiliary basis, `aux`; synonyms `ri`, `rijk`), `exact` four-center integrals, `rij_snk` (density-fitted J with seminumerical K, ORCA's RIJCOSX; synonym `rijcosx`) or `rij_cgk` (density-fitted J with compensated grid-based K: exact exchange of the SAD densities, the rest on the grid `k_grid` with a symmetric overlap fit; energies and gradients)."""
     aux: str
-    """The auxiliary basis of `df` and of `rij_snk`'s J. `auto`: def2-universal-jkfit for energies and gradients, `cc-pvtz-jkfit|def2-universal-jkfit` for Hessians (df); def2-universal-jfit (rij_snk). `"a|b"` takes each element from the first set that has it."""
+    """The auxiliary basis of `df` and of the J of `rij_snk` and `rij_cgk`. `auto`: def2-universal-jkfit for energies and gradients, `cc-pvtz-jkfit|def2-universal-jkfit` for Hessians (df, rij_cgk); def2-universal-jfit (rij_snk). `"a|b"` takes each element from the first set that has it."""
     k_grid: str | int | dict[str, Any]
-    """The grid of `rij_snk`'s seminumerical exchange: `cosx:N` (ORCA-like COSX grids of DefGrid N), `gridx:A,B,C` (COSX grid levels of the first and last SCF iterations and the final energy) or any grid. `auto`: `cosx:2`."""
+    """The grid of `rij_snk`'s seminumerical exchange: `cosx:N` (ORCA-like COSX grids of DefGrid N), `gridx:A,B,C` (COSX grid levels of the first and last SCF iterations and the final energy) or any grid. `auto`: `cosx:2`. For `rij_cgk` one grid: `gridx:N` (one COSX grid level) or any single grid; `auto`: `gridx:2`."""
     screening: float
     """Screening threshold of the exact four-center integrals (derivatives use at most 1e-12)."""
     exact_storage: Literal["auto", "direct", "incore"]
@@ -154,9 +154,11 @@ class ScfSettings(TypedDict, total=False):
     plateau_window: int
     """An SCF whose energy and orbital gradient stayed on a plateau over this many iterations when its escalation comes due, or at `max_iter`, is accepted with the warning `loosely_converged`; under accuracy targets only when the estimates of its final orbital gradient meet them (0: off)."""
     escalate: bool
-    """An SCF whose DIIS stagnates (`stagnation_window`), or that has spent 2/3 of `max_iter`, restarts once from the lowest-energy orbitals it visited, with quasi-Newton steps, for the rest of `max_iter`."""
+    """An SCF whose DIIS stagnates (`stagnation_window`) or blows up (`blowup_window`), or that has spent 2/3 of `max_iter`, restarts once from the lowest-energy orbitals it visited, with quasi-Newton steps, for the rest of `max_iter`."""
     stagnation_window: int
     """Iterations without a new lowest energy after which the escalation starts (0: only at 2/3 of `max_iter`)."""
+    blowup_window: int
+    """Iterations in a row of a DIIS blow-up (the energy more than 1 Eh above the lowest visited, max|F_ai| more than 10 times the smallest) after which the escalation starts (0: off)."""
     lindep: float
     """Canonical orthogonalization: overlap eigenvalues at or below this (absolute) drop their functions; fewer orbitals left than occupied ones is an input error (in (0, 1))."""
 
@@ -226,6 +228,10 @@ class BackendSettings(TypedDict, total=False):
     """The GPU to use: a device id (or a list of one)."""
     scf_loop: Literal["auto", "host", "device"]
     """Where the SCF loop's own work runs with a GPU: `host` (the CPU drives the device's Fock builds) or `device` (the whole loop on the GPU). `auto`: device, closed and open shells."""
+    df_j: Literal["auto", "stored", "direct"]
+    """The engine of the SCF's density-fitted J on a GPU: `stored` (the DF engine's three-index tensor, on the device or streamed from host memory) or `direct` (no stored tensor: the integrals recomputed in every build; where J needs no tensor for anything else: jk df with a pure functional, or the J of jk rij_cgk, without an implicit solvent). `auto`: direct where the tensor would not stay on the device beside the other engines, else stored."""
+    nuclear_attraction: Literal["auto", "gpu", "cpu"]
+    """Where the SCF's nuclear attraction V is computed beside a GPU's J/K setup: `gpu` (the device PCM engine's pair x point integrals) or `cpu`. `auto`: the GPU when the kept shell pairs times the point charges reach 2e8 (about a second of the host's: large molecules), else the CPU. The overlap, kinetic energy and ECPs stay on the CPU."""
     kernel_cache: str
     """Where a GPU backend keeps its compiled kernels between runs: a directory or `off` (memory only). `auto`: `$LINUS_GPU_CACHE`, else `$XDG_CACHE_HOME/linus/gpu-kernels`, else `~/.cache/linus/gpu-kernels`."""
 

@@ -55,7 +55,7 @@ use std::sync::{Arc, Mutex};
 /// Grid points per device block of the SCF's XC: the collocation's blocks; the products are
 /// per grid batch.
 const SCF_BLOCK_POINTS: usize = 2048;
-/// Grid points per device block of the CPKS kernel (M3: 512 to 2048 cost the same, 256 more).
+/// Grid points per device block of the CPKS kernel (512 to 2048 points cost the same, 256 more).
 const KERNEL_BLOCK_POINTS: usize = 512;
 /// Grid points per FP64 block of the electric-field CPHF's kernel, three perturbations per call
 /// (B3LYP/def2-SVP on an RTX PRO 6000, ms per call with the ground state kept:
@@ -67,8 +67,7 @@ const FIELD_BLOCK_POINTS: usize = 2048;
 /// products per grid batch (their sums over at most a batch's points or functions, the batches
 /// added in FP64), else FP64. The SCF's potential stays FP64 under every setting: in FP32
 /// (densities in FP64) its energies were as accurate, but the SCF needed 1-6 more iterations on
-/// TZVP-size molecules, which cost more than the cheaper XC builds saved
-/// (docs/internal/gpu-spike.md, its XC and response sections).
+/// TZVP-size molecules, which cost more than the cheaper XC builds saved.
 fn xc_math(a: Arith) -> XcMath {
     match a {
         Arith::Fp32 => XcMath::Fp32,
@@ -122,6 +121,54 @@ fn vv10_math(a: Arith) -> Vv10Math {
         Arith::Fp64 => Vv10Math::Fp64,
         Arith::Fp32 => Vv10Math::Fp32,
         _ => Vv10Math::DoubleFloat,
+    }
+}
+
+/// The grid builder's partition on the session's device (linus-grid's `DevicePartition` over
+/// linus-gpu's `GpuPartition`), recording where each grid's weights were computed
+/// (`resolved.record.backend.grid_partition`): out of device memory, or in a case the kernels
+/// do not cover, the host computes them (recorded with the reason); any other device error is
+/// the calculation's.
+pub(crate) struct GridPartition<'a> {
+    pub(crate) backend: &'a super::GpuBackend,
+    /// The device bytes the partition may take (the memory plan's `grid_partition`).
+    pub(crate) allowance: Option<usize>,
+}
+
+impl linus_grid::DevicePartition for GridPartition<'_> {
+    fn weights(
+        &self,
+        tables: &linus_grid::PairTables,
+        x: &[f64],
+        y: &[f64],
+        z: &[f64],
+        owner: &[u32],
+        vol: &[f64],
+    ) -> Result<Option<Vec<f64>>, Box<dyn std::error::Error + Send + Sync>> {
+        // within the memory plan's share for it beside the DF-J/K's setup
+        let part = linus_gpu::xc::partition::GpuPartition {
+            gpu: &self.backend.gpu,
+            allowance: self.allowance,
+        };
+        match part.weights(tables, x, y, z, owner, vol) {
+            Ok(w) => {
+                self.backend.note_grid_partition(
+                    "gpu",
+                    "an unscreened partition (Becke's): the device's weights, each point's cell \
+                     functions below 2^-100 of their sum left out"
+                        .into(),
+                );
+                Ok(Some(w))
+            }
+            Err(e) if e.falls_back_at_setup() => {
+                self.backend.note_grid_partition(
+                    "cpu",
+                    format!("the device declined ({e}): the host's weights"),
+                );
+                Ok(None)
+            }
+            Err(e) => Err(Box::new(device_error(Family::Xc, e))),
+        }
     }
 }
 
@@ -207,6 +254,9 @@ impl GpuXcPotential {
     }
 }
 
+/// A channel's orbitals on the host: C (column-major), its columns and occupations.
+type Channel = (Vec<f64>, usize, Vec<f64>);
+
 impl XcPotential for GpuXcPotential {
     fn compute(
         &mut self,
@@ -215,15 +265,13 @@ impl XcPotential for GpuXcPotential {
     ) -> Result<(f64, Mat<f64>, Mat<f64>), LinusError> {
         let n = d.da.nrows();
         let nch = if d.restricted { 1 } else { 2 };
-        // (C column-major, columns, occupations) per channel
-        let chans: Vec<(Vec<f64>, usize, Vec<f64>)> = match d.orbitals {
-            Some(o) => (0..nch)
-                .map(|s| (to_cm(o.c[s].as_ref()), o.c[s].ncols(), o.n[s].clone()))
-                .collect(),
-            None => [d.da, d.db][..nch]
+        // (C column-major, columns, occupations) per channel: the orbitals given, or (a guess's
+        // densities, for an engine that takes orbitals) D = P P^T - N N^T, occupations +1 and
+        // -1, by a factorization on the host (O(nbf^3))
+        let factored = || -> Vec<Channel> {
+            [d.da, d.db][..nch]
                 .iter()
                 .map(|m| {
-                    // D = P P^T - N N^T: occupations +1 and -1
                     let (p, q) = factor_symmetric(m.as_ref(), par);
                     let mut c = to_cm(p.as_ref());
                     c.extend(to_cm(q.as_ref()));
@@ -231,20 +279,45 @@ impl XcPotential for GpuXcPotential {
                     occ.extend(vec![-1.0; q.ncols()]);
                     (c, p.ncols() + q.ncols(), occ)
                 })
-                .collect(),
+                .collect()
         };
-        let ch: Vec<XcChannel> = chans
-            .iter()
-            .map(|(c, ncol, occ)| XcChannel {
-                c,
-                ncol: *ncol,
-                occ,
-            })
-            .collect();
-        let r = self
-            .eng
-            .compute(&self.gpu, &ch, d.restricted)
-            .map_err(|e| device_error(Family::Xc, e))?;
+        let mut chans: Option<Vec<Channel>> = d.orbitals.map(|o| {
+            (0..nch)
+                .map(|s| (to_cm(o.c[s].as_ref()), o.c[s].ncols(), o.n[s].clone()))
+                .collect()
+        });
+        fn channels(c: &[Channel]) -> Vec<XcChannel<'_>> {
+            c.iter()
+                .map(|(c, ncol, occ)| XcChannel {
+                    c,
+                    ncol: *ncol,
+                    occ,
+                })
+                .collect()
+        }
+        // a guess's densities go to the device as they are (the per-batch path takes them)
+        let from_d = match d.orbitals {
+            Some(_) => None,
+            None => {
+                let dm: Vec<Vec<f64>> = [d.da, d.db][..nch]
+                    .iter()
+                    .map(|m| to_cm(m.as_ref()))
+                    .collect();
+                let refs: Vec<&[f64]> = dm.iter().map(|m| m.as_slice()).collect();
+                self.eng
+                    .compute_densities(&self.gpu, &refs, d.restricted)
+                    .map_err(|e| device_error(Family::Xc, e))?
+            }
+        };
+        let r = match from_d {
+            Some(r) => r,
+            None => {
+                let c = chans.get_or_insert_with(factored);
+                self.eng
+                    .compute(&self.gpu, &channels(c), d.restricted)
+                    .map_err(|e| device_error(Family::Xc, e))?
+            }
+        };
         let mut exc = r.exc;
         let mut va = from_cm(n, n, &r.v[0]);
         let mut vb = if d.restricted {
@@ -255,8 +328,9 @@ impl XcPotential for GpuXcPotential {
         // VV10: a functional of the total density, its potential to both spins, as in
         // XcIntegrator::potential; on the device, or on the CPU (crate::xc::vv10)
         if let Some(nl) = self.nl.as_mut() {
+            let c = chans.get_or_insert_with(factored);
             let (e, v) = nl
-                .compute(&self.gpu, &ch, d.restricted)
+                .compute(&self.gpu, &channels(c), d.restricted)
                 .map_err(|e| device_error(Family::Vv10, e))?;
             let v = from_cm(n, n, &v);
             exc += e;
@@ -284,8 +358,9 @@ impl ScfXc for GpuXcPotential {
 }
 
 /// The SCF's XC term on the device over the CPU integrator `cpu` (families `xc` and `vv10`;
-/// timed as `xc_setup`), VV10 on the device when its setup fits too; declined (the integrator,
-/// VV10 with it) when the semilocal setup does not fit.
+/// timed as `xc_setup`, with its part `xc_setup_functional`, the functional compiled and checked
+/// for the device), VV10 on the device when its setup fits too; declined (the integrator, VV10
+/// with it) when the semilocal setup does not fit.
 pub(crate) fn scf_potential(
     calc: &CalcContext,
     gpu: &Arc<Gpu>,
@@ -301,9 +376,16 @@ pub(crate) fn scf_potential(
             SCF_BLOCK_POINTS,
             (XcScreen::Batch, xc_math(p.vxc), products(p)),
         )
+        .map(|eng| {
+            let t = std::time::Instant::now();
+            let place = eng.prepare_functional(gpu, spin_channels(calc));
+            (eng, place, t.elapsed().as_secs_f64())
+        })
     });
     Ok(match setup(Family::Xc, built)? {
-        Setup::Ready(eng) => {
+        Setup::Ready((eng, place, t_functional)) => {
+            calc.note_functional(Family::Xc, place);
+            timers.add("xc_setup_functional", t_functional);
             let nl = vv10_engine(calc, &cpu, timers)?;
             Setup::Ready(Box::new(GpuXcPotential {
                 gpu: gpu.clone(),
@@ -320,6 +402,17 @@ pub(crate) fn scf_potential(
             Setup::Declined(why)
         }
     })
+}
+
+/// The spin channels of the calculation's determinant (1 restricted, 2 unrestricted), as the
+/// SCF's XC calls will see them.
+fn spin_channels(calc: &CalcContext) -> usize {
+    let closed = calc.mol.nalpha_nbeta().is_ok_and(|(a, b)| a == b);
+    if calc.plan.restricted().unwrap_or(closed) {
+        1
+    } else {
+        2
+    }
 }
 
 /// The reason of a VV10 that runs on the CPU because the semilocal XC term does.
@@ -549,7 +642,14 @@ impl GradientTerm for GpuXcGradient<'_> {
             return Ok(Setup::Ready(()));
         };
         Ok(
-            match gradient_engine(self.calc, &self.gpu, &x, grid, timers)? {
+            match gradient_engine(
+                self.calc,
+                &self.gpu,
+                &x,
+                grid,
+                if inputs.ground.scf.restricted { 1 } else { 2 },
+                timers,
+            )? {
                 Setup::Ready(e) => {
                     self.engine = Some((x, e));
                     Setup::Ready(())
@@ -580,6 +680,7 @@ fn gradient_engine(
     gpu: &Arc<Gpu>,
     xc: &XcIntegrator,
     grid: &crate::driver::GridChoice,
+    nsp: usize,
     timers: &mut Timers,
 ) -> Result<Setup<linus_gpu::grad::xc::GpuXcGrad>, LinusError> {
     use linus_gpu::grad::xc::{GpuXcGrad, GpuXcGradOptions};
@@ -599,6 +700,11 @@ fn gradient_engine(
             ..GpuXcGradOptions::default()
         },
     );
+    if let Ok(g) = &built {
+        let t = std::time::Instant::now();
+        calc.note_functional(Family::GradientXc, g.prepare_functional(gpu, nsp));
+        timers.add("grad_xc_setup_functional", t.elapsed().as_secs_f64());
+    }
     let t_setup = t0.elapsed().as_secs_f64();
     timers.add("grad_xc_setup", t_setup);
     timers.add("grad_xc", t_setup);
@@ -606,12 +712,11 @@ fn gradient_engine(
         let s = g.stats();
         timers.add("grad_xc_setup_blocks", s.setup_blocks);
         timers.add("grad_xc_setup_layout", s.setup_layout);
-        for (name, v) in ["blocks", "screen", "lists", "plans"]
-            .iter()
-            .zip(s.setup_layout_parts)
-        {
-            timers.add(&format!("grad_xc_setup_layout_{name}"), v);
-        }
+        let p = s.setup_layout_parts;
+        timers.add("grad_xc_setup_layout_blocks", p.blocks);
+        timers.add("grad_xc_setup_layout_screen", p.screen);
+        timers.add("grad_xc_setup_layout_lists", p.lists);
+        timers.add("grad_xc_setup_layout_plans", s.setup_plans);
     }
     let g = setup(Family::GradientXc, built)?;
     if matches!(g, Setup::Declined(_)) && xc.vv10().is_some() {
@@ -712,7 +817,8 @@ pub(crate) fn vv10_gradient(
 }
 
 /// VV10's pair sweeps of responses on the device (`linus_dft::vv10_resp`): linus-gpu's
-/// `GpuVv10Resp` in the arithmetic of the SCF's VV10 (double-float by default, FP64 with
+/// `GpuVv10Resp` in the arithmetic of the SCF's VV10 (by default FP64 on FP64-rich cards and
+/// double-float on the others, FP64 with
 /// `precision.fp32: "off"`).
 struct GpuSweep {
     gpu: Arc<linus_gpu::Gpu>,
@@ -901,12 +1007,15 @@ mod tests {
     #[test]
     fn cpks_kernel_arithmetic() {
         use crate::driver::options::Fp64Mode;
-        use crate::driver::policy::{CardClass, ExchangeRates};
+        use crate::driver::policy::{CardClass, CardProps};
         use Arith::{Fp32, Fp64};
-        let rates = ExchangeRates::of((12, 0), 188, 2_280_000, Some(500.0));
         let pol = |fp64, fp32, rich: bool| {
             let int8 = Some(if rich { 30.0 } else { 500.0 });
-            DevicePolicy::new(fp64, fp32, CardClass::new(rich, int8), "x", rates)
+            DevicePolicy::new(
+                fp64,
+                fp32,
+                &CardProps::of_class(CardClass::new(rich, int8), (12, 0)),
+            )
         };
         let e = pol(Fp64Mode::Auto, Fp32Mode::Auto, false);
         assert_eq!((e.cpks_xc(false), e.cpks_xc(true)), (OZAKI, Fp32));
@@ -949,16 +1058,24 @@ mod tests {
                 Err(e) => panic!("{e}"),
             };
             c.energy().unwrap();
-            // VV10 ran on the device in double-float (the default arithmetic)
+            // VV10 ran on the device in the card class's default arithmetic: double-float on
+            // FP64-poor cards (where the default precision emulates the exchange), FP64 on
+            // FP64-rich ones
             let rb = c.backend_used();
             assert_eq!(rb.vv10, Some("gpu"), "{method}");
-            assert_eq!(
-                rb.vv10_arithmetic,
-                Some(crate::driver::report::Vv10Arithmetic {
-                    scf: "df64",
-                    gradient: "df64"
-                })
+            let class = if rb.precision == "emulated" {
+                "df64"
+            } else {
+                "fp64"
+            };
+            let a = rb.vv10_arithmetic.clone().expect("VV10's arithmetic");
+            assert!(
+                a.scf == class && a.gradient == class,
+                "{a:?} on {}",
+                rb.precision
             );
+            let table = rb.arithmetic.as_ref().expect("the policy table");
+            assert_eq!(table["vv10_scf"].arith, class);
             assert!(c
                 .vv10()
                 .is_some_and(|v| v.evaluations > 0 && v.last_energy.is_some()));

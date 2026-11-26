@@ -127,12 +127,17 @@ pub struct XcSetup<'a> {
     pub nlc_grid: Option<GridSpec>,
     /// Memory (MB, all threads) for the XC-kernel accumulators of responses.
     pub kernel_budget_mb: usize,
+    /// The grids' partition weights on a device (the host's but for terms below 2^-100 of a
+    /// point's sum; `linus_grid::DevicePartition`, which records where they ran), else None.
+    pub partition: Option<Box<dyn linus_grid::DevicePartition + 'a>>,
 }
 
 impl XcIntegrator {
     /// The XC integrator of a calculation, the one factory of the SCF, gradients, Hessians and
     /// polarizabilities: the grids of `setup` for the atoms `z` at `positions` (timed as "grid"
-    /// and "nlc_grid"), the functional and its VV10.
+    /// and "nlc_grid"; with a device partition also the XC grid's "grid_partition", its partition
+    /// weights (the device's, or the host's where the device declined), and "grid_batches", the
+    /// cutoff and batching), the functional and its VV10.
     pub fn build(
         basis: &BasisSet,
         z: &[u32],
@@ -140,10 +145,19 @@ impl XcIntegrator {
         setup: &XcSetup<'_>,
         timers: &mut Timers,
     ) -> Result<Self, LinusError> {
-        let grid = timers.time("grid", || MolecularGrid::build(z, positions, &setup.grid))?;
+        let part = setup.partition.as_deref();
+        let (grid, gt) = timers.time("grid", || {
+            MolecularGrid::build_timed(z, positions, &setup.grid, part)
+        })?;
+        if part.is_some() {
+            timers.add("grid_partition", gt.partition);
+            timers.add("grid_batches", gt.batches);
+        }
         let nlc = match &setup.nlc_grid {
             Some(spec) if setup.functional.functional().vv10().is_some() => {
-                Some(timers.time("nlc_grid", || MolecularGrid::build(z, positions, spec))?)
+                Some(timers.time("nlc_grid", || {
+                    MolecularGrid::build_with(z, positions, spec, part)
+                })?)
             }
             _ => None,
         };
@@ -709,7 +723,7 @@ impl Kind {
 /// X = phi D (and, for tau, Y_k = d_k phi D in `ym`, 3 x ld x nao). ao is function-major
 /// with `nc` components.
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, reason = "a kernel's arrays and sizes")]
 fn densities_body(
     ao: &[f64],
     nc: usize,
@@ -759,7 +773,7 @@ multiversion!(fn densities(ao: &[f64], nc: usize, ld: usize, nao: usize, gga: bo
 
 /// W_mu = vr phi_mu + sum_k vg_k d_k phi_mu (ld x nao).
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, reason = "a kernel's arrays and sizes")]
 fn wmat_body(
     ao: &[f64],
     nc: usize,
@@ -992,7 +1006,10 @@ pub(crate) fn eval_functional(func: &Functional, k: Kind, order: usize, s: &mut 
 
 /// Per-point potential weights of spin `sp`: vr = half w vrho (ld, zero past np) and, for
 /// GGA, vg_k = w (2 vsigma_ss grad_s,k + vsigma_ab grad_o,k) (3 x ld).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the functional's outputs and the weights' arrays"
+)]
 pub(crate) fn potential_weights(
     out: &XcOutput,
     k: Kind,
@@ -1212,7 +1229,7 @@ impl XcIntegrator {
 /// c_i = d_i phi_mu B_mu + sum_k d_ik phi_mu vg_k X_mu + 1/2 vt sum_k d_ik phi_mu Y_k,mu,
 /// gat[atom][i] -= 2 sum_g c_i, tsum[i][g] -= 2 c_i.
 #[inline(always)]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, reason = "a kernel's arrays and sizes")]
 fn grad_contract_body(
     ao: &[f64],
     nc: usize,

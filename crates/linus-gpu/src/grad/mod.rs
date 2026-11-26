@@ -17,6 +17,8 @@
 //! device.
 
 pub mod df;
+#[cfg(feature = "gpu")]
+pub(crate) mod df_j;
 pub mod xc;
 
 /// Adds `b` to `a` atom by atom (`a` grows to `b`'s length).

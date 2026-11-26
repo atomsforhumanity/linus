@@ -1,0 +1,41 @@
+name: Different result from another program
+description: linus gives a different energy, gradient, frequency or property than another program (or than you expect).
+title: "[Result] "
+labels: ["wrong result"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We take these seriously: linus is validated against PySCF, Psi4 and ORCA, and every difference we know
+        of is documented. Tell us what you compared; settings that differ between programs (grids, density
+        fitting, thresholds, ECPs) are often the cause, and we'll help find out.
+  - type: textarea
+    id: what
+    attributes:
+      label: What differs, and by how much?
+      placeholder: "e.g. B3LYP/def2-TZVP energy of my molecule: linus -1234.567890 Eh, ORCA 6.0 -1234.568120 Eh"
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: Optional. The structure and linus's command, request or Python code.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: other
+    attributes:
+      label: The other program's settings
+      description: Optional. Its name, version and input (method, basis, grid, density fitting, convergence).
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: linus version
+      description: Optional. The output of `linus --version`.
+    validations:
+      required: false

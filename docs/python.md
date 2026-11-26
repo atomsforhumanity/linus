@@ -307,7 +307,7 @@ while it runs, as small JSON objects with an `event` name (the runner adds `path
 | `stage_start` | `stage` | a stage starts: `scf`, `gradient`, `hessian` (its response and assembly), `polarizability` (an IR run's electric-field response) |
 | `stage_end` | `stage`, `seconds`, `success` | the stage ends (`success` false when it failed: an SCF that did not converge, an error) |
 | `scf_iteration` | `iteration`, `energy` (Eh), `delta_energy` (Eh), `gradient` (max \|F_ai\|) | after each SCF iteration's Fock build, on the CPU and on the device; the numbers are those of the record's `scf.history` |
-| `scf_escalation` | `iteration`, `trigger` (`stagnation`, `two_thirds`), `from_iteration` | the SCF restarts within its budget from its lowest-energy orbitals with quasi-Newton steps (the record's `scf.escalation`) |
+| `scf_escalation` | `iteration`, `trigger` (`stagnation`, `blowup`, `two_thirds`), `from_iteration` | the SCF restarts within its budget from its lowest-energy orbitals with quasi-Newton steps (the record's `scf.escalation`) |
 | `response_iteration` | `solve` (`hessian`, `polarizability`), `iteration`, `residual`, `unconverged`, `total` | after each iteration of a CPHF/CPKS solve: the largest residual left and the right-hand sides not yet converged of `total` |
 
 ```python

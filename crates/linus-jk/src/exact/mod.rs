@@ -147,7 +147,11 @@ impl FastJk {
             },
             ws,
         );
-        JkOutput { j, k }
+        JkOutput {
+            j,
+            k,
+            k_energy: None,
+        }
     }
 }
 

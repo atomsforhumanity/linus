@@ -29,19 +29,20 @@ mod cpu;
 #[cfg(feature = "gpu")]
 pub(crate) mod gpu;
 pub(crate) mod scf;
+pub(crate) mod threads;
 
 pub(crate) use cpu::CpuBackend;
 
 use crate::derivatives::terms::{GradientTerm, HessianTerm, TermInputs};
 use crate::driver::backend::{Device, Family, Placement};
 use crate::driver::ground::{GroundState, ScfSetup};
-use crate::driver::report::EmulationUsed;
+use crate::driver::report::{EmulationUsed, PlaceRecord};
 use crate::driver::CalcContext;
 use crate::solvent::derivatives::SolventGradient;
 use crate::solvent::scf::{PcmSetup, ScfEnvironment};
 use crate::solvent::SolventSettings;
-use crate::two_electron::{KernelUse, ResponseRequest, ResponseSetup};
-use faer::{MatRef, Par};
+use crate::two_electron::{KernelUse, ResponseRequest, ResponseSetup, ResponseUse};
+use faer::{Mat, MatRef, Par};
 use linus_base::error::LinusError;
 use linus_base::terms::ResponseKernel;
 use linus_core::timing::Timers;
@@ -50,6 +51,8 @@ use linus_dft::vv10_resp::{Vv10Ground, Vv10PairSweep};
 use linus_dft::XcIntegrator;
 use linus_ints::operator::Operator;
 use linus_ints::PairSet;
+use linus_scf::response::second_order::Gram;
+use linus_scf::response::solver::SubspaceSolver;
 use linus_scf::ScfLoop;
 use scf::{ScfJkBuilt, ScfRun, ScfTerms, ScfXc};
 use std::any::Any;
@@ -69,6 +72,14 @@ pub(crate) enum Setup<T> {
     Declined(String),
 }
 
+/// The nuclei's attraction V on a device: packed on the host, computed when it runs
+/// ([`CalcContext::nuclear_attraction`]).
+pub(crate) trait NuclearAttraction: Send {
+    /// V (nbf x nbf); declined with the reason where the device ran out of memory (the host's V
+    /// then); any other device error is the calculation's.
+    fn compute(self: Box<Self>) -> Result<Setup<Mat<f64>>, LinusError>;
+}
+
 /// A backend's provider of engines, one factory per method family and derivative order (module
 /// docs). A factory sets its engine up; the engine computes. Every factory answers on the CPU.
 pub(crate) trait Backend: Any + Send + Sync {
@@ -85,6 +96,30 @@ pub(crate) trait Backend: Any + Send + Sync {
     /// FP64.
     fn emulation(&self, _k: Family) -> Option<EmulationUsed> {
         None
+    }
+
+    /// The grids' partition weights on the device (the host's but for terms below 2^-100 of a
+    /// point's sum, faster; None: the host's), within `allowance` device bytes (the memory
+    /// plan's `grid_partition`: above it, the host's weights, recorded).
+    fn grid_partition(
+        &self,
+        _allowance: Option<usize>,
+    ) -> Option<Box<dyn linus_grid::DevicePartition + '_>> {
+        None
+    }
+
+    /// Where the last grid built with [`Backend::grid_partition`] took its partition weights
+    /// (`gpu`, or `cpu` when the device declined) and why (`resolved.record.backend
+    /// .grid_partition`); None when no grid asked the device.
+    fn grid_partition_place(&self) -> Option<(&'static str, String)> {
+        None
+    }
+
+    /// Where each device XC family's last setup evaluates the functional's derivatives, in the
+    /// order recorded: None on the device, else the reason libxc on the host does
+    /// (`resolved.record.backend.functional`); none on the CPU.
+    fn functional_places(&self) -> Vec<(Family, Option<String>)> {
+        Vec::new()
     }
 
     /// The families whose engines drew beyond their last workspace grant (the device memory
@@ -111,6 +146,18 @@ pub(crate) trait Backend: Any + Send + Sync {
         _basis: &linus_ints::BasisSet,
         _aux: Option<&linus_ints::BasisSet>,
     ) -> Option<String> {
+        None
+    }
+
+    /// Whether the SCF's density-fitting tensors for the auxiliary basis `aux` (the layout's
+    /// sizes `rows`; B^omega too for a range-separated exchange) stay on this backend's device
+    /// by its DF-J/K storage plan, the setup's own rule; None without a device.
+    fn df_on_device(
+        &self,
+        _cx: &CalcContext,
+        _aux: &linus_ints::BasisSet,
+        _rows: linus_ints::eri3c::DfRows,
+    ) -> Option<bool> {
         None
     }
 
@@ -216,6 +263,37 @@ pub(crate) trait Backend: Any + Send + Sync {
         timers: &mut Timers,
     ) -> Result<Setup<ResponseSetup>, LinusError>;
 
+    /// The CPHF/CPKS solver's own algebra for a Hessian's response of `shape` (the products'
+    /// device: [`CalcContext::response_solver`]), its memory set aside now; declined with the
+    /// reason where the host's solver runs. The CPU's provider has none.
+    fn response_solver(
+        &self,
+        _cx: &CalcContext,
+        _purpose: ResponseUse,
+        _shape: SolverShape,
+    ) -> Setup<Box<dyn SubspaceSolver>> {
+        Setup::Declined("the solver runs on the host".into())
+    }
+
+    /// The second-order assembly's stacked GEMMs of the response `purpose` on the device, which
+    /// records where they ran (None: the host's).
+    fn gram(&self, _cx: &CalcContext, _purpose: ResponseUse) -> Option<Box<dyn Gram>> {
+        None
+    }
+
+    /// The nuclei's attraction V of `charges` over `pairs` on the device, its host part (the
+    /// pairs' packed data) done now; declined with the reason where the device's kernels do not
+    /// cover the basis; any other device error is the calculation's. The CPU's provider has
+    /// none.
+    fn nuclear_attraction(
+        &self,
+        _cx: &CalcContext,
+        _pairs: &PairSet,
+        _charges: &[(f64, [f64; 3])],
+    ) -> Result<Setup<Box<dyn NuclearAttraction>>, LinusError> {
+        Ok(Setup::Declined("the host computes V".into()))
+    }
+
     /// The semilocal CPKS kernel of the integrator `xc` (family `response_xc`) for the occupied
     /// orbitals `occ` (one matrix per spin channel), serving the response `kernel`.
     fn response_kernel<'a>(
@@ -299,4 +377,80 @@ impl CalcContext {
             ))),
         }
     }
+
+    /// The device's CPHF/CPKS solver for the response `purpose` of `shape` where its products
+    /// (the response J/K) run on the device, recorded (`response[].solver`: `gpu`, or `cpu` with
+    /// the reason the device declined); None where the host's solver runs (without a device
+    /// response J/K nothing is recorded).
+    pub(crate) fn response_solver(
+        &self,
+        purpose: ResponseUse,
+        shape: SolverShape,
+    ) -> Option<Box<dyn SubspaceSolver>> {
+        let device = self.backend.provider()?;
+        if self.ran(Family::ResponseJk) != Some(Placement::Device) {
+            return None;
+        }
+        let (solver, at) = match device.response_solver(self, purpose, shape) {
+            Setup::Ready(s) => (Some(s), PlaceRecord::gpu()),
+            Setup::Declined(why) => (None, PlaceRecord::cpu(why)),
+        };
+        self.backend.responses().set_solver(purpose.name(), at);
+        solver
+    }
+}
+
+impl CalcContext {
+    /// Whether the SCF's nuclear attraction V of `ncharges` point charges over `pairs` goes to
+    /// the device, and why: the plan's rule ([`crate::driver::plan::Plan::nuclear_attraction_on_device`])
+    /// beside a device J/K's setup (V's host part packs beside it, its pass runs after it); None
+    /// without one.
+    pub(crate) fn nuclear_attraction_place(
+        &self,
+        pairs: &PairSet,
+        ncharges: usize,
+    ) -> Option<(bool, String)> {
+        self.backend.provider()?;
+        if self.placement(Family::Jk) != Some(Placement::Device) {
+            return None;
+        }
+        let kept = (0..pairs.len())
+            .filter(|&k| pairs.pair(k).nprim > 0)
+            .count();
+        Some(self.plan.nuclear_attraction_on_device(kept, ncharges))
+    }
+
+    /// The device's nuclear attraction of `charges` over `pairs`, its host part packed;
+    /// declined with the reason where the device's kernels do not cover the basis.
+    pub(crate) fn nuclear_attraction(
+        &self,
+        pairs: &PairSet,
+        charges: &[(f64, [f64; 3])],
+    ) -> Result<Setup<Box<dyn NuclearAttraction>>, LinusError> {
+        match self.backend.provider() {
+            Some(device) => device.nuclear_attraction(self, pairs, charges),
+            None => Ok(Setup::Declined("no device".into())),
+        }
+    }
+
+    /// The second-order assembly's stacked GEMMs of the response `purpose` on the device where
+    /// its products (the response J/K) ran there (None: the host's).
+    pub(crate) fn device_gram(&self, purpose: ResponseUse) -> Option<Box<dyn Gram>> {
+        if self.ran(Family::ResponseJk) != Some(Placement::Device) {
+            return None;
+        }
+        self.backend.provider()?.gram(self, purpose)
+    }
+}
+
+/// The size of a response's CPHF/CPKS solve ([`Backend::response_solver`]): `len` unknowns (sum
+/// over the spin channels of nvir x nocc), `nr` right-hand sides (a Hessian's 3N) and the
+/// products' extras of `elen` (n x sum nocc; 0 when the solve keeps none).
+#[derive(Clone, Copy, Debug)]
+// read by the GPU's provider alone (the CPU's has no solver of its own to size)
+#[cfg_attr(not(feature = "gpu"), allow(dead_code))]
+pub(crate) struct SolverShape {
+    pub len: usize,
+    pub nr: usize,
+    pub elen: usize,
 }

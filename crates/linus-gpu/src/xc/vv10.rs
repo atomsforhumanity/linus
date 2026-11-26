@@ -27,7 +27,7 @@
 //! the tiles in FP64. A pair costs one division and ~25 operations in FP64, ~220 FP32
 //! operations in double-float (~330 with the gradient's sums), ~30 in FP32; on cards with
 //! little FP64 throughput (1/64 of FP32 on the RTX PRO 6000) double-float runs several times
-//! faster than FP64. docs/internal/gpu-spike.md, section VV10GPU, has the precision study.
+//! faster than FP64 (and a precision study found its energies and gradients FP64-equal).
 
 /// Points j per tile of the pair kernels (threads per block: one point i each). The tile's
 /// sums are the double-float and FP32 kernels' unit of FP64 accumulation, so it is fixed

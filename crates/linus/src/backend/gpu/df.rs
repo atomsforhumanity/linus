@@ -20,9 +20,7 @@
 //!
 //! Matrices cross the boundary column-major (`mat_to_colmajor`, `mat_from_colmajor`).
 
-use crate::backend::gpu::costing::{
-    auto_choice, df_shrunk_cost, df_stream_cost, AutoChoice, ExchangeCosting,
-};
+use crate::backend::gpu::costing::{auto_choice, AutoChoice, ExchangeCosting};
 use crate::backend::gpu::device_error;
 use crate::backend::gpu::setup;
 use crate::backend::scf::{ScfJk, ScfJkBuilt, ScfRun};
@@ -46,8 +44,8 @@ use linus_base::terms::{JkBuilder, JkOutput, JkRequest, ResponseJk};
 use linus_core::timing::Timers;
 use linus_core::Arith;
 use linus_gpu::df::{
-    DfFit, DfIntegrals, DfLayout, DfShared, DfStorage, Factor, GpuDfJk, GpuDfJkOptions,
-    GpuJkOutput, GpuJkRequest, KMath,
+    DfFit, DfIntegrals, DfShared, DfStorage, Factor, GpuDfJk, GpuDfJkOptions, GpuJkOutput,
+    GpuJkRequest, KMath,
 };
 use linus_gpu::engine::Phases;
 use linus_gpu::response::df::{GpuDfResponse, GpuDfResponseOptions, RespMath};
@@ -180,7 +178,7 @@ fn emulate_k(gpu: &Gpu, eng: &mut GpuDfJk, chain: &[Arith]) -> EmulationUsed {
             reason: r.fit_note.clone(),
         },
     });
-    let used = apply_chain(chain, |a| eng.set_k_math(gpu, kmath(a), false));
+    let used = apply_chain(chain, |a| eng.set_k_math(gpu, kmath(a)));
     let r = eng.resolved();
     let ozaki = matches!(used.arith, Arith::Ozaki { .. });
     emulation_used(
@@ -331,18 +329,13 @@ impl CoulombFit {
     }
 }
 
-/// A DF-J/K engine for `basis` and `aux` on the cheapest rung that fits the engine's allowance
-/// (`opts.device_budget`, else the device's free memory). First the tensor on the device with the
-/// automatic K block; then, by their costs per build (decision D11, [`df_shrunk_cost`],
-/// [`df_stream_cost`]): the tensor on the device with the K block shrunk to fit
-/// ([`GpuDfJkOptions::k_block_fit`], at least [`linus_gpu::df::K_BLOCK_MIN`]) and streamed from
-/// page-locked host memory with the automatic block (when the tensor fits `host_budget` bytes;
-/// None: device only), the device-resident one first unless even its smallest block costs more
-/// than streaming the tensor; last, streamed with the block shrunk. Every rung counts the planned
-/// exchange arithmetic's workspace ([`GpuDfJkOptions::k_planned`]). None fitting is an
-/// out-of-memory or unsupported error, which makes the caller fall back to the CPU (the host loop
-/// and the CPU's J/K are the SCF's next rungs, `crate::backend::scf`). The layout, packed
-/// integrals and metric come from `shared` when given ([`GpuDfJk::with_shared`]).
+/// A DF-J/K engine for `basis` and `aux` on the rung of its storage plan
+/// (`linus_gpu::df::plan::plan`: the cheapest rung of decision D11's ladder that fits
+/// `opts.device_budget`; streamed only within `host_budget` bytes, None: the device only). A plan
+/// with no rung that fits is an out-of-memory or unsupported error, which makes the caller fall
+/// back to the CPU (the host loop and the CPU's J/K are the SCF's next rungs,
+/// `crate::backend::scf`). The layout, packed integrals and metric come from `shared` when given
+/// ([`GpuDfJk::with_shared`]).
 fn df_engine(
     gpu: &Gpu,
     basis: &BasisSet,
@@ -351,98 +344,50 @@ fn df_engine(
     host_budget: Option<usize>,
     shared: Option<&DfShared>,
 ) -> Result<GpuDfJk, GpuError> {
-    let attempt = |storage: DfStorage, fit: bool| {
-        GpuDfJk::with_shared(
-            gpu,
-            basis,
-            aux,
-            &GpuDfJkOptions {
-                storage,
-                k_block_fit: fit,
-                ..opts.clone()
-            },
-            shared,
-        )
+    let opts = GpuDfJkOptions {
+        host_budget: Some(host_budget.unwrap_or(0)),
+        ..opts
     };
-    let oom = |r: &Result<GpuDfJk, GpuError>| matches!(r, Err(GpuError::OutOfMemory { .. }));
-    let r = attempt(DfStorage::Device, false);
-    if !oom(&r) {
-        return r;
-    }
-    let gib = |b: usize| b as f64 / 1073741824.0;
-    // B, and B^omega of a range-separated hybrid prepared at setup
-    let tensor = match shared {
-        Some(s) if s.fits(basis, aux, &opts.thresholds) => s.layout.tensor_bytes(),
-        _ => DfLayout::new(
-            basis,
-            &linus_gpu::cpu::Aux3c::new(aux),
-            opts.thresholds.pair,
-        )
-        .tensor_bytes(),
-    } * if opts.omega.is_some() { 2 } else { 1 };
-    let host = host_budget.is_some_and(|b| tensor <= b);
-    // the rungs below in the order of their costs per build: the device-resident tensor with
-    // the automatic K block shrunk to fit (an explicit block stays as set), counted at its
-    // smallest block, against streaming the tensor with the automatic block
-    let shrink = opts.k_block == 0;
-    let nq_auto = linus_gpu::df::auto_k_block(basis.nbf, aux.nbf, opts.k_workspace);
-    let shrunk_first = shrink
-        && df_shrunk_cost(aux.nbf, nq_auto, linus_gpu::df::K_BLOCK_MIN) <= df_stream_cost(tensor);
-    let rungs = [
-        (shrunk_first, DfStorage::Device, true),
-        (host, DfStorage::Host, false),
-        (shrink && !shrunk_first, DfStorage::Device, true),
-        (shrink && host, DfStorage::Host, true),
-    ];
-    let mut last = r;
-    for (_, storage, fit) in rungs.into_iter().filter(|r| r.0) {
-        last = attempt(storage, fit);
-        if !oom(&last) {
-            return last;
-        }
-    }
-    match host_budget {
-        Some(_) if host => last,
-        Some(budget) => Err(GpuError::NotCovered(format!(
-            "the density-fitting tensor ({:.2} GiB) fits neither the device nor the host budget of its \
-             streamed storage ({:.2} GiB, 75% of memory_gib)",
-            gib(tensor),
-            gib(budget)
-        ))),
-        None => Err(GpuError::NotCovered(format!(
-            "the density-fitting tensor ({:.2} GiB) and the range-separated exchange's second tensor do not fit \
-             the device",
-            gib(tensor)
-        ))),
-    }
+    GpuDfJk::with_shared(gpu, basis, aux, &opts, shared)
 }
 
 /// The storage rung a device DF-J/K engine set up on ([`df_engine`]) and why, for
 /// `resolved.record.df.rung`.
 fn df_rung(r: &linus_gpu::df::GpuDfJkResolved) -> String {
     let gib = |b: usize| b as f64 / 1073741824.0;
-    let auto = linus_gpu::df::auto_k_block(r.nbf, r.naux, GpuDfJkOptions::default().k_workspace);
+    let (p, auto) = (&r.plan, r.plan.auto_block);
     let ms = |s: f64| 1e3 * s;
-    let shrunk = if r.k_block < auto {
-        let cost = df_shrunk_cost(r.naux, auto, r.k_block);
+    let shrunk = if p.k_block < auto {
         let costs = if r.storage == DfStorage::Host {
             String::new()
         } else {
             format!(
                 " (about {:.0} ms per build, against {:.0} ms for streaming the tensor from host \
                  memory: decision D11's costs)",
-                ms(cost),
-                ms(df_stream_cost(r.tensor_bytes))
+                ms(p.extra_seconds),
+                ms(p.stream_seconds)
             )
         };
         format!(
             ", with the K block shrunk from {auto} to {} functions to fit beside the other engines' \
              reserve{costs}",
-            r.k_block
+            p.k_block
         )
     } else {
         String::new()
     };
+    // the SCF's check before its first build (GpuScfJk::fit)
+    let fitted = if r.k_block < p.k_block {
+        format!(
+            "; the K block stepped down from {} to {} functions before the first build: the other \
+             engines' per-call needs (VV10's, the PCM's, the XC batches') beside their reserve \
+             are no plan item",
+            p.k_block, r.k_block
+        )
+    } else {
+        String::new()
+    };
+    let shrunk = shrunk + &fitted;
     match r.storage {
         DfStorage::Host => format!(
             "streamed from host memory: the tensor ({:.2} GiB) and a build's workspace do not fit the \
@@ -464,8 +409,12 @@ pub(crate) struct ScfJkSetup {
     /// The exchange GEMMs' fallback chain and the fit's arithmetic (the device policy's).
     pub k: &'static [Arith],
     pub fit: Arith,
-    /// Native K's resident dense planes (the device policy's).
-    pub k_dense: bool,
+    /// Native K's panel GEMM (the device policy's, [`panel_kernel`]).
+    pub k_panel_kernel: linus_gpu::df::PanelKernel,
+    /// The device bytes the engine plans within ([`scf_df_budget`]) and the factor columns of
+    /// the SCF's builds ([`scf_k_columns`]).
+    pub device_budget: usize,
+    pub k_columns: usize,
     /// The range separation of a range-separated hybrid (B^omega prepared at setup).
     pub omega: Option<f64>,
     /// Bytes of host memory for a streamed tensor.
@@ -491,17 +440,7 @@ impl GpuDfJkBuilder {
         setup: ScfJkSetup,
         shared: Option<&DfShared>,
     ) -> Result<(Self, Option<EmulationUsed>), GpuError> {
-        let opts = GpuDfJkOptions {
-            omega: setup.omega,
-            fit: df_fit(setup.fit),
-            k_dense: setup.k_dense,
-            others_reserve: setup.others_reserve,
-            integrals: setup.integrals,
-            // the exchange's arithmetic, set after the setup ([`emulate_k`]): its workspace
-            // counts in the storage plan
-            k_planned: setup.k.first().map_or(KMath::Native, |&a| kmath(a)),
-            ..GpuDfJkOptions::default()
-        };
+        let opts = scf_df_options(&setup);
         let mut eng = df_engine(&gpu, basis, aux, opts, Some(setup.host_budget), shared)?;
         let emu = (setup.k != NATIVE).then(|| emulate_k(&gpu, &mut eng, setup.k));
         Ok((
@@ -531,7 +470,8 @@ impl GpuDfJkBuilder {
         }
     }
 
-    /// What the setup resolved to, as `resolved.record.df` reports it.
+    /// What the setup resolved to (and the SCF's check before its first build fitted), as
+    /// `resolved.record.df` reports it.
     pub(crate) fn resolved(&self) -> ResolvedDf {
         let r = self.eng.resolved();
         ResolvedDf {
@@ -559,6 +499,9 @@ impl GpuDfJkBuilder {
                     v.what, v.requested, v.remaining, v.granted
                 )
             }),
+            // the panels' GEMM runs for native FP64 K
+            k_kernel: matches!(r.k_math, linus_gpu::df::KMath::Native)
+                .then(|| r.k_panel_kernel.name()),
         }
     }
 
@@ -736,6 +679,11 @@ impl GpuScfJk {
         self.b.take()
     }
 
+    /// The builder back from the device loop.
+    pub(crate) fn put(&mut self, b: GpuDfJkBuilder) {
+        self.b = Some(b);
+    }
+
     fn get(&mut self) -> &mut GpuDfJkBuilder {
         self.b
             .as_mut()
@@ -753,6 +701,10 @@ impl ScfJk for GpuScfJk {
             self.b
                 .expect("the SCF's device J/K after the device loop took it"),
         )
+    }
+
+    fn df_record(&mut self) -> Option<ResolvedDf> {
+        self.b.as_ref().map(|b| b.resolved())
     }
 
     /// The device's J/K against the device memory free once every SCF engine is set up, before
@@ -774,8 +726,29 @@ impl ScfJk for GpuScfJk {
         let device_loop =
             cx.placement(Family::ScfLoop) == Some(Placement::Device) && loop_declined.is_none();
         let (builds, probe) = scf_builds(cx, run);
+        let reserve = device_memory(cx)?.others_reserve;
         let b = self.get();
         let gib = |x: usize| x as f64 / 1073741824.0;
+        // the panel path's automatic block stepped down until the largest build fits what the
+        // other engines left, their reserve kept free for what they allocate per call. The
+        // setup's plan cannot know this yet: it counts the other engines by that reserve alone,
+        // and their setups and per-call needs (VV10's, the PCM's, the XC batches') are no plan
+        // item (u1an39/def2-SVP wB97M-V UKS with C-PCM under an 8 GB cap ran out of device
+        // memory in its second build). Here every engine is set up and nothing runs beside
+        // this check, and `free` is the device pool's own accounting under its limit (not the
+        // driver's free memory, which other processes on the card move): the same block for
+        // one device, cap and calculation. The record says so (`df_rung`).
+        loop {
+            let (_, free) = b.build_fit(0, &[], false);
+            let largest = builds
+                .iter()
+                .map(|(nd, cols)| b.build_fit(*nd, cols, false).0)
+                .max()
+                .unwrap_or(0);
+            if largest + reserve <= free || !b.eng.shrink_panel_block() {
+                break;
+            }
+        }
         // the closed-shell probe's builds count whether or not its gap gate fires
         let counted = if probe {
             " (the closed-shell probe's two-spin builds counted)"
@@ -893,34 +866,77 @@ fn block_factor_columns(d: &Mat<f64>, basis: &BasisSet) -> Option<usize> {
     Some(w.iter().filter(|&&x| x > cut || x < -cut).count())
 }
 
-/// The SCF's J/K on the device for the auxiliary basis `aux`, set up with `scf` (timed as
-/// `jk_setup`), with the range-separated exchange operator of the method; declined (the CPU's
-/// `DfJk`) when the setup does not fit.
-pub(crate) fn scf_jk(
+/// The DF layout, packed integrals and metric of the SCF's J/K on the device for `aux` (the
+/// layout screens the geometry's shell pairs, built while the device opened, with their
+/// Schwarz factors: the same layout as from pairs of its own).
+pub(crate) fn df_shared(calc: &CalcContext, aux: &BasisSet) -> Result<Arc<DfShared>, GpuError> {
+    let pairs = calc
+        .integrals
+        .pairs(&calc.basis, linus_ints::DerivOrder::Zero);
+    DfShared::with_pairs(
+        &calc.basis,
+        aux,
+        &GpuDfJkOptions::default().thresholds,
+        Some(&pairs),
+    )
+    .map(Arc::new)
+}
+
+/// What the SCF's device J/K is set up with: the device policy's arithmetic, the memory plan's
+/// reserve, `scf`'s host budget, the plan's integrals, and the range separation `omega` of a
+/// range-separated exchange on the engine (None: J alone, or K of another engine).
+pub(crate) fn scf_jk_setup(
     calc: &CalcContext,
-    gpu: &Arc<Gpu>,
     scf: &ScfSetup,
-    aux: &BasisSet,
-    timers: &mut Timers,
-) -> Result<Setup<ScfJkBuilt>, LinusError> {
+    omega: Option<f64>,
+) -> Result<ScfJkSetup, LinusError> {
+    scf_jk_setup_within(calc, scf.memory.df_bytes(), omega)
+}
+
+/// [`scf_jk_setup`] with `host_budget` bytes of page-locked host memory for a streamed tensor
+/// (zero: the device only), for callers ahead of the SCF's setup ([`scf_df_plan`]).
+fn scf_jk_setup_within(
+    calc: &CalcContext,
+    host_budget: usize,
+    omega: Option<f64>,
+) -> Result<ScfJkSetup, LinusError> {
     let policy = device_policy(calc)?;
-    let setup_opts = ScfJkSetup {
+    Ok(ScfJkSetup {
         k: policy.scf_k,
         fit: policy.scf_fit,
-        k_dense: policy.k_dense,
-        omega: calc.method.omega(),
-        host_budget: scf.memory.df_bytes(),
+        k_panel_kernel: panel_kernel(policy),
+        device_budget: scf_df_budget(calc)?,
+        k_columns: scf_k_columns(calc)?,
+        omega,
+        host_budget,
         others_reserve: device_memory(calc)?.others_reserve,
         integrals: match calc.plan.uncovered() {
             Some(_) => DfIntegrals::Cpu,
             None => DfIntegrals::Auto,
         },
-    };
+    })
+}
+
+/// The SCF's J/K on the device for the auxiliary basis `aux`, set up with `scf` (timed as
+/// `jk_setup`), with the range-separated exchange operator of the method, on `shared` (the
+/// layout, integrals and metric a caller built already) or a [`df_shared`] of its own;
+/// declined (the CPU's `DfJk`) when the setup does not fit.
+pub(crate) fn scf_jk(
+    calc: &CalcContext,
+    gpu: &Arc<Gpu>,
+    scf: &ScfSetup,
+    aux: &BasisSet,
+    shared: Option<Arc<DfShared>>,
+    timers: &mut Timers,
+) -> Result<Setup<ScfJkBuilt>, LinusError> {
+    let setup_opts = scf_jk_setup(calc, scf, calc.method.omega())?;
     let built = timers.time("jk_setup", || {
         // the layout, packed integrals and metric, kept for the derivatives
         // (crate::backend::gpu::session) of an SCF converged for them
-        let d = GpuDfJkOptions::default();
-        let shared = Arc::new(DfShared::new(&calc.basis, aux, &d.thresholds)?);
+        let shared = match shared {
+            Some(s) => s,
+            None => df_shared(calc, aux)?,
+        };
         calc.hand_off_df(scf.purpose, shared.clone(), aux);
         GpuDfJkBuilder::new(gpu.clone(), &calc.basis, aux, setup_opts, Some(&shared))
     });
@@ -978,6 +994,89 @@ pub(crate) fn device_policy(calc: &CalcContext) -> Result<&DevicePolicy, LinusEr
         .ok_or_else(|| LinusError::Internal("a device setup without a device".into()))
 }
 
+/// The engine options of the SCF's device DF-J/K set up with `setup` ([`GpuDfJkBuilder::new`],
+/// [`scf_df_plan`]).
+fn scf_df_options(setup: &ScfJkSetup) -> GpuDfJkOptions {
+    GpuDfJkOptions {
+        omega: setup.omega,
+        fit: df_fit(setup.fit),
+        k_panel_kernel: setup.k_panel_kernel,
+        // the plan's budget is net of the other engines' reserve: no second reserve on the
+        // shrunk rungs
+        device_budget: Some(setup.device_budget),
+        host_budget: Some(setup.host_budget),
+        shrink_reserve: Some(0),
+        k_columns: Some(setup.k_columns),
+        others_reserve: setup.others_reserve,
+        integrals: setup.integrals,
+        // the exchange's arithmetic, set after the setup ([`emulate_k`]): its workspace counts in
+        // the storage plan
+        k_planned: setup.k.first().map_or(KMath::Native, |&a| kmath(a)),
+        ..GpuDfJkOptions::default()
+    }
+}
+
+/// The storage plan of the SCF's device DF-J/K for `sizes` (`linus_gpu::df::plan::plan`, the
+/// rule its setup applies, with the setup's bytes beside the tensors less the device integrals'
+/// builder, known only once packed), with B^omega for `omega` and `host_budget` bytes of
+/// page-locked host memory for streamed tensors (zero: the device only): for callers that decide
+/// ahead of the setup (the placement's memory needs; the memory-lean J's choice).
+pub(crate) fn scf_df_plan(
+    calc: &CalcContext,
+    sizes: linus_gpu::df::plan::DfSizes,
+    omega: Option<f64>,
+    host_budget: usize,
+) -> Result<Result<linus_gpu::df::plan::DfPlan, linus_gpu::df::plan::DfPlanRefusal>, LinusError> {
+    let setup = scf_jk_setup_within(calc, host_budget, omega)?;
+    let opts = scf_df_options(&setup);
+    let request = linus_gpu::df::plan_request(
+        &opts,
+        sizes,
+        setup.device_budget,
+        linus_gpu::df::plan::setup_bytes(&sizes),
+    );
+    Ok(linus_gpu::df::plan::plan(&request))
+}
+
+/// The device bytes the SCF's DF-J/K engine plans within (`linus_gpu::df::plan`): the memory
+/// plan's device limit less its reserve for the other engines (the XC engines, whose grid
+/// partition sets up beside it, PCM, the device loop's state). A share of the plan, not the
+/// memory free at the setup, so the storage, the K block and the bits do not depend on what the
+/// other engines hold at that moment.
+pub(crate) fn scf_df_budget(calc: &CalcContext) -> Result<usize, LinusError> {
+    let m = device_memory(calc)?;
+    Ok(m.limit.saturating_sub(m.others_reserve))
+}
+
+/// The factor columns of the SCF's largest builds, which the panel path's block is sized for:
+/// none without exact exchange (J alone); a closed shell's two-spin builds (the closed-shell
+/// probe's, twice the occupied orbitals; the SAD guess's per-atom factors stay below them);
+/// both spins' for open shells. A build with more columns runs in passes, each reading the
+/// tensor again (sized for a closed shell's occupied orbitals alone, ts61/def2-QZVP's J/K took
+/// 19 % longer on the H200, the probe's and the guess's builds in two passes or more).
+pub(crate) fn scf_k_columns(calc: &CalcContext) -> Result<usize, LinusError> {
+    // as the SCF's builds count their factors (scf_builds)
+    if linus_base::terms::exchange_parts(calc.method.exchange).0 == 0.0 {
+        return Ok(0);
+    }
+    let (na, nb) = calc.mol.nalpha_nbeta().map_err(LinusError::Input)?;
+    Ok(if calc.plan.restricted().unwrap_or(na == nb) {
+        2 * na
+    } else {
+        na + nb
+    })
+}
+
+/// Native K's panel GEMM of the device policy: the sm_90a tensor-core kernel
+/// (`DevicePolicy::k_tensor_cores`), else cuBLAS on the gathered panels.
+pub(crate) fn panel_kernel(policy: &DevicePolicy) -> linus_gpu::df::PanelKernel {
+    if policy.k_tensor_cores {
+        linus_gpu::df::PanelKernel::MmaSm90a
+    } else {
+        linus_gpu::df::PanelKernel::Strided
+    }
+}
+
 /// The session's device memory plan (a device is open when a family runs on it).
 pub(crate) fn device_memory(
     calc: &CalcContext,
@@ -995,8 +1094,6 @@ pub(crate) struct ResponseMemory {
     pub operator_host: usize,
     /// The device's reserves and workspaces.
     pub device: crate::driver::memory::DeviceMemoryPlan,
-    /// Native K's resident dense planes (the device policy's).
-    pub k_dense: bool,
 }
 
 /// The label of an exchange arithmetic in `resolved.record.backend.response`.
@@ -1084,7 +1181,10 @@ impl GpuResponseJk {
     /// operator when it pays, fits (on the device, or streamed from host memory) and is the
     /// cheaper path by the policy's exchange costing, else (and if it later does not fit) the
     /// FP32 exchange through the tensor; returns the choice.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the response's inputs: the orbitals, the operator, the recipe, its memory and records"
+    )]
     pub(crate) fn new(
         gpu: Arc<Gpu>,
         basis: &BasisSet,
@@ -1133,7 +1233,6 @@ impl GpuResponseJk {
         let jopts = GpuDfJkOptions {
             device_budget: Some(free.saturating_sub(ybytes + ropts.workspace)),
             others_reserve: plan.others_reserve,
-            k_dense: memory.k_dense,
             ..GpuDfJkOptions::default()
         };
         // range-separated exchange: its operator tensor needs the tensor on the device
@@ -1338,7 +1437,6 @@ pub(crate) fn response_setup(
         tensor_host: gs.setup.memory.df_bytes(),
         operator_host: calc.plan.memory().response_operator_host_bytes(),
         device: device_memory(calc)?,
-        k_dense: policy.k_dense,
     };
     let built = timers.time(timer, || {
         GpuResponseJk::new(
@@ -1638,7 +1736,9 @@ impl GradientTerm for GpuJkGradient<'_> {
 /// orbitals per channel and the exchange operator `xop` (coefficients included: a_x/r for HF and
 /// global hybrids, a/r + b erf(omega r)/r for range-separated ones, the wK scheme of the CPU's
 /// `df_gradient`), declined when its setup and workspace do not fit; timed as `grad_2e_setup`
-/// (and `grad_2e`).
+/// (and `grad_2e`). Its derivative planes are the device policy's
+/// (`DevicePolicy::df_grad_planes`); the kernels it takes, and why, go to the record
+/// (`resolved.record.backend.gradient_jk_kernels`).
 fn gradient_engine(
     calc: &CalcContext,
     gpu: &Arc<Gpu>,
@@ -1647,30 +1747,51 @@ fn gradient_engine(
     xop: Operator,
     timers: &mut Timers,
 ) -> Result<Setup<linus_gpu::grad::df::GpuDfGrad>, LinusError> {
-    use linus_gpu::grad::df::{GpuDfGrad, GpuDfGradOptions};
+    use linus_gpu::grad::df::{DerivPlanes, GpuDfGrad, GpuDfGradOptions};
+    let policy = device_policy(calc)?;
+    let opts = GpuDfGradOptions {
+        planes: if policy.df_grad_planes {
+            DerivPlanes::StoredOrFused
+        } else {
+            DerivPlanes::Fused
+        },
+        ..GpuDfGradOptions::default()
+    };
     let t0 = std::time::Instant::now();
     // the SCF's layout, integrals, metric and derivative records (crate::backend::gpu::session),
     // once the records packed during the SCF are done
     let shared = calc.device_session().and_then(|s| s.df());
     timers.add("grad_2e_setup_wait", t0.elapsed().as_secs_f64());
-    let built = GpuDfGrad::with_shared(
-        gpu,
-        &calc.basis,
-        aux,
-        &GpuDfGradOptions::default(),
-        shared.as_deref(),
-    )
-    .and_then(|mut g| {
-        // the erf integrals of a range-separated operator, then the workspace of the gradient
-        // pass on top of the setup's allocations
-        g.prepare_operator(gpu, &xop)?;
-        g.grant_workspace(gpu, ncols, &xop)?;
-        Ok(g)
-    });
+    let built = GpuDfGrad::with_shared(gpu, &calc.basis, aux, &opts, shared.as_deref()).and_then(
+        |mut g| {
+            // the erf integrals of a range-separated operator, then the workspace of the gradient
+            // pass on top of the setup's allocations
+            g.prepare_operator(gpu, &xop)?;
+            g.grant_workspace(gpu, ncols, &xop)?;
+            Ok(g)
+        },
+    );
     let t_setup = t0.elapsed().as_secs_f64();
     timers.add("grad_2e_setup", t_setup);
     timers.add("grad_2e", t_setup);
     if let Ok(g) = &built {
+        let k = g.kernels(ncols, &xop);
+        let reason = match (k.declined, k.kernels) {
+            (Some(why), _) => why,
+            (None, "hermite_j") => "no exchange: the rank-1 Gamma contracted in Hermite space (no \
+                                   integral block or derivative plane)"
+                .to_string(),
+            (None, "stored_planes") => "the device policy on FP64-rich cards: the derivative \
+                                       planes stored and contracted (the fused kernels' atomics \
+                                       bind there)"
+                .to_string(),
+            (None, _) => "the device policy: Gamma contracted inside the derivative kernels".into(),
+        };
+        calc.record
+            .decide(crate::driver::record::Decision::GradientJkKernels {
+                kernels: k.kernels,
+                reason,
+            });
         let s = &g.setup_times;
         for (name, v) in s.phases() {
             timers.add(&format!("grad_2e_setup_{name}"), v);
@@ -1746,11 +1867,14 @@ mod tests {
     #[test]
     fn response_recipes() {
         use crate::driver::options::{Fp64Mode, ResponsePrecision as P};
-        use crate::driver::policy::{CardClass, ExchangeRates, EMULATION};
-        let rates = ExchangeRates::of((12, 0), 188, 2_280_000, Some(500.0));
+        use crate::driver::policy::{CardClass, CardProps, EMULATION};
         let pol = |fp64, fp32, rich: bool| {
             let int8 = Some(if rich { 30.0 } else { 500.0 });
-            DevicePolicy::new(fp64, fp32, CardClass::new(rich, int8), "x", rates)
+            DevicePolicy::new(
+                fp64,
+                fp32,
+                &CardProps::of_class(CardClass::new(rich, int8), (12, 0)),
+            )
         };
         let rich = pol(Fp64Mode::Auto, Fp32Mode::Auto, true);
         let poor = pol(Fp64Mode::Auto, Fp32Mode::Auto, false);

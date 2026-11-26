@@ -17,9 +17,19 @@
 #define LINUS_HIP 1
 // HIP shuffles take the width; all lanes of the wavefront take part
 #define linus_shfl_down(v, d) __shfl_down((v), (d), LINUS_WARP_SIZE)
+#define linus_shfl_xor(v, m) __shfl_xor((v), (m), LINUS_WARP_SIZE)
+#define linus_shfl(v, src) __shfl((v), (src), LINUS_WARP_SIZE)
+// a 64-bit mask on either vendor (bit l: lane l)
+#define linus_ballot(p) ((unsigned long long)__ballot(p))
+// a wavefront runs in lockstep
+#define linus_syncwarp() ((void)0)
 #else
 #define LINUS_CUDA 1
 #define linus_shfl_down(v, d) __shfl_down_sync(0xffffffffu, (v), (d), LINUS_WARP_SIZE)
+#define linus_shfl_xor(v, m) __shfl_xor_sync(0xffffffffu, (v), (m), LINUS_WARP_SIZE)
+#define linus_shfl(v, src) __shfl_sync(0xffffffffu, (v), (src), LINUS_WARP_SIZE)
+#define linus_ballot(p) ((unsigned long long)__ballot_sync(0xffffffffu, (p)))
+#define linus_syncwarp() __syncwarp()
 #endif
 
 #endif

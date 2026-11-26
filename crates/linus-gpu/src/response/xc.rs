@@ -1193,7 +1193,6 @@ mod device {
                     &c,
                     Collocation::Own,
                     xyz,
-                    &mut bat.phi,
                     Some(&mut bat.phic),
                     if single { Some(&mut bat.phic32) } else { None },
                 )?;

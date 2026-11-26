@@ -14,6 +14,10 @@
 //! - [`pcm_gen`]: the PCM surface-charge kernels generated offline by tools/intgen (cuda_pcm.py),
 //!   two per Hermite degree (potentials and charge accumulators; first derivatives). Used by
 //!   [`crate::pcm`].
+//! - [`jengine_gen`]: the J-engine contractions of the density-fitted Coulomb terms in Hermite
+//!   space, generated offline by tools/intgen (cuda_jengine.py): three families (orbital-pair or
+//!   auxiliary bras and kets), one kernel per (bra accumulator degree, ket degree). Used by the
+//!   J-only DF gradient (`grad::df_j`) and the memory-lean DF-J (`jdirect`).
 //! - `registry` (feature `gpu`): every hand-written module (name, source, entry points), for
 //!   the compile test and the kernel manifest.
 //! - [`vgemm`]: variable-size batched FP64 GEMMs (many small products of different shapes in
@@ -24,12 +28,15 @@ pub mod colloc;
 #[cfg(any(test, feature = "testkit"))]
 pub mod eri3c;
 pub mod eri3c_class;
+pub mod gridk;
 #[rustfmt::skip]
 pub mod eri3c_gen;
 /// The per-architecture variants of [`eri3c_gen`] (generated as eri3c_gen/arch.rs).
 #[rustfmt::skip]
 #[path = "eri3c_gen/arch.rs"]
 pub mod eri3c_gen_arch;
+#[rustfmt::skip]
+pub mod jengine_gen;
 #[rustfmt::skip]
 pub mod pcm_gen;
 #[cfg(feature = "gpu")]

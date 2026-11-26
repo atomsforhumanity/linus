@@ -21,32 +21,38 @@
 //! 1. **Integrals** (mn|P) of the block's pairs on the device ([`crate::eri3c`]); gamma by a
 //!    GEMV with the density rows. With exchange, the rows are unpacked into a dense
 //!    Ad\[m\]\[n\]\[P\] (diagonal shell blocks at half weight, so that X = Y + Y^T), and
-//!    Y\[i\]\[j\]\[P\] += sum_m C_mi sum_n Ad\[m\]\[n\]\[P\] C_nj by GEMMs (one per m, then one
-//!    for the block).
+//!    Y\[i\]\[j\]\[P\] += sum_m C_mi sum_n Ad\[m\]\[n\]\[P\] C_nj by two GEMMs (a strided
+//!    batch over m, then one for the block).
 //! 2. **Fit:** X = Y + Y^T over the orbital pairs i >= j (off-diagonal ones scaled by sqrt 2, so
 //!    that sums over the pairs are the full sums), then c and X~ by two triangular solves with
 //!    the metric's Cholesky factor (cuSOLVER, cuBLAS).
 //! 3. **Metric term:** g_PQ by GEMMs over the packed pairs (its lower triangle), to the host, where
 //!    linus-ints' two-center derivative integrals contract it (small: naux^2 against nx naux).
 //! 4. **Three-center term:** per block, Zd\[m\]\[n\]\[P\] = a_x sum_s w_s (C_s X~^s_P C_s^T)_mn
-//!    for n < m1 by GEMMs; then per sub-block of pairs Gamma = f (c D - Zd) in the integral row
-//!    layout (f = 2 for the rows of off-diagonal shell pairs), contracted with the derivative
-//!    integrals inside [`crate::eri3c`]'s derivative kernels (`Eri3c::gradient`: the pair
-//!    centres and, by translational invariance, the auxiliary centre, per atom in fixed
-//!    point; no derivative integral stored). The first implementation (`fused: false`) stores
-//!    the six derivative planes of a sub-block and contracts them here: one thread per
-//!    auxiliary function walks the rows of a chunk of pairs, pair sums to their atoms and
-//!    auxiliary sums to their functions, both in fixed point ([`crate::detsum`]).
+//!    for n < m1 by a strided batch of GEMMs; then per sub-block of pairs Gamma = f (c D - Zd) in
+//!    the integral row layout (f = 2 for the rows of off-diagonal shell pairs), contracted with
+//!    the derivative integrals in one of two ways ([`DerivPlanes`], the caller's choice: linus
+//!    passes its device policy's). Fused: inside [`crate::eri3c`]'s derivative kernels
+//!    (`Eri3c::gradient`: the pair centres and, by translational invariance, the auxiliary
+//!    centre, per atom in fixed point; no derivative integral stored). Stored planes (the
+//!    default on FP64-rich cards, where the fused kernels' atomics bind): the six derivative
+//!    planes of a sub-block are stored and contracted here, one thread per auxiliary function
+//!    walking the rows of a chunk of pairs, pair sums to their atoms and auxiliary sums to their
+//!    functions, both in fixed point ([`crate::detsum`]); when their workspace does not fit, the
+//!    fused kernels run and the call says so (`GpuDfGrad::kernels`).
 //!
 //! In the code the total density and its rows come first (`density`), then each step is a
 //! method of `GpuDfGrad`: `pass1`, `fit`, `metric_term` (the device's GEMMs and the download),
-//! `unpack_fit` (X~ in full for step 4) and `metric_contraction` (the host's part, while the
-//! device unpacks), `pass2`, and `assemble` (the downloads and the sums per atom). A method
-//! takes the call's context `GradCall` (the inputs, the sizes the steps share, the timeline of
-//! device events behind `GpuDfGradTimes`) and the buffers earlier steps left (`Pass1`,
+//! `unpack_fit` (X~ in full for step 4), `pass2`, `metric_contraction` (the host's part, while
+//! the device unpacks and runs pass 2), and `assemble` (the downloads and the sums per atom). A
+//! method takes the call's context `GradCall` (the inputs, the sizes the steps share, the
+//! timeline of device events behind `GpuDfGradTimes`) and the buffers earlier steps left (`Pass1`,
 //! `Pass2`).
 //!
-//! Without exchange (a_x = 0 or no occupied orbitals) only gamma, c and the J terms are formed.
+//! Without exchange (a_x = 0 or no occupied orbitals) the gradient is contracted in Hermite space
+//! (`grad::df_j`, [`GpuDfGradOptions::hermite_j`]: no integral block, derivative plane
+//! or Gamma) where its kernels cover the bases; elsewhere only gamma, c and the J terms are
+//! formed on the steps above.
 //!
 //! Range-separated exchange: the same builders compute the erf integrals and derivatives
 //! ([`crate::eri3c`]'s erf kernels, compiled at the first such gradient or by
@@ -77,11 +83,17 @@ pub struct GpuDfGradOptions {
     /// Also report the Coulomb and exchange parts separately (costs a second metric
     /// contraction on the host and, fused, a second derivative pass).
     pub split_terms: bool,
-    /// Contract Gamma inside the derivative kernels ([`crate::eri3c`]'s `Eri3c::gradient`):
-    /// no derivative integral is stored; `deriv_bytes` then bounds the Gamma rows of a
-    /// sub-block. Off: the six derivative planes are stored per sub-block and contracted by a
-    /// kernel of this module (the first implementation, kept as a cross-check).
-    pub fused: bool,
+    /// Where the derivative integrals meet Gamma ([`DerivPlanes`]; linus passes its device
+    /// policy's choice). Default: fused into the derivative kernels.
+    pub planes: DerivPlanes,
+    /// Gradients without exchange in Hermite space (`grad::df_j`: no integral block,
+    /// derivative plane or Gamma; the rank-1 Gamma c D contracted as Hermite densities), where
+    /// its kernels cover the bases (orbital l <= 3, auxiliary l <= 4); off: the integral and
+    /// derivative kernels as with exchange. On by default on every card: it is the faster on
+    /// both classes (RTX PRO 6000, def2-SVP: 0.24 against 0.54 s per gradient at u1an39, 0.35
+    /// against 1.25 s at ts61), unlike the SCF's memory-lean J, whose Hermite kernels lose to its
+    /// recomputed integrals there (linus's `DevicePolicy::j_direct_hermite`).
+    pub hermite_j: bool,
 }
 
 impl Default for GpuDfGradOptions {
@@ -91,9 +103,38 @@ impl Default for GpuDfGradOptions {
             block_bytes: 2 << 30,
             deriv_bytes: 2 << 30,
             split_terms: false,
-            fused: true,
+            planes: DerivPlanes::Fused,
+            hermite_j: true,
         }
     }
+}
+
+/// Where the DF gradient's derivative integrals meet Gamma ([`GpuDfGradOptions::planes`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DerivPlanes {
+    /// Gamma contracted inside the derivative kernels ([`crate::eri3c`]'s `Eri3c::gradient`): no
+    /// derivative integral is stored; `deriv_bytes` bounds the Gamma rows of a sub-block.
+    Fused,
+    /// The six derivative planes of a sub-block stored and contracted by a kernel of this
+    /// module: faster where FP64 is fast (H200: the fused kernels' global fixed-point atomics
+    /// bind; the stored planes and their contraction take 0.5-0.7x their time), in a workspace
+    /// up to six times the fused path's Gamma rows.
+    Stored,
+    /// [`DerivPlanes::Stored`], or [`DerivPlanes::Fused`] when the planes' workspace does not fit
+    /// the device (`GpuDfGrad::grant_workspace`; reported by `GpuDfGrad::kernels`).
+    StoredOrFused,
+}
+
+/// The kernels a DF gradient call takes (`GpuDfGrad::kernels`) and, when they are not the
+/// preferred ones, why.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GradKernels {
+    /// "hermite_j" (the J-only gradient in Hermite space, `grad::df_j`), "stored_planes" or
+    /// "fused" ([`DerivPlanes`]).
+    pub kernels: &'static str,
+    /// Why the preferred kernels did not run: the Hermite kernels do not cover the basis sets,
+    /// or the stored planes' workspace does not fit (None: they did).
+    pub declined: Option<String>,
 }
 
 /// Rows of a chunk of pairs: the contraction kernel walks a chunk with one block of threads.
@@ -192,7 +233,11 @@ impl DfGradPlan {
             r = e;
         }
         // chunks inside each block, sub-blocks of chunks
-        let planes = if opts.fused { 1 } else { 6 };
+        let planes = if opts.planes == DerivPlanes::Fused {
+            1
+        } else {
+            6
+        };
         let deriv_rows = (opts.deriv_bytes / (planes * 8 * naux)).max(1);
         let mut chunks = Vec::new();
         for b in &mut blocks {
@@ -267,6 +312,36 @@ impl DfGradPlan {
             lay.nx
         };
         lay.x0[p0]..x1
+    }
+
+    /// Re-cuts every block's chunks into sub-blocks of at most `deriv_rows` rows (a chunk
+    /// larger alone), as [`DfGradPlan::new`] does for its derivative budget.
+    #[cfg(feature = "gpu")]
+    pub(crate) fn repartition(&mut self, deriv_rows: usize) {
+        for bi in 0..self.blocks.len() {
+            let (Some(&(c_first, _)), Some(&(_, c_end))) =
+                (self.blocks[bi].subs.first(), self.blocks[bi].subs.last())
+            else {
+                continue;
+            };
+            let mut subs = Vec::new();
+            let mut c = c_first;
+            while c < c_end {
+                let mut e = c;
+                let mut rows = 0;
+                while e < c_end {
+                    let r = self.chunk_rows(e, e + 1).len();
+                    if rows > 0 && rows + r > deriv_rows {
+                        break;
+                    }
+                    rows += r;
+                    e += 1;
+                }
+                subs.push((c, e));
+                c = e;
+            }
+            self.blocks[bi].subs = subs;
+        }
     }
 
     /// The largest block's sizes, which the DF gradient's and Hessian's buffers are sized by.
@@ -369,6 +444,9 @@ mod device {
         pub aux_pairs: f64,
         /// The builders' erf kernels (compiled, or loaded from the cache) for range separation.
         pub long_range: f64,
+        /// The J-only path's engine (`grad::df_j`: tables, its kernels), when a call of that
+        /// shape was granted.
+        pub hermite: f64,
         pub total: f64,
     }
 
@@ -384,6 +462,7 @@ mod device {
                 ("aux_pairs", self.aux_pairs),
                 ("upload", self.upload),
                 ("kernels", self.kernels),
+                ("hermite", self.hermite),
             ]
         }
     }
@@ -409,6 +488,9 @@ mod device {
         pub zd: f64,
         /// Pass 2: derivative integrals (fused: with the contraction).
         pub deriv: f64,
+        /// The J-only gradient in Hermite space (`grad::df_j`), its whole call after
+        /// the density (no pass 1 or 2).
+        pub hermite_j: f64,
         /// Pass 2: contraction (fused: building Gamma).
         pub contract: f64,
     }
@@ -433,6 +515,10 @@ mod device {
         ints: Eri3c,
         ders: Eri3c,
         chol: DeviceBuf<f64>,
+        /// [`GpuDfGradOptions::hermite_j`], and the J-only path's engine once a call needed it
+        /// (None inside: the bases are beyond its kernels).
+        hermite_j: bool,
+        hermite: Option<Option<crate::grad::df_j::DfJHermite>>,
         rows: RowTables,
         px0: DeviceBuf<i64>,
         pnab: DeviceBuf<i32>,
@@ -445,6 +531,12 @@ mod device {
         kernels: Kernels,
         split: bool,
         fused: bool,
+        /// [`DerivPlanes::StoredOrFused`]: when the stored planes' workspace does not fit,
+        /// [`GpuDfGrad::grant_workspace`] takes the fused kernels instead, and why.
+        fused_fallback: bool,
+        planes_declined: Option<String>,
+        /// [`GpuDfGradOptions::deriv_bytes`].
+        deriv_bytes: usize,
         /// The plan's largest block.
         max_block: BlockSizes,
         /// The memory plan's grant of the workspaces ([`GpuDfGrad::grant_workspace`]), drawn
@@ -456,6 +548,12 @@ mod device {
 
     fn launch_err(what: &str) -> GpuError {
         GpuError::Contract(format!("DF gradient: {what}"))
+    }
+
+    /// Whether a gradient of the occupied columns `ncols` and the operator `xop` has exchange
+    /// terms (else J alone).
+    fn with_exchange(ncols: &[usize], xop: &Operator) -> bool {
+        (xop.coulomb() != 0.0 || xop.has_erf()) && ncols.iter().sum::<usize>() > 0
     }
 
     impl GpuDfGrad {
@@ -485,6 +583,8 @@ mod device {
             let t_all = Instant::now();
             let mut times = GpuDfGradSetupTimes::default();
             let t = Instant::now();
+            let fused = opts.planes == DerivPlanes::Fused;
+            let fused_fallback = opts.planes == DerivPlanes::StoredOrFused;
             let shared = shared.filter(|s| s.fits(basis, aux, &opts.thresholds));
             let plan = match shared {
                 Some(s) => DfGradPlan::with_layout(s.layout.clone(), basis, aux, opts),
@@ -504,8 +604,10 @@ mod device {
                 shared,
                 thresholds: &opts.thresholds,
             };
-            let (ints, pack_ints) = source.integrals(gpu)?;
-            let (ders, pack_derivs) = source.derivatives(gpu, Eri3cKind::Derivatives)?;
+            // the records now, the classes' kernels once a call needs them (grant_workspace,
+            // compute_device): the J-only gradient in Hermite space contracts the records itself
+            let (ints, pack_ints) = source.integral_records(gpu)?;
+            let (ders, pack_derivs) = source.derivative_records(gpu, Eri3cKind::Derivatives)?;
             (times.pack_ints, times.pack_derivs) = (pack_ints, pack_derivs);
             times.upload = ints.setup_upload + ders.setup_upload;
             times.upload_bytes = ints.setup_upload_bytes + ders.setup_upload_bytes;
@@ -551,6 +653,8 @@ mod device {
                 ints,
                 ders,
                 chol,
+                hermite_j: opts.hermite_j,
+                hermite: None,
                 rows,
                 px0,
                 pnab,
@@ -562,7 +666,10 @@ mod device {
                 gemm: Gemm::new(gpu)?,
                 kernels,
                 split: opts.split_terms,
-                fused: opts.fused,
+                fused,
+                fused_fallback,
+                planes_declined: None,
+                deriv_bytes: opts.deriv_bytes,
                 max_block,
                 plan,
                 workspace: None,
@@ -607,10 +714,15 @@ mod device {
         /// Device bytes of the workspaces of a gradient with `ncols` occupied orbitals per
         /// spin and the exchange operator `xop` (see [`GpuDfGrad::compute`]), besides the
         /// setup's builders and factor: a range-separated operator adds Y and Y~ per spin (the
-        /// pass-2 buffers are shared).
+        /// pass-2 buffers are shared). A J-only call on the Hermite path (its engine set up,
+        /// [`GpuDfGrad::grant_workspace`]) takes only the density, its rows and gamma: the
+        /// engine's tables, densities and partials are held from its setup.
         pub fn workspace_bytes(&self, ncols: &[usize], xop: &Operator) -> usize {
-            let with_k = xop.coulomb() != 0.0 || xop.has_erf();
-            let mut b = self.base_workspace_bytes(ncols, with_k);
+            if self.runs_hermite(with_exchange(ncols, xop)) {
+                let (nbf, naux) = (self.nbf, self.naux);
+                return 8 * (nbf * nbf + self.plan.layout.nx + naux);
+            }
+            let mut b = self.base_workspace_bytes(ncols, with_exchange(ncols, xop));
             if xop.has_erf() {
                 b += 8 * ncols
                     .iter()
@@ -642,17 +754,110 @@ mod device {
 
         /// Sets aside the workspaces of a gradient with `ncols` and `xop`
         /// ([`GpuDfGrad::workspace_bytes`]) as the memory plan's grant, which the calls'
-        /// allocations draw from; an out-of-memory error when they do not fit.
+        /// allocations draw from; an out-of-memory error when they do not fit. The stored
+        /// derivative planes of the device's default (FP64-rich devices) give way to the fused
+        /// kernels, whose buffer is a sixth, when they do not fit.
         pub fn grant_workspace(
             &mut self,
             gpu: &Gpu,
             ncols: &[usize],
             xop: &Operator,
         ) -> Result<(), GpuError> {
+            const WHAT: &str = "the two-electron gradient's workspace";
             self.workspace = None;
+            // the J-only path's engine first: its tables are setup bytes, and the call's
+            // workspace is then its own (no integral block or derivative plane)
+            let with_k = with_exchange(ncols, xop);
+            if !with_k && self.hermite_j {
+                self.ensure_hermite(gpu)?;
+            }
+            let classic = !self.runs_hermite(with_k);
             let need = self.workspace_bytes(ncols, xop);
-            self.workspace = Some(gpu.grant(need, "the two-electron gradient's workspace")?);
+            match gpu.grant(need, WHAT) {
+                Ok(g) => self.workspace = Some(g),
+                Err(e @ GpuError::OutOfMemory { .. })
+                    if classic && self.fused_fallback && !self.fused =>
+                {
+                    self.use_fused();
+                    self.planes_declined = Some(format!(
+                        "the stored derivative planes' workspace does not fit ({e}): the fused \
+                         kernels' is a sixth of it"
+                    ));
+                    let need = self.workspace_bytes(ncols, xop);
+                    self.workspace = Some(gpu.grant(need, WHAT)?);
+                }
+                Err(e) => return Err(e),
+            }
+            // what the calls of this shape take, while the caller's setup still runs (linus
+            // sets the gradient up beside its one-electron pass): the builders' kernels
+            if classic {
+                self.ensure_kernels(gpu)?;
+            }
             Ok(())
+        }
+
+        /// Whether a call with exchange (`with_k`) or without runs on the Hermite path: J only,
+        /// the path on, and its engine set up over these bases.
+        fn runs_hermite(&self, with_k: bool) -> bool {
+            !with_k && self.hermite_j && matches!(self.hermite, Some(Some(_)))
+        }
+
+        /// The integral and derivative builders' kernels (once).
+        fn ensure_kernels(&mut self, gpu: &Gpu) -> Result<(), GpuError> {
+            if self.ints.kernels_loaded() && self.ders.kernels_loaded() {
+                return Ok(());
+            }
+            let t = Instant::now();
+            self.ints.ensure_kernels(gpu)?;
+            self.ders.ensure_kernels(gpu)?;
+            self.setup_times.kernels += t.elapsed().as_secs_f64();
+            Ok(())
+        }
+
+        /// The J-only path's engine (once; None inside when the bases are beyond its kernels):
+        /// its tables, densities and partials held as the setup's, not drawn from a call's
+        /// workspace.
+        fn ensure_hermite(&mut self, gpu: &Gpu) -> Result<(), GpuError> {
+            if self.hermite.is_none() {
+                let t = Instant::now();
+                let h = crate::grad::df_j::DfJHermite::new(gpu, &self.ints, &self.ders)?;
+                self.hermite = Some(h);
+                self.setup_times.hermite += t.elapsed().as_secs_f64();
+            }
+            Ok(())
+        }
+
+        /// The kernels a call of the occupied columns `ncols` and the operator `xop` takes, after
+        /// [`GpuDfGrad::grant_workspace`] for that shape, and why not the preferred ones.
+        pub fn kernels(&self, ncols: &[usize], xop: &Operator) -> GradKernels {
+            let with_k = with_exchange(ncols, xop);
+            let classic = if self.fused { "fused" } else { "stored_planes" };
+            match (with_k, self.hermite_j, &self.hermite) {
+                (false, true, Some(Some(_))) => GradKernels {
+                    kernels: "hermite_j",
+                    declined: None,
+                },
+                (false, true, Some(None)) => GradKernels {
+                    kernels: classic,
+                    declined: Some(
+                        "the Hermite kernels do not cover the basis sets (orbital l <= 3, \
+                         auxiliary l <= 4)"
+                            .into(),
+                    ),
+                },
+                _ => GradKernels {
+                    kernels: classic,
+                    declined: self.planes_declined.clone(),
+                },
+            }
+        }
+
+        /// The fused kernels from now on: sub-blocks re-cut for one plane of Gamma rows.
+        fn use_fused(&mut self) {
+            self.fused = true;
+            self.plan
+                .repartition((self.deriv_bytes / (8 * self.naux.max(1))).max(1));
+            self.max_block = self.plan.max_block();
         }
 
         /// The draws of the calls beyond the workspace's grant (plan violations).
@@ -682,8 +887,8 @@ mod device {
         /// As [`GpuDfGrad::compute`] for occupied orbitals on the device: `cmo` holds the
         /// channels side by side (nbf x sum(ncols), column-major; one channel for a closed
         /// shell with `restricted`, else alpha and beta). The phases of the module docs run in
-        /// order, the metric term's contraction on the host while the device unpacks X~ for
-        /// pass 2.
+        /// order, the metric term's contraction on the host while the device unpacks X~ and
+        /// runs pass 2.
         pub fn compute_device(
             &mut self,
             gpu: &Gpu,
@@ -746,14 +951,42 @@ mod device {
             };
             // the density rows and the integral block stay allocated to the end of the call
             let (dens, wrow) = self.density(&mut c)?;
+            if with_k || !self.hermite_j {
+                self.ensure_kernels(gpu)?;
+            }
+            if !with_k && self.hermite_j {
+                self.ensure_hermite(gpu)?;
+                let natom = c.natom.max(self.ders.host().natom);
+                if let Some(Some(h)) = self.hermite.as_mut() {
+                    // the J-only gradient in Hermite space (crate::grad::df_j)
+                    let s = c.tl.mark()?;
+                    let (g, metric) = h.gradient(
+                        gpu, &self.ints, &self.ders, &wrow, &self.chol, &self.gemm, naux, natom,
+                    )?;
+                    c.tl.close(|ts| &mut ts.hermite_j, s)?;
+                    c.tl.add_to(&mut times)?;
+                    drop(dens);
+                    times.total = t_all.elapsed().as_secs_f64();
+                    self.last = times;
+                    let zero = vec![[0.0; 3]; natom];
+                    return Ok(GpuDfGradOutput {
+                        coulomb: split.then(|| g.clone()),
+                        exchange: split.then_some(zero),
+                        gradient: g,
+                        metric,
+                    });
+                }
+            }
             let mut pass1 = self.pass1(&mut c, &wrow)?;
             let xp = self.fit(&mut c, &mut pass1)?;
             let hgm = self.metric_term(&mut c, &pass1.gamma, &xp)?;
             self.unpack_fit(&c, xp, &mut pass1.y)?;
+            // pass 2 is queued first, so the host's metric contraction runs while the device
+            // unpacks and contracts (nothing in between waits for the device)
+            let acc = self.pass2(&mut c, &dens, &mut pass1)?;
             let th = Instant::now();
             let g2 = self.metric_contraction(&c, &hgm);
             times.metric_host = th.elapsed().as_secs_f64();
-            let acc = self.pass2(&mut c, &dens, &mut pass1)?;
             let out = self.assemble(&c, acc, &g2, &mut times)?;
             times.total = t_all.elapsed().as_secs_f64();
             self.last = times;
@@ -883,17 +1116,15 @@ mod device {
                                 continue;
                             }
                             let cc = c0s[sp] * nbf;
-                            // U[m][j][P] = sum_n Ad[m][n][P] C_nj
-                            for mi in 0..nm {
-                                self.gemm.gemm(
-                                    Arith::Fp64,
-                                    GemmDims::new(Op::N, Op::N, naux, o, m1),
-                                    (1.0, 0.0),
-                                    MatRef::new(ad, mi * m1 * naux, naux),
-                                    MatRef::new(cmo, cc, nbf),
-                                    MatMut::new(u, mi * o * naux, naux),
-                                )?;
-                            }
+                            // U[m][j][P] = sum_n Ad[m][n][P] C_nj, one strided batch over m
+                            self.gemm.gemm_strided(
+                                Arith::Fp64,
+                                GemmDims::new(Op::N, Op::N, naux, o, m1).batch(nm),
+                                (1.0, 0.0),
+                                MatRef::new(ad, 0, naux).stride(m1 * naux),
+                                MatRef::new(cmo, cc, nbf).stride(0),
+                                MatMut::new(u, 0, naux).stride(o * naux),
+                            )?;
                             // Y[i][j][P] += sum_m C_mi U[m][j][P]
                             self.gemm.gemm(
                                 Arith::Fp64,
@@ -1221,17 +1452,15 @@ mod device {
                                     MatMut::new(t, 0, o * naux),
                                 )?;
                             }
-                            // Zd[m][n][P] (+)= sum_j T[m][j][P] C_nj, n < m1
-                            for mi in 0..nm {
-                                self.gemm.gemm(
-                                    Arith::Fp64,
-                                    GemmDims::new(Op::N, Op::T, naux, m1, o),
-                                    (1.0, if first { 0.0 } else { 1.0 }),
-                                    MatRef::new(t, mi * o * naux, naux),
-                                    MatRef::new(cmo, cc, nbf),
-                                    MatMut::new(zd, mi * m1 * naux, naux),
-                                )?;
-                            }
+                            // Zd[m][n][P] (+)= sum_j T[m][j][P] C_nj, n < m1, one strided batch over m
+                            self.gemm.gemm_strided(
+                                Arith::Fp64,
+                                GemmDims::new(Op::N, Op::T, naux, m1, o).batch(nm),
+                                (1.0, if first { 0.0 } else { 1.0 }),
+                                MatRef::new(t, 0, naux).stride(o * naux),
+                                MatRef::new(cmo, cc, nbf).stride(0),
+                                MatMut::new(zd, 0, naux).stride(m1 * naux),
+                            )?;
                             first = false;
                         }
                         if first {
@@ -1535,6 +1764,46 @@ mod tests {
                 p = e;
             }
             assert_eq!(p, np);
+        }
+    }
+
+    /// The stored planes' plan re-cut for the fused kernels (the workspace fallback of
+    /// `GpuDfGrad::grant_workspace`) is the fused kernels' own plan.
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn repartition_gives_the_fused_plan() {
+        let a = 1.0 / linus_core::units::BOHR_ANGSTROM;
+        let mol = harness::Structure::new(
+            vec![8, 1, 1],
+            vec![
+                [0.0, 0.0, 0.1173 * a],
+                [0.0, 0.7572 * a, -0.4692 * a],
+                [0.0, -0.7572 * a, -0.4692 * a],
+            ],
+            0,
+            1,
+        )
+        .unwrap();
+        let basis = harness::basis(&mol, "def2-tzvp").unwrap();
+        let aux = harness::basis(&mol, "def2-universal-jkfit").unwrap();
+        for deriv_bytes in [1 << 16, 1 << 18, 1 << 22, 2 << 30] {
+            let opts = |fused: bool| GpuDfGradOptions {
+                block_bytes: 1 << 20,
+                deriv_bytes,
+                planes: if fused {
+                    DerivPlanes::Fused
+                } else {
+                    DerivPlanes::Stored
+                },
+                ..Default::default()
+            };
+            let mut planes = DfGradPlan::new(&basis, &aux, &opts(false));
+            let fused = DfGradPlan::new(&basis, &aux, &opts(true));
+            planes.repartition((deriv_bytes / (8 * aux.nbf)).max(1));
+            let subs = |p: &DfGradPlan| -> Vec<Vec<(usize, usize)>> {
+                p.blocks.iter().map(|b| b.subs.clone()).collect()
+            };
+            assert_eq!(subs(&planes), subs(&fused), "deriv_bytes {deriv_bytes}");
         }
     }
 }

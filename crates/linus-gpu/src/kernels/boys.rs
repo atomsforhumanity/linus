@@ -10,6 +10,10 @@ pub const BOYS_ROWS: usize = 1172;
 pub const BOYS_COLS: usize = 27;
 /// Highest total angular momentum l_a + l_b + l_k the table supports (as linus-ints).
 pub const MAX_LT: usize = 18;
+/// The kernels interpolate the table below this T (the nearest row and the Taylor terms above
+/// it lie within [`BOYS_ROWS`]) and take the asymptotic form from here on (as linus-ints'
+/// eri3c and tools/intgen/mdmath.py's `BOYS_TMAX`).
+pub const BOYS_TMAX: f64 = 117.0;
 
 /// The Boys table (row-major, BOYS_ROWS x BOYS_COLS), computed as linus-ints computes its own.
 pub fn boys_table() -> Vec<f64> {

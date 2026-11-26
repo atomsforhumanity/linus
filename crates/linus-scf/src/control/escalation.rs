@@ -4,9 +4,10 @@
 //! within that budget, from the orbitals of its lowest-energy iteration with quasi-Newton steps
 //! (which descend in energy), a new DIIS subspace, no level shift and no damping. The escalation
 //! starts after the iteration at which the lowest energy has not improved for `stagnation_window`
-//! iterations, or after 2/3 of `max_iter`, whichever comes first, and only while at least
-//! [`MIN_ESCALATION`] iterations are left: its first iteration only builds the lowest-energy
-//! density again, so it needs a second to take a step.
+//! iterations, or after 2/3 of `max_iter`, or after `blowup_window` iterations of a DIIS blow-up
+//! ([`super::BlowUp`]), whichever comes first, and only while at least [`MIN_ESCALATION`]
+//! iterations are left: its first iteration only builds the lowest-energy density again, so it
+//! needs a second to take a step.
 
 use crate::{Escalation, EscalationRun};
 
@@ -21,6 +22,9 @@ pub enum Trigger {
     Stagnation,
     /// 2/3 of `max_iter` are spent.
     TwoThirds,
+    /// DIIS blew up: the energy and the orbital gradient far above their lowest for
+    /// `blowup_window` iterations ([`super::BlowUp`]).
+    BlowUp,
 }
 
 impl Trigger {
@@ -29,6 +33,7 @@ impl Trigger {
         match self {
             Trigger::Stagnation => "stagnation",
             Trigger::TwoThirds => "two_thirds",
+            Trigger::BlowUp => "blowup",
         }
     }
 }
@@ -75,10 +80,12 @@ impl EscalationRule {
     }
 
     /// Why the escalation starts after iteration `iters`, the lowest energy (of a density from
-    /// orbitals) having last improved at iteration `lowest_iter` (0: none yet); None while it is
-    /// not due, has run, is off, or the budget leaves it fewer than [`MIN_ESCALATION`]
-    /// iterations.
-    pub fn due(&self, iters: usize, lowest_iter: usize) -> Option<Trigger> {
+    /// orbitals) having last improved at iteration `lowest_iter` (0: none yet) and DIIS having
+    /// `blown_up` ([`super::BlowUp::blown_up`]); None while it is not due, has run, is off, or the
+    /// budget leaves it fewer than [`MIN_ESCALATION`] iterations. Where a blow-up coincides with
+    /// another trigger the other names it: an SCF whose escalation the blow-up does not bring
+    /// forward keeps its record.
+    pub fn due(&self, iters: usize, lowest_iter: usize, blown_up: bool) -> Option<Trigger> {
         if !self.available() || lowest_iter == 0 || iters + MIN_ESCALATION > self.max_iter {
             return None;
         }
@@ -86,6 +93,8 @@ impl EscalationRule {
             Some(Trigger::Stagnation)
         } else if iters >= self.latest() {
             Some(Trigger::TwoThirds)
+        } else if blown_up {
+            Some(Trigger::BlowUp)
         } else {
             None
         }
@@ -141,12 +150,26 @@ mod tests {
         assert_eq!(e.latest(), 20);
         assert!(!e.exhausted(29) && e.exhausted(30));
         // no lowest-energy iterate yet (a guess density's iteration)
-        assert_eq!(e.due(1, 0), None);
-        assert_eq!(e.due(10, 3), None, "7 iterations without a lower energy");
-        assert_eq!(e.due(11, 3), Some(Trigger::Stagnation));
-        assert_eq!(e.due(20, 19), Some(Trigger::TwoThirds));
+        assert_eq!(e.due(1, 0, false), None);
+        assert_eq!(e.due(1, 0, true), None);
+        assert_eq!(
+            e.due(10, 3, false),
+            None,
+            "7 iterations without a lower energy"
+        );
+        assert_eq!(e.due(10, 3, true), Some(Trigger::BlowUp));
+        assert_eq!(e.due(11, 3, false), Some(Trigger::Stagnation));
+        assert_eq!(
+            e.due(11, 3, true),
+            Some(Trigger::Stagnation),
+            "the stagnation names it"
+        );
+        assert_eq!(e.due(20, 19, false), Some(Trigger::TwoThirds));
+        assert_eq!(e.due(20, 19, true), Some(Trigger::TwoThirds));
+        // the budget's last iteration: too late for any
+        assert_eq!(e.due(29, 3, true), None);
         e.start(11, Trigger::Stagnation, 3, -1.5, 11);
-        assert!(!e.available() && e.due(20, 3).is_none(), "once");
+        assert!(!e.available() && e.due(20, 3, true).is_none(), "once");
         match e.finish(30, false, true) {
             Some(Escalation::Ran(r)) => assert_eq!(
                 (r.trigger, r.at, r.from_iter, r.iterations, r.converged),
@@ -160,13 +183,13 @@ mod tests {
     fn a_small_budget_or_off_says_why_it_did_not_run() {
         // max_iter 2: after iteration 1 one iteration is left, fewer than the escalation needs
         let mut e = EscalationRule::new(true, 2, 8);
-        assert_eq!(e.due(1, 1), None);
+        assert_eq!(e.due(1, 1, true), None);
         assert_eq!(
             e.finish(2, false, true),
             Some(Escalation::NotRun { reason: "max_iter" })
         );
         let mut off = EscalationRule::new(false, 128, 8);
-        assert_eq!(off.due(100, 1), None);
+        assert_eq!(off.due(100, 1, true), None);
         assert_eq!(
             off.finish(128, false, true),
             Some(Escalation::NotRun { reason: "off" })
@@ -179,7 +202,7 @@ mod tests {
         // window 0: only 2/3 of max_iter
         let w0 = EscalationRule::new(true, 30, 0);
         assert_eq!(
-            (w0.due(19, 2), w0.due(20, 2)),
+            (w0.due(19, 2, false), w0.due(20, 2, false)),
             (None, Some(Trigger::TwoThirds))
         );
     }

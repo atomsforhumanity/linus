@@ -1,0 +1,39 @@
+name: Request a feature
+description: A method, property, setting or workflow you'd like linus to have. We build what the community asks for.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Anything is fair game: post-HF methods (MP2, coupled cluster), functionals, basis sets,
+        properties, solvent models, GPU support for a method, file formats, a Python API... A sentence or
+        two is enough to start; we'll ask if we need more.
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like linus to do?
+      placeholder: "e.g. DF-MP2 energies and gradients; CCSD(T) energies; NMR shieldings; ωB97M-D3BJ on the GPU"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What would you use it for?
+      description: Optional, but it helps us prioritise and design it well. Typical system sizes, how many calculations, which hardware.
+    validations:
+      required: false
+  - type: textarea
+    id: refs
+    attributes:
+      label: References or other programs that do it
+      description: Optional. Papers, or another code's implementation we could validate against.
+    validations:
+      required: false
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Want to be involved? (optional)
+      options:
+        - label: I can test it on my systems
+        - label: I can provide reference results or a test case
